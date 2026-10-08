@@ -1,1 +1,1 @@
-# true-plan-showdown-verification
+ .github/workflows/verify-showdown-pinned.yml 
