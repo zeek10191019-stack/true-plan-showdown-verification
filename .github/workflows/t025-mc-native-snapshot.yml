@@ -1,0 +1,61 @@
+
+name: T025 pinned M-C native snapshot and future RNG research
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-mc-snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      REPO_PRIVATE: ${{ github.event.repository.private }}
+    steps:
+      - name: Public repo guard
+        run: |
+          set -euo pipefail
+          test "$REPO_PRIVATE" = "false"
+          echo "PASS PUBLIC_REPO_ONLY"
+
+      - name: Public test source checkout
+        uses: actions/checkout@v4
+        with:
+          path: public-tests
+          persist-credentials: false
+
+      - name: Pinned Showdown checkout
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-showdown
+
+      - name: Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+
+      - name: Source gate, clean install, and build
+        working-directory: pinned-showdown
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "aa17ca0fac8bc5605df673bd8774c2d0e91efa43"
+          test "$(git rev-parse HEAD^{tree})" = "98c9038b81fa5ed7f1e9818736b701918920501e"
+          test "$(node -v)" = 'v22.18.0'
+          sha256sum package-lock.json
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Run T025 pinned M-C native snapshot fixture
+        shell: bash
+        env:
+          SHOWDOWN_ROOT: ${{ github.workspace }}/pinned-showdown
+        run: |
+          set -euo pipefail
+          node public-tests/tests/t025-mc-native-snapshot.cjs
+          echo 'Native33=0/33; Exact34=0/34; Stage1.5 historical 560/3500'
