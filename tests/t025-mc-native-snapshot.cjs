@@ -44,8 +44,10 @@ assert(inputPrefix.length > 0 && logPrefix.length > 0);
 const restore = () => Battle.fromJSON(frozenJSON);
 const a = restore();
 const b = restore();
-assert.equal(JSON.stringify(a.toJSON()),frozenJSON,'Snapshot A roundtrip drift');
-assert.equal(JSON.stringify(b.toJSON()),frozenJSON,'Snapshot B roundtrip drift');
+
+assert.deepStrictEqual(a.toJSON(), JSON.parse(frozenJSON), 'Snapshot A roundtrip drift');
+assert.deepStrictEqual(b.toJSON(), JSON.parse(frozenJSON), 'Snapshot B roundtrip drift');
+
 console.log('PASS SNAPSHOT_ROUNDTRIP',frozenDigest);
 
 function prefixInvariant(branch) {
