@@ -1,1 +1,96 @@
 
+name: T008 two independent pinned Showdown clean builds
+on:
+  push:
+    paths:
+      - '.github/workflows/t008-two-clean-builds.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  two-independent-builds:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      REPO_PRIVATE: ${{ github.event.repository.private }}
+    steps:
+      - name: Public/free repository guard
+        run: |
+          set -euo pipefail
+          test "$REPO_PRIVATE" = "false"
+          echo "PASS PUBLIC_REPOSITORY; no private Battle AI assets"
+      - name: Independent checkout A
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: clean-A
+      - name: Independent checkout B
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: clean-B
+      - name: Fixed Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Build A and B from isolated checkouts and compare dist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -v)" = "v22.18.0"
+          node -v
+          npm -v
+          for label in A B; do
+            root="clean-$label"
+            echo "::group::INDEPENDENT_BUILD_$label"
+            pushd "$root"
+            test "$(git rev-parse HEAD)" = "aa17ca0fac8bc5605df673bd8774c2d0e91efa43"
+            test "$(git rev-parse HEAD^{tree})" = "98c9038b81fa5ed7f1e9818736b701918920501e"
+            echo "PIN_COMMIT=$(git rev-parse HEAD)"
+            echo "PIN_TREE=$(git rev-parse HEAD^{tree})"
+            sha256sum package-lock.json | tee "../package-lock-$label.sha256"
+            test ! -d node_modules
+            test ! -d dist
+            npm ci --no-audit --no-fund
+            npm run build
+            test -d dist
+            find dist -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum > "../dist-$label.sha256"
+            test -s "../dist-$label.sha256"
+            echo "DIST_FILE_COUNT=$(wc -l < "../dist-$label.sha256")"
+            sha256sum "../dist-$label.sha256"
+            node <<'NODE'
+          const assert = require('node:assert/strict');
+          const {Dex} = require('./dist/sim');
+          const f = Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');
+          assert.ok(f.exists);
+          assert.equal(f.mod, 'champions');
+          const mod = Dex.forFormat(f);
+          assert.equal(mod.gen, 9);
+          assert.equal(typeof mod.data.Scripts.statModify, 'function');
+          console.log('PASS CHAMPIONS_MC_MOD_LOAD');
+          NODE
+            git diff --quiet HEAD
+            echo "PASS INDEPENDENT_BUILD_$label"
+            popd
+            echo "::endgroup::"
+          done
+          diff -u package-lock-A.sha256 package-lock-B.sha256 >/dev/null || {
+            echo "FAIL LOCKFILE_DIFFERENCE"
+            exit 1
+          }
+          if cmp -s dist-A.sha256 dist-B.sha256; then
+            echo "PASS T008_IDENTICAL_DIST_SHA256_MANIFESTS"
+            sha256sum dist-A.sha256 dist-B.sha256
+            echo "Native33=0/33; Exact34=0/34; Stage1.5=560/3500 HISTORICAL ONLY"
+          else
+            echo "FAIL T008_DIST_NOT_BYTE_IDENTICAL"
+            diff -u dist-A.sha256 dist-B.sha256 | head -150 || true
+            exit 1
+          fi
+
