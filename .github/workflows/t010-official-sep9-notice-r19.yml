@@ -1,0 +1,132 @@
+name: T010 R19 official Sep9 patch notice byte capture
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sep9-official-notice:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      REPO_PRIVATE: ${{ github.event.repository.private }}
+      OFFICIAL_URL: https://champions-news.pokemon-home.com/ja/page/817.html
+    steps:
+      - name: Confirm public repository and standard runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REPO_PRIVATE" = false
+          test "$RUNNER_OS" = Linux
+          echo PASS_PUBLIC_STANDARD_RUNNER_ONLY
+
+      - name: Capture raw official HTML and Chrome DOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/t010_r19"
+          mkdir -p "$root"
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$browser" || { echo FAIL_BROWSER_NOT_INSTALLED; exit 1; }
+          "$browser" --version
+          curl --proto '=https' --proto-redir '=https' --fail --location --max-redirs 2 --connect-timeout 15 --max-time 60 --retry 1 --silent --show-error --compressed \
+            --write-out '%{url_effective}' "$OFFICIAL_URL" --output "$root/sep9.raw.html" > "$root/effective_url.txt"
+          test "$(cat "$root/effective_url.txt")" = "$OFFICIAL_URL" || { echo FAIL_UNEXPECTED_REDIRECT; exit 1; }
+          timeout 90s "$browser" --headless=new --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check \
+            --user-data-dir="$RUNNER_TEMP/chrome-t010-r19" --virtual-time-budget=30000 \
+            --dump-dom "$OFFICIAL_URL" > "$root/sep9.rendered.html" 2> "$RUNNER_TEMP/chrome-r19-stderr.log" || {
+            echo FAIL_CHROME_RENDER
+            tail -n 8 "$RUNNER_TEMP/chrome-r19-stderr.log" || true
+            exit 1
+          }
+          test -s "$root/sep9.raw.html" && test -s "$root/sep9.rendered.html"
+          rm "$root/effective_url.txt"
+          sha256sum "$root/sep9.raw.html" "$root/sep9.rendered.html"
+
+      - name: Verify official notice markers and source-byte hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/t010_r19" "$GITHUB_RUN_ID" <<'PY'
+          from pathlib import Path
+          from hashlib import sha256
+          from html.parser import HTMLParser
+          import json
+          import re
+          import sys
+          import unicodedata
+
+          root=Path(sys.argv[1]);run_id=sys.argv[2]
+          source_url='https://champions-news.pokemon-home.com/ja/page/817.html'
+          class Visible(HTMLParser):
+              skip={'script','style','template','noscript','svg'}
+              block={'div','p','li','br','h1','h2','h3','h4','section','article','tr'}
+              def __init__(self):
+                  super().__init__(convert_charrefs=True)
+                  self.text=[];self.hidden=[]
+              def handle_starttag(self,tag,attrs):
+                  if self.hidden:
+                      if tag in self.skip:self.hidden.append(tag)
+                  elif tag in self.skip:self.hidden.append(tag)
+                  elif tag in self.block:self.text.append('\n')
+              def handle_endtag(self,tag):
+                  if self.hidden:
+                      if tag==self.hidden[-1]:self.hidden.pop()
+                  elif tag in self.block:self.text.append('\n')
+              def handle_data(self,data):
+                  if not self.hidden:self.text.append(data)
+
+          def get(name):
+              raw=(root/name).read_bytes()
+              if not 100 < len(raw) <= 1_500_000 or b'\0' in raw:
+                  raise ValueError('FAIL_SOURCE_BAD_BYTES_'+name)
+              html=raw.decode('utf-8-sig','strict')
+              if '<html' not in html.lower() and '<!doctype' not in html.lower():
+                  raise ValueError('FAIL_SOURCE_NOT_HTML_'+name)
+              return raw,html
+
+          raw, _=get('sep9.raw.html')
+          rendered,html=get('sep9.rendered.html')
+          parser=Visible();parser.feed(html)
+          lines=[re.sub(r'\s+','',s) for s in unicodedata.normalize('NFKC',''.join(parser.text)).splitlines() if s.strip()]
+          txt=''.join(lines)
+          for term in ('9月9日','PokémonChampions','ニョロトノ','はたく','ブリジュラス',
+                       'ミラーコート','メタルバースト','きりさく','ねがいごと','ちからをすいとる'):
+              if term not in txt:raise ValueError('FAIL_OFFICIAL_TEXT_MISSING_'+term)
+          for mon,moves in {'ニョロトノ':('はたく',),'ブリジュラス':('ミラーコート','メタルバースト')}.items():
+              if not any(all(m in txt[p:p+110] for m in moves) for p in [m.start() for m in re.finditer(mon,txt)]):
+                  raise ValueError('FAIL_SPECIES_MOVE_BINDING_'+mon)
+          for move in ('ねがいごと','ちからをすいとる'):
+              if not re.search(move+r'[:：]?12[→\-＞>]+8',txt):
+                  raise ValueError('FAIL_PP_NOTICE_'+move)
+          metadata={
+             'schema':'T010_R19_PUBLIC_NOTICE_CAPTURE_V1','source_url':source_url,
+             'season':'M-7','regulation':'M-C','capture':'PUBLIC_GITHUB_ACTIONS_HTML_AND_BROWSER_DOM',
+             'run_id':str(run_id),'raw_sha256':sha256(raw).hexdigest(),
+             'rendered_sha256':sha256(rendered).hexdigest(),
+             'canonical_db_certified':False,'native33':'0/33','exact34':'0/34',
+             'stage1_pure_ingress':'DENY'}
+          (root/'source.json').write_text(json.dumps(metadata,ensure_ascii=False,sort_keys=True,indent=2)+'\n',encoding='utf-8')
+          check=json.loads((root/'source.json').read_text(encoding='utf-8'))
+          assert check==metadata
+          assert sha256((root/'sep9.raw.html').read_bytes()).hexdigest()==metadata['raw_sha256']
+          assert sha256((root/'sep9.rendered.html').read_bytes()).hexdigest()==metadata['rendered_sha256']
+          print('PASS_R19_OFFICIAL_NOTICE_CAPTURE_READBACK__NOT_CANONICAL')
+          print('R19_NOTICE',json.dumps(metadata,ensure_ascii=False,sort_keys=True))
+          print('NOT_CERTIFIED: full game legality, actual game-form keys, current-patch completeness; Native33=0/33 Exact34=0/34')
+          PY
+
+      - name: Upload public official source bytes and provenance
+        if: always() && env.REPO_PRIVATE == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: t010-r19-sep9-official-notice-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/t010_r19/sep9.raw.html
+            ${{ runner.temp }}/t010_r19/sep9.rendered.html
+            ${{ runner.temp }}/t010_r19/source.json
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 6
