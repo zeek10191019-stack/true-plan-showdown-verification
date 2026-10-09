@@ -275,7 +275,13 @@ jobs:
             rejects({...obs,prng:b.prng.getSeed()},/shape violation/);
             rejects({...obs,opponent_hidden_item:'sitrusberry'},/shape violation/);
             rejects({...obs,battle:b.toJSON()},/shape violation/);
-            rejects({...obs,visible_protocol:['|forged|']},/history changed retroactively/);
+            // Test same-length retrospective corruption, not history truncation.
+            const tampered=copy(obs.visible_protocol);
+            assert(tampered.length>0,'public history cannot be empty in corruption test');
+            assert.notEqual(tampered[0],'|forged|','corruption marker must differ from original');
+            tampered[0]='|forged|';
+            assert.equal(tampered.length,obs.visible_protocol.length);
+            rejects({...obs,visible_protocol:tampered},/history changed retroactively/);
             rejects({...obs,visible_protocol:[...obs.visible_protocol,'|move|p2a: Target4|Solar Beam|']},/unsupported or impossible/);
             rejects({...obs,visible_protocol:[...obs.visible_protocol,'|move|p2a: Target4|Protect|','|move|p2a: Target4|Endure|']},/more than one/);
             const model=new PublicBelief(dex),owned=copy(obs);
@@ -353,7 +359,7 @@ jobs:
           if(require.main===module)main();
           module.exports={PublicBelief,initialBelief,bayesUpdate,predictNext,publicMoveEvents,run};
           R2724_SOURCE
-          printf '%s  %s\n' 'f1594fca082fc9e22b69d0f3ced148e685454879fa68a444a62e1e67e580e733' ./r2724-bayesian-belief-action-forecast.cjs | sha256sum -c -
+          printf '%s  %s\n' '7291d1fc69850a06ff58e06b5ffb48576e116f106acea3abc1b618947bbf8e44' ./r2724-bayesian-belief-action-forecast.cjs | sha256sum -c -
           node --check ./r2724-bayesian-belief-action-forecast.cjs
           node ./r2724-bayesian-belief-action-forecast.cjs ./r2724-evidence | tee ./r2724-console.log
           cp ./r2720-faint-force-switch-win.cjs ./r2724-evidence/
@@ -379,7 +385,7 @@ jobs:
           assert hashlib.sha256((p/'r2720-faint-force-switch-win.cjs').read_bytes()).hexdigest()=='2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b'
           assert hashlib.sha256((p/'r2722-rng-observation-boundaries.cjs').read_bytes()).hexdigest()=='0a4fe39d6e1f3ac1c208171b3c38c9d19a388d618baf1b4bfeab78e1c24b8d7e'
           assert hashlib.sha256((p/'r2723-multiturn-belief-boundaries.cjs').read_bytes()).hexdigest()=='fed3b7e13eb09f0ffd2bfcb6fb8497ac39da502781994c56c16dbb846a566c49'
-          assert hashlib.sha256((p/'r2724-bayesian-belief-action-forecast.cjs').read_bytes()).hexdigest()=='f1594fca082fc9e22b69d0f3ced148e685454879fa68a444a62e1e67e580e733'
+          assert hashlib.sha256((p/'r2724-bayesian-belief-action-forecast.cjs').read_bytes()).hexdigest()=='7291d1fc69850a06ff58e06b5ffb48576e116f106acea3abc1b618947bbf8e44'
           receipt=json.loads((p/'r2724-receipt.json').read_text())
           worlds=json.loads((p/'six-worlds-probabilistic-belief-and-forecast.json').read_text())
           negatives=json.loads((p/'negative-controls-public-only.json').read_text())
