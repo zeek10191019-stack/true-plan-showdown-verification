@@ -1,0 +1,246 @@
+name: R27.21 public boundary illegal actions and API tie proof
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2721-public-boundary-manual
+  cancel-in-progress: false
+jobs:
+  public_research_only:
+    name: Pinned M-C invalid action and controlled API-tie regression
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch pinned public Showdown and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/showdown"
+          cd "$RUNNER_TEMP/showdown"
+          git init -q
+          git remote add origin https://github.com/smogon/pokemon-showdown.git
+          git fetch --depth 1 origin aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse 'HEAD^{tree}')" = 98c9038b81fa5ed7f1e9818736b701918920501e
+          test "$(node --version)" = v22.18.0
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Verify public pinned dist digest
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_DIST'
+          import pathlib,hashlib
+          dist=pathlib.Path('dist')
+          items=list(dist.rglob('*'))
+          assert not any(p.is_symlink() for p in items)
+          files=sorted((p for p in items if p.is_file()),key=lambda p:p.relative_to(dist).as_posix())
+          assert len(files)==1094,len(files)
+          h=hashlib.sha256()
+          for p in files:
+              n=p.relative_to(dist).as_posix().encode()
+              h.update(len(n).to_bytes(8,'big'))
+              h.update(n)
+              h.update(hashlib.sha256(p.read_bytes()).digest())
+          assert h.hexdigest()=='3697be28e9736b691f005bc5ad7b56789523fbf4ef04d838fcc91f6cfae9c3df'
+          print('R2721_PINNED_DIST_PASS',len(files),h.hexdigest())
+          PY_DIST
+      - name: Get R27.20 public source at fixed repository commit
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/6b0d3daa8c3957821604fcbd410287e0f7f389d1/.github/workflows/r2720-public-faint-forced-switch-terminal.yml' -o ./r2720-public-workflow-source.yml
+          printf '%s  %s\n' '75dc810599d0d91b747f77bb37e1278f6fa7b782364b537c907591f21454933c' ./r2720-public-workflow-source.yml | sha256sum -c -
+          python3 - <<'PY_EXTRACT'
+          from pathlib import Path
+          wf=Path('r2720-public-workflow-source.yml').read_text()
+          starter="          cat > ./r2720-faint-force-switch-win.cjs <<'R2720_SOURCE'\n"
+          assert wf.count(starter)==1
+          blob=wf.split(starter,1)[1].split('\n          R2720_SOURCE\n',1)[0]
+          source='\n'.join(line[10:] for line in blob.split('\n'))+'\n'
+          Path('r2720-faint-force-switch-win.cjs').write_text(source)
+          PY_EXTRACT
+          printf '%s  %s\n' '2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b' ./r2720-faint-force-switch-win.cjs | sha256sum -c -
+          node --check ./r2720-faint-force-switch-win.cjs
+      - name: Negative phase-boundary and controlled API-tie replay
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          cat > ./r2721-negative-choices-and-tie.cjs <<'R2721_TEST_SOURCE'
+          #!/usr/bin/env node
+          'use strict';
+          /** Public pinned Showdown synthetic boundary regression; no private Battle AI. */
+          const assert=require('node:assert/strict');
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const crypto=require('node:crypto');
+          const {Battle,extractChannelMessages}=require('./dist/sim/battle');
+          const {State}=require('./dist/sim/state');
+          const {runOnce,canonicalTrace}=require('./r2720-faint-force-switch-win.cjs');
+          const sha=x=>crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');
+          const snap=b=>JSON.parse(JSON.stringify(b.toJSON()));
+          const norm=x=>State.normalize(JSON.parse(JSON.stringify(x)));
+          function view(b){
+           const c=extractChannelMessages(b.log.join('\n'),[1,2]);
+           assert(Array.isArray(c[1])&&Array.isArray(c[2]));
+           return {p1:c[1],p2:c[2]};
+          }
+          function core(b){
+           return {requestState:b.requestState,turn:b.turn,ended:b.ended,winner:b.winner,
+             p1:b.p1.pokemon.map(p=>({name:p.name,hp:p.hp,fainted:p.fainted,active:p.isActive})),
+             p2:b.p2.pokemon.map(p=>({name:p.name,hp:p.hp,fainted:p.fainted,active:p.isActive})),
+             inputLog:b.inputLog.slice(),log:b.log.slice()};
+          }
+          function negativeCase(saved,who,action,label,expected){
+           const b=Battle.fromJSON(JSON.stringify(saved));
+           const s=b.getSide(who);
+           const prior=core(b);
+           assert.throws(()=>s.choose(action),new RegExp(expected),label+' must throw in strict mode');
+           assert.deepEqual(core(b),prior,label+' mutated gameplay or omniscient log');
+           assert.equal(s.choice.actions.length,0,label+' queued an illegal action');
+           assert(typeof s.choice.error==='string'&&s.choice.error.length>0,label+' omitted error');
+           assert.equal(b.requestState,prior.requestState);
+           return {label,who,action,phase:prior.requestState,error:s.choice.error,core_sha256:sha(prior)};
+          }
+          function tieBranch(saved){
+           const traces=[];
+           for(let n=0;n<2;n++){
+            const b=Battle.fromJSON(JSON.stringify(saved));
+            assert(!b.ended&&b.requestState==='move','tie input must be an active battle');
+            const pre=norm(snap(b));
+            const result=b.win(null); // API-controlled tie only, NOT natural simultaneous-KO evidence.
+            assert.equal(result,true);assert(b.ended);assert.equal(b.winner,'');
+            assert.equal(b.requestState,'');
+            const viewers=view(b);
+            for(const side of ['p1','p2']){
+             assert.equal(viewers[side].filter(x=>x==='|tie').length,1,'missing public tie');
+             assert(!viewers[side].some(x=>x.startsWith('|win|')),'unexpected public winner');
+            }
+            const terminal=norm(snap(b));
+            assert.deepEqual(norm(snap(Battle.fromJSON(JSON.stringify(snap(b))))),terminal,'terminal tie roundtrip');
+            const trace={pre,terminal,p1:State.normalizeLog(viewers.p1),p2:State.normalizeLog(viewers.p2),ended:b.ended,winner:b.winner};
+            traces.push({digest:sha(trace),terminalState:snap(b),viewer:viewerSlim(viewers)});
+           }
+           assert.equal(traces[0].digest,traces[1].digest,'tie branch non-deterministic');
+           return {api_tie_replays:2,normalized_hash_a:traces[0].digest,normalized_hash_b:traces[1].digest,
+            terminal:traces[0].terminalState,public_tie:traces[0].viewer};
+          }
+          function viewerSlim(x){return {p1:x.p1.filter(x=>x==='|tie'),p2:x.p2.filter(x=>x==='|tie')};}
+          function runBoundaries(){
+           const p=runOnce();
+           assert.equal(p.states.length,6);
+           assert.deepEqual(p.transitions.map(x=>x.kind),[
+            'attacking_faint_1','forced_switch_1','attacking_faint_2','forced_switch_2','attacking_faint_3']);
+           const states=p.states.map(x=>x.state);
+           const cases=[
+            // Can't switch to already active slot while in move phase.
+            [0,'p1','switch 1','active_switch_invalid',"can't switch to an active"],
+            // An unknown move index cannot be selected.
+            [0,'p1','move 99','invalid_move_slot',"doesn't have a move"],
+            // Forced replacement phase is never a move-request phase.
+            [1,'p2','move 1','move_on_forced_switch',"need a switch response"],
+            // The fainted active Pokemon is not a legal replacement.
+            [1,'p2','switch 1','fainted_active_rejected',"can't switch to an active"],
+            [1,'p2','switch 9','out_of_roster_rejected','do not have a Pokémon in slot'],
+            // Both fainted bench and active slots are unavailable at the second replacement.
+            [3,'p2','switch 1','previous_faint_rejected',"can't switch to a fainted"],
+            [3,'p2','switch 2','second_faint_rejected',"can't switch to an active"],
+            // Both sides must refuse input once game is over.
+            [5,'p1','move 1','winner_post_terminal_rejected','game is over'],
+            [5,'p2','switch 3','loser_post_terminal_rejected','game is over'],
+           ];
+           const failures=[];
+           for(const [index,who,action,label,expected] of cases){
+            try{failures.push(negativeCase(states[index],who,action,label,expected));}
+            catch(e){e.message='R2721_CASE_'+label+': '+e.message;throw e;}
+           }
+           const tie=tieBranch(states[4]);
+           const final_state=states[5];
+           assert.equal(final_state.ended,true);
+           assert.equal(final_state.requestState,'');
+           const x=canonicalTrace(p);
+           return {negative:failures,tie,base_normalized_hash:sha(x),
+            terminal_state_digest:sha(norm(final_state)),base_replay_states:6,base_replay_transitions:5};
+          }
+          function main(){
+           const a=runBoundaries(),b=runBoundaries();
+           assert.deepEqual(a.negative,b.negative,'negative choices were not deterministic');
+           assert.equal(a.tie.normalized_hash_a,b.tie.normalized_hash_b,'tie branch mismatch across independent runs');
+           assert.equal(a.base_normalized_hash,b.base_normalized_hash,'parent R27.20 result changed');
+           const out=path.resolve(process.argv[2]||'r2721-evidence');
+           fs.mkdirSync(out,{recursive:true});
+           const put=(name,data)=>fs.writeFileSync(path.join(out,name),data,'utf8');
+           put('negative-choice-cases.jsonl',a.negative.map(x=>JSON.stringify(x)).join('\n')+'\n');
+           put('controlled-api-tie.json',JSON.stringify({kind:'CONTROLLED_API_TIE_NOT_NATURAL_DOUBLE_KO',
+            replays:a.tie.api_tie_replays,normalized_hash_a:a.tie.normalized_hash_a,
+            normalized_hash_b:a.tie.normalized_hash_b,public_tie:a.tie.public_tie},null,2)+'\n');
+           put('api-tie-terminal-state.json',JSON.stringify(a.tie.terminal)+'\n');
+           const receipt={schema:'TRUE_PLAN_R2721_PUBLIC_NEGATIVE_TERMINAL_V1',
+            status:'PASS_PUBLIC_SYNTHETIC_ONLY',pinned_showdown_commit:'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',
+            negative_choice_cases:a.negative.length,controlled_api_tie_replays:a.tie.api_tie_replays,
+            base_parent_states:a.base_replay_states,base_parent_transitions:a.base_replay_transitions,
+            controlled_tie_hash_a:a.tie.normalized_hash_a,controlled_tie_hash_b:a.tie.normalized_hash_b,
+            independent_parent_hash_a:a.base_normalized_hash,independent_parent_hash_b:b.base_normalized_hash,
+            boundaries_not_proven:['natural simultaneous KO/double faint tie','timer draw','Champions real game phase parity'],
+            certification:{native33:'0/33',exact34:'0/34',actual_game:'0/30',stage15_formal_increment:0,
+             gate:'DENY_FORMAL_CERTIFICATION'}};
+           put('r2721-receipt.json',JSON.stringify(receipt,null,2)+'\n');
+           console.log('R2721_PUBLIC_BOUNDARY_RECEIPT '+JSON.stringify(receipt));
+          }
+          if(require.main===module)main();
+          module.exports={negativeCase,tieBranch,runBoundaries};
+          R2721_TEST_SOURCE
+          printf '%s  %s\n' 'fc4e8436b921a073bf51e198f6e0ad92746c55781ead17ce789eae3d3de53ced' ./r2721-negative-choices-and-tie.cjs | sha256sum -c -
+          node --check ./r2721-negative-choices-and-tie.cjs
+          node ./r2721-negative-choices-and-tie.cjs ./r2721-evidence | tee ./r2721-console-receipt.log
+          cp ./r2720-faint-force-switch-win.cjs ./r2721-evidence/
+          cp ./r2721-negative-choices-and-tie.cjs ./r2721-evidence/
+      - name: Audit boundary receipt and file hashes
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_AUDIT'
+          import hashlib,json,pathlib
+          p=pathlib.Path('r2721-evidence')
+          expected={'r2720-faint-force-switch-win.cjs','r2721-negative-choices-and-tie.cjs',
+             'negative-choice-cases.jsonl','controlled-api-tie.json',
+             'api-tie-terminal-state.json','r2721-receipt.json'}
+          assert {x.name for x in p.iterdir()}==expected
+          total=sum(x.stat().st_size for x in p.iterdir())
+          assert 0<total<=8*1024*1024,total
+          assert hashlib.sha256((p/'r2720-faint-force-switch-win.cjs').read_bytes()).hexdigest()=='2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b'
+          assert hashlib.sha256((p/'r2721-negative-choices-and-tie.cjs').read_bytes()).hexdigest()=='fc4e8436b921a073bf51e198f6e0ad92746c55781ead17ce789eae3d3de53ced'
+          receipt=json.loads((p/'r2721-receipt.json').read_text())
+          tests=[json.loads(line) for line in (p/'negative-choice-cases.jsonl').read_text().splitlines()]
+          tie=json.loads((p/'controlled-api-tie.json').read_text())
+          assert len(tests)==9 and len(set(x['label'] for x in tests))==9
+          assert receipt['negative_choice_cases']==9
+          assert receipt['controlled_api_tie_replays']==2
+          assert receipt['controlled_tie_hash_a']==receipt['controlled_tie_hash_b']
+          assert receipt['independent_parent_hash_a']==receipt['independent_parent_hash_b']
+          assert tie['kind']=='CONTROLLED_API_TIE_NOT_NATURAL_DOUBLE_KO'
+          assert len(receipt['boundaries_not_proven'])==3
+          assert receipt['certification']=={'native33':'0/33','exact34':'0/34','actual_game':'0/30',
+              'stage15_formal_increment':0,'gate':'DENY_FORMAL_CERTIFICATION'}
+          print('R2721_PUBLIC_RECEIPT_AUDITED',len(tests),total)
+          PY_AUDIT
+          (cd ./r2721-evidence && sha256sum *.cjs *.json *.jsonl > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - name: Upload public boundary artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2721-public-boundary-negative-and-controlled-api-tie
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/showdown/r2721-evidence/
