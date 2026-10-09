@@ -142,6 +142,15 @@ jobs:
            assert.deepEqual(p.transitions.map(x=>x.kind),[
             'attacking_faint_1','forced_switch_1','attacking_faint_2','forced_switch_2','attacking_faint_3']);
            const states=p.states.map(x=>x.state);
+           // Showdown rotates the switched-in party member into active slot 1.
+           // At the second forced switch, Target5 occupies slot 1 (fainted active)
+           // and Target4 occupies slot 2 (previously fainted bench).
+           const forcedSide=states[3].sides.find(x=>x.id==='p2');
+           assert(forcedSide,'missing p2 side in second forced switch snapshot');
+           assert.equal(forcedSide.pokemon[0].set.name,'Target5','unexpected active roster reordering');
+           assert.equal(forcedSide.pokemon[1].set.name,'Target4','unexpected fainted bench reordering');
+           assert.equal(forcedSide.pokemon[0].hp,0);
+           assert.equal(forcedSide.pokemon[1].hp,0);
            const cases=[
             // Can't switch to already active slot while in move phase.
             [0,'p1','switch 1','active_switch_invalid',"can't switch to an active"],
@@ -153,8 +162,8 @@ jobs:
             [1,'p2','switch 1','fainted_active_rejected',"can't switch to an active"],
             [1,'p2','switch 9','out_of_roster_rejected','do not have a Pokémon in slot'],
             // Both fainted bench and active slots are unavailable at the second replacement.
-            [3,'p2','switch 1','previous_faint_rejected',"can't switch to a fainted"],
-            [3,'p2','switch 2','second_faint_rejected',"can't switch to an active"],
+            [3,'p2','switch 2','previous_faint_rejected',"can't switch to a fainted"],
+            [3,'p2','switch 1','second_faint_rejected',"can't switch to an active"],
             // Both sides must refuse input once game is over.
             [5,'p1','move 1','winner_post_terminal_rejected','game is over'],
             [5,'p2','switch 3','loser_post_terminal_rejected','game is over'],
@@ -200,7 +209,7 @@ jobs:
           if(require.main===module)main();
           module.exports={negativeCase,tieBranch,runBoundaries};
           R2721_TEST_SOURCE
-          printf '%s  %s\n' 'fc4e8436b921a073bf51e198f6e0ad92746c55781ead17ce789eae3d3de53ced' ./r2721-negative-choices-and-tie.cjs | sha256sum -c -
+          printf '%s  %s\n' '48cdd2f4e09e6e930df426e90f9c46c86e506722afbd08c8e509f85b837e3f4c' ./r2721-negative-choices-and-tie.cjs | sha256sum -c -
           node --check ./r2721-negative-choices-and-tie.cjs
           node ./r2721-negative-choices-and-tie.cjs ./r2721-evidence | tee ./r2721-console-receipt.log
           cp ./r2720-faint-force-switch-win.cjs ./r2721-evidence/
@@ -220,7 +229,7 @@ jobs:
           total=sum(x.stat().st_size for x in p.iterdir())
           assert 0<total<=8*1024*1024,total
           assert hashlib.sha256((p/'r2720-faint-force-switch-win.cjs').read_bytes()).hexdigest()=='2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b'
-          assert hashlib.sha256((p/'r2721-negative-choices-and-tie.cjs').read_bytes()).hexdigest()=='fc4e8436b921a073bf51e198f6e0ad92746c55781ead17ce789eae3d3de53ced'
+          assert hashlib.sha256((p/'r2721-negative-choices-and-tie.cjs').read_bytes()).hexdigest()=='48cdd2f4e09e6e930df426e90f9c46c86e506722afbd08c8e509f85b837e3f4c'
           receipt=json.loads((p/'r2721-receipt.json').read_text())
           tests=[json.loads(line) for line in (p/'negative-choice-cases.jsonl').read_text().splitlines()]
           tie=json.loads((p/'controlled-api-tie.json').read_text())
