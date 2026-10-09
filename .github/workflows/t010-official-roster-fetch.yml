@@ -1,0 +1,148 @@
+name: T010 official M7 MC roster capture diagnostic R11
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  roster-diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      REPO_PRIVATE: ${{ github.event.repository.private }}
+    steps:
+      - name: Enforce public verification only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REPO_PRIVATE" = false
+          echo 'PASS_PUBLIC_REPOSITORY_ONLY'
+      - name: Retrieve two official public HTML documents
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/roster"
+          curl --proto '=https' --proto-redir '=https' --fail --location --max-redirs 2 --retry 1 --connect-timeout 15 --max-time 60 --silent --show-error --compressed \
+            'https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178955680104qaiodg/ja/pokemon.html' \
+            --output "$RUNNER_TEMP/roster/m7.html"
+          curl --proto '=https' --proto-redir '=https' --fail --location --max-redirs 2 --retry 1 --connect-timeout 15 --max-time 60 --silent --show-error --compressed \
+            'https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178713870219xeaaio/ja/pokemon.html' \
+            --output "$RUNNER_TEMP/roster/mc.html"
+          sha256sum "$RUNNER_TEMP/roster/m7.html" "$RUNNER_TEMP/roster/mc.html"
+      - name: Diagnose full displayed rows without deduplicating forms
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/roster/m7.html" "$RUNNER_TEMP/roster/mc.html" <<'PY'
+          """R11 T010: diagnostic official HTML capture, retaining duplicate displayed rows.
+
+          This is not canonical legality, form identification, or proof of current game parity.
+          Duplicate visible No+name may reflect indistinguishable forms: preserve the count,
+          never assign a form suffix speculatively, and fail closed for canonical promotion.
+          """
+          from __future__ import annotations
+          from collections import Counter
+          from html.parser import HTMLParser
+          from pathlib import Path
+          from hashlib import sha256
+          import json
+          import re
+          import sys
+          import unicodedata
+
+          SOURCES = {
+           'm7':'https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178955680104qaiodg/ja/pokemon.html',
+           'mc':'https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178713870219xeaaio/ja/pokemon.html',
+          }
+          ROW = re.compile(r'^No[.．]\s*(\d{4})\s+(.+?)\s*$',re.I)
+          CANDIDATE = re.compile(r'^No[.．]',re.I)
+
+          class VisibleText(HTMLParser):
+              BLOCK={'div','p','li','tr','br','h1','h2','h3','section','article'}
+              SKIP={'script','style','template','noscript','svg'}
+              def __init__(self):
+                  super().__init__(convert_charrefs=True)
+                  self.parts=[]
+                  self.skipping=None
+                  self.depth=0
+              def handle_starttag(self,tag,attrs):
+                  if self.skipping:
+                      if tag == self.skipping: self.depth+=1
+                      return
+                  if tag in self.SKIP:
+                      self.skipping=tag; self.depth=1
+                      return
+                  if tag in self.BLOCK: self.parts.append('\n')
+              def handle_endtag(self,tag):
+                  if self.skipping:
+                      if tag==self.skipping:
+                          self.depth-=1
+                          if self.depth==0:self.skipping=None
+                      return
+                  if tag in self.BLOCK: self.parts.append('\n')
+              def handle_data(self,data):
+                  if not self.skipping:self.parts.append(data)
+
+          def parse_bytes(raw:bytes)->dict:
+              if type(raw) is not bytes or not 100 < len(raw) < 5_000_000 or b'\0' in raw:
+                  raise ValueError('INVALID_RAW_HTML_BYTES')
+              html=raw.decode('utf-8-sig',errors='strict')
+              if '<html' not in html.lower() and '<!doctype' not in html.lower():
+                  raise ValueError('NOT_A_COMPLETE_HTML_DOCUMENT')
+              extractor=VisibleText();extractor.feed(html)
+              text=unicodedata.normalize('NFKC',''.join(extractor.parts))
+              parsed=[];malformed=[];prior=0
+              for line in text.splitlines():
+                  line=line.strip()
+                  if not CANDIDATE.match(line):continue
+                  hit=ROW.fullmatch(line)
+                  if not hit:
+                      malformed.append(line[:100]);continue
+                  dex=int(hit.group(1));name=hit.group(2).strip()
+                  if not 1<=dex<=1025 or dex<prior or not name or len(name)>100:
+                      raise ValueError('BAD_DEX_ORDER_OR_NAME')
+                  prior=dex
+                  parsed.append((dex,name))
+              if malformed:raise ValueError('MALFORMED_NO_ROWS:'+repr(malformed[:5]))
+              if not parsed:raise ValueError('NO_VISIBLE_ROSTER_ROWS')
+              occurrences=Counter(parsed)
+              ambiguous=[{'dex':d,'display':n,'occurrences':c} for (d,n),c in sorted(occurrences.items()) if c>1]
+              return {'raw_sha256':sha256(raw).hexdigest(),'raw_bytes':len(raw),
+                      'visible_row_count':len(parsed),'distinct_display_rows':len(occurrences),
+                      'national_dex_count':len({d for d,_ in parsed}),
+                      'ambiguous_repeated_display_rows':ambiguous,
+                      'rows':parsed,'multiset':occurrences}
+
+          def compare(m7:dict,mc:dict)->dict:
+              a=m7['multiset'];b=mc['multiset']
+              def brief(diff):
+                  return [{'dex':d,'display':n,'count':c} for (d,n),c in sorted(diff.items())]
+              return {'same_display_multiset':a==b,
+                      'm7_only':brief(a-b),'mc_only':brief(b-a),
+                      'unresolved_form_identity':bool(m7['ambiguous_repeated_display_rows'] or mc['ambiguous_repeated_display_rows']),
+                      'canonical_db_certified':False,'t011_certified':False,
+                      'native33':'0/33','exact34':'0/34','stage15_historical':'560/3500'}
+
+          def main(paths):
+              if len(paths)!=2:raise SystemExit('usage: diagnostic.py M7_RAW_HTML MC_RAW_HTML')
+              result={tag:parse_bytes(Path(src).read_bytes()) for tag,src in zip(('m7','mc'),paths)}
+              for tag in ('m7','mc'):
+                  x=result[tag]
+                  print('T010_SOURCE',json.dumps({'source_role':tag,'claimed_url':SOURCES[tag],
+                      'raw_sha256':x['raw_sha256'],'raw_bytes':x['raw_bytes'],'visible_row_count':x['visible_row_count'],
+                      'distinct_display_rows':x['distinct_display_rows'],'national_dex_count':x['national_dex_count'],
+                      'ambiguous_repeated_display_rows':x['ambiguous_repeated_display_rows']},ensure_ascii=False,sort_keys=True))
+                  for i,(d,n) in enumerate(x['rows'],1):
+                      print('T010_ROW',json.dumps({'source':tag,'ordinal':i,'dex':d,'display':n},ensure_ascii=False))
+              summary=compare(result['m7'],result['mc'])
+              print('T010_MULTISET_COMPARISON',json.dumps(summary,ensure_ascii=False,sort_keys=True))
+              if any(result[x]['visible_row_count']<200 for x in ('m7','mc')):
+                  raise ValueError('INCOMPLETE_OR_JS_RENDERED_ROSTER_POSSIBLE')
+              if not summary['same_display_multiset']:
+                  raise ValueError('M7_MC_DISPLAY_MULTISET_MISMATCH__NOT_CANONICAL')
+              print('PASS_T010_PUBLIC_CAPTURE_DIAGNOSTIC__NOT_CANONICAL_CERTIFICATION')
+              if summary['unresolved_form_identity']:
+                  print('UNRESOLVED_DISPLAY_DUPLICATES__REQUIRE_INDEPENDENT_FORM_ID_PROOF')
+              print('NOT_CERTIFIED: raw files ephemeral; no authenticated full roster proof, no patch learnset/item/ability/mega parity, no PURE, no T011, no Native33/Exact34 credit')
+
+          if __name__=='__main__':main(sys.argv[1:])
+          PY
