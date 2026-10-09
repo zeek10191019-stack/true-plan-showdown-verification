@@ -85,7 +85,39 @@ jobs:
             return crypto.createHash('sha256').update(JSON.stringify(stable(x))).digest('hex');
           }
           function snapshot(b) { return JSON.parse(JSON.stringify(b.toJSON())); }
-          function normalized(b) { return JSON.stringify(stable(State.normalize(snapshot(b)))); }
+          function normalizeState(raw) {
+            // State.normalize is in-place; preserve original evidence bytes.
+            return State.normalize(JSON.parse(JSON.stringify(raw)));
+          }
+          function normalized(b) { return JSON.stringify(stable(normalizeState(snapshot(b)))); }
+          function normalizedTrace(run) {
+            // Compare all gameplay fields; normalize ONLY Showdown's wall-clock |t:| events.
+            const states=run.snapshots.map(x=>({index:x.index,turn:x.turn,state:normalizeState(x.state)}));
+            const steps=run.steps.map((step,i)=>({
+              index:step.index,turn_before:step.turn_before,turn_after:step.turn_after,
+              choices:step.choices,witnesses:step.witnesses,
+              visible:{p1:State.normalizeLog(step.visible.p1),p2:State.normalizeLog(step.visible.p2)},
+              pre_sha256:hash(states[i].state),post_sha256:hash(states[i+1].state)
+            }));
+            return {
+              format:run.format,formatId:run.formatId,species:run.species,counters:run.counters,
+              snapshots:states,steps,
+              omniscient:State.normalizeLog(run.omniscient),
+              viewers:{p1:State.normalizeLog(run.viewers.p1),p2:State.normalizeLog(run.viewers.p2)}
+            };
+          }
+          function firstDifference(a,b,path='trace') {
+            if(Object.is(a,b))return null;
+            if(a===null||b===null||typeof a!=='object'||typeof b!=='object')
+              return {path,left:String(a).slice(0,250),right:String(b).slice(0,250)};
+            const keys=Array.from(new Set([...Object.keys(a),...Object.keys(b)])).sort();
+            for(const k of keys){
+              if(!(k in a)||!(k in b))return {path:path+'.'+k,left:k in a,right:k in b};
+              const mismatch=firstDifference(a[k],b[k],path+'['+JSON.stringify(k)+']');
+              if(mismatch)return mismatch;
+            }
+            return null;
+          }
           function validateVisible(events, proof, expectedTurn) {
             assert(Array.isArray(events));
             assert(events.every(e => typeof e === 'string' && !/[\r\n]/.test(e)));
@@ -205,7 +237,7 @@ jobs:
               steps.push(entry);
               snapshots.push({index:i+1,turn:b.turn,state:post});
               chain.push(hash({turn:b.turn,choices,visible,
-                post_sha256:hash(State.normalize(post))}));
+                post_sha256:hash(normalizeState(post))}));
             }
             assert.equal(counters.p1.switch,1);
             assert.equal(counters.p2.switch,1);
@@ -221,7 +253,13 @@ jobs:
             const a=runOnce();
             const b=runOnce();
             const aHash=hash(a),bHash=hash(b);
-            assert.equal(aHash,bHash,'two independent same-seed runs diverged');
+            const comparableA=normalizedTrace(a),comparableB=normalizedTrace(b);
+            const aNormalizedHash=hash(comparableA),bNormalizedHash=hash(comparableB);
+            if(aNormalizedHash!==bNormalizedHash){
+              console.error('FIRST_GAMEPLAY_TRACE_DIFFERENCE',JSON.stringify(firstDifference(comparableA,comparableB)));
+              assert.fail('NON_TIMESTAMP_DETERMINISM_FAILURE');
+            }
+            assert.equal(aNormalizedHash,bNormalizedHash);
             assert.equal(a.steps.length,30);
             assert.equal(a.snapshots.length,31);
             for (let i=0;i<30;i++) {
@@ -235,7 +273,7 @@ jobs:
               assert.equal(step.post_sha256,hash(next.state));
               const restored=Battle.fromJSON(JSON.stringify(prev.state));
               restored.makeChoices(step.choices.p1,step.choices.p2);
-              assert.equal(normalized(restored),JSON.stringify(stable(State.normalize(next.state))),
+              assert.equal(normalized(restored),JSON.stringify(stable(normalizeState(next.state))),
                 'archived snapshot replay mismatch at '+(i+1));
             }
             const dest=path.resolve(process.argv[2]||'r2718-evidence');
@@ -254,7 +292,9 @@ jobs:
               format:a.format,species:a.species,turns:30,snapshots:31,
               same_seed_independent_replay:'PASS',
               archived_per_turn_snapshot_replay:'PASS',
-              full_trace_sha256:aHash,independent_trace_sha256:bHash,
+              raw_full_trace_sha256:aHash,raw_independent_trace_sha256:bHash,
+              normalized_full_trace_sha256:aNormalizedHash,normalized_independent_trace_sha256:bNormalizedHash,
+              normalize_only:'Showdown |t:| wall-clock protocol events; preserve all other fields',
               transition_chain_sha256:a.transition_chain_sha256,
               action_counters:a.counters,
               has_omniscient_state:true,
@@ -267,9 +307,9 @@ jobs:
             console.log(JSON.stringify(receipt));
           }
           if(require.main===module)main();
-          module.exports={runOnce,validateVisible};
+          module.exports={runOnce,validateVisible,normalizedTrace,firstDifference};
           R2718_PROBE
-          printf '%s  %s\n' 'aac7ff916d14baeb059a501ea6bfa797d9b0c275a157a97d0567c5ec33a883be' r2718-30turn-evidence.cjs | sha256sum -c -
+          printf '%s  %s\n' 'f897ac004f269a46ccaa5be0d4a9d5e9202f7bb7d31aa69ba6c76fb46a279864' r2718-30turn-evidence.cjs | sha256sum -c -
           node --check ./r2718-30turn-evidence.cjs
           node ./r2718-30turn-evidence.cjs ./r2718-evidence | tee ./r2718-console-receipt.json
           cp ./r2718-30turn-evidence.cjs ./r2718-evidence/
@@ -298,7 +338,7 @@ jobs:
           assert receipt['certification']=={'native33':'0/33','exact34':'0/34',
                  'actual_game':'0/30','stage15_formal_increment':0,
                  'gate':'DENY_FORMAL_CERTIFICATION'}
-          assert hashlib.sha256((p/'r2718-30turn-evidence.cjs').read_bytes()).hexdigest()=='aac7ff916d14baeb059a501ea6bfa797d9b0c275a157a97d0567c5ec33a883be'
+          assert hashlib.sha256((p/'r2718-30turn-evidence.cjs').read_bytes()).hexdigest()=='f897ac004f269a46ccaa5be0d4a9d5e9202f7bb7d31aa69ba6c76fb46a279864'
           print('COMPLETE_PUBLIC_EVIDENCE_PASS',len(snap),len(steps),total)
           PY_AUDIT
           (cd ./r2718-evidence && sha256sum *.cjs *.json *.jsonl *.log > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
