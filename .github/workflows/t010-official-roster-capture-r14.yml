@@ -1,0 +1,240 @@
+name: T010 R14 official raw HTML and rendered DOM artifact receipt
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  official-roster-archival:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      REPO_PRIVATE: ${{ github.event.repository.private }}
+      M7_URL: https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178955680104qaiodg/ja/pokemon.html
+      MC_URL: https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178713870219xeaaio/ja/pokemon.html
+    steps:
+      - name: Verify no private code or paid runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REPO_PRIVATE" = false
+          test "$RUNNER_OS" = Linux
+          echo PASS_PUBLIC_STANDARD_RUNNER_ONLY
+      - name: Capture public official HTML and actual Chrome DOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/t010_r14"
+          mkdir -p "$root"
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$browser" || { echo FAIL_NO_PREINSTALLED_CHROME; exit 1; }
+          "$browser" --version
+          for tag in m7 mc; do
+            if [ "$tag" = m7 ]; then url="$M7_URL"; else url="$MC_URL"; fi
+            curl --proto "=https" --fail --connect-timeout 15 --max-time 60 --retry 1 --silent --show-error --compressed "$url" --output "$root/$tag.raw.html"
+            timeout 90s "$browser" --headless=new --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check --user-data-dir="$RUNNER_TEMP/chrome-t010-$tag" --virtual-time-budget=30000 --dump-dom "$url" > "$root/$tag.rendered.html" 2> "$RUNNER_TEMP/chrome-$tag-stderr.txt" || { echo "FAIL_RENDER_$tag"; exit 1; }
+            test -s "$root/$tag.raw.html" && test -s "$root/$tag.rendered.html" || { echo "FAIL_EMPTY_HTML_$tag"; exit 1; }
+            sha256sum "$root/$tag.raw.html" "$root/$tag.rendered.html"
+          done
+      - name: Verify exact R13 displayed roster then save and readback original bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          browser="$(google-chrome --version || true)"
+          python3 - "$RUNNER_TEMP/t010_r14" "$GITHUB_RUN_ID" "$browser" <<'PY'
+          """R14 public official URL HTML/DOM capture artifact: independently verify bytes.
+
+          PUBLIC DISPLAY DATA ONLY. Never certifies Pokémon legality, form IDs, PURE, T011, Native33.
+          No web requests; verification uses bytes of an already-downloaded GitHub Actions artifact.
+          """
+          from __future__ import annotations
+
+          from collections import Counter
+          from hashlib import sha256
+          from html.parser import HTMLParser
+          import json
+          from pathlib import Path
+          import re
+          import unicodedata
+          from typing import Any
+
+          SCHEMA = 'TRUE_PLAN_R14_PUBLIC_ORIGINAL_HTML_DOM_CAPTURE_RECEIPT_V1'
+          REPO = 'zeek10191019-stack/true-plan-showdown-verification'
+          EXPECTED_TSV_SHA256 = 'b9efb27744effc4e31a3a1a23c6dff709a48df68d6e2e3e104445fc949a38b46'
+          EXPECTED_PREVIOUS_R12_RENDER_SHA256 = '5b6749c85ed4e7b20fb4aa1dbc2c84d8d9191084c9afd28b92d3936d8ae896b6'
+          EXPECTED_ROWS = 262
+          EXPECTED_DEX = 231
+          SOURCE_URLS = {
+              'm7':'https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178955680104qaiodg/ja/pokemon.html',
+              'mc':'https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178713870219xeaaio/ja/pokemon.html',
+          }
+          ROW = re.compile(r'^No[.．]\s*(\d{4})(?:\s+(.+))?$', re.I)
+          FILE_NAMES = tuple(f'{s}.{k}.html' for s in ('m7','mc') for k in ('raw','rendered'))
+
+
+          def digest(raw:bytes)->str:
+              return sha256(raw).hexdigest()
+
+
+          def canonical(x:Any)->bytes:
+              return json.dumps(x,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False).encode('utf-8')
+
+
+          class Visible(HTMLParser):
+              BLOCK = {'div','p','li','tr','br','h1','h2','h3','section','article'}
+              SKIP = {'script','style','noscript','template','svg'}
+              def __init__(self):
+                  super().__init__(convert_charrefs=True)
+                  self.parts: list[str]=[]
+                  self.skip_depth=0
+              def handle_starttag(self,tag,attrs):
+                  if self.skip_depth:
+                      if tag in self.SKIP: self.skip_depth += 1
+                      return
+                  if tag in self.SKIP: self.skip_depth = 1
+                  elif tag in self.BLOCK: self.parts.append('\n')
+              def handle_endtag(self,tag):
+                  if self.skip_depth:
+                      if tag in self.SKIP: self.skip_depth -= 1
+                      return
+                  if tag in self.BLOCK: self.parts.append('\n')
+              def handle_data(self,text):
+                  if not self.skip_depth: self.parts.append(text)
+
+
+          def extract_rows(raw:bytes)->list[tuple[int,str]]:
+              if type(raw) is not bytes or not 100 < len(raw) < 10_000_000 or b'\0' in raw:
+                  raise ValueError('R14_BAD_HTML_BYTES')
+              html=raw.decode('utf-8-sig','strict')
+              if '<html' not in html.lower() and '<!doctype' not in html.lower():
+                  raise ValueError('R14_NOT_HTML')
+              obj=Visible();obj.feed(html)
+              text=unicodedata.normalize('NFKC',''.join(obj.parts))
+              lines=[x.strip() for x in text.splitlines() if x.strip()]
+              rows=[]
+              for i,line in enumerate(lines):
+                  if not line.lower().startswith('no.'): continue
+                  match=ROW.fullmatch(line)
+                  if not match: raise ValueError('R14_UNPARSED_NO_ROW')
+                  dex=int(match.group(1))
+                  name=match.group(2) or (lines[i+1] if i+1<len(lines) else '')
+                  name=name.strip()
+                  if (not 1<=dex<=1025 or not 1<=len(name)<=100 or name.lower().startswith('no.')
+                          or any(x in name for x in '<>{}\0\t\r\n')):
+                      raise ValueError('R14_INVALID_ROW_OR_NAME')
+                  rows.append((dex,name))
+              return rows
+
+
+          def canonical_tsv(rows:list[tuple[int,str]])->bytes:
+              return ''.join(f'{dex:04d}\t{name}\n' for dex,name in rows).encode('utf-8')
+
+
+          def rows_match_r13(rows:list[tuple[int,str]])->bool:
+              if len(rows)!=EXPECTED_ROWS or len({d for d,_ in rows})!=EXPECTED_DEX:
+                  return False
+              counts=Counter(rows)
+              if {k:v for k,v in counts.items() if v>1}!={(931,'イキリンコ'):2}:
+                  return False
+              if any(a[0]>b[0] for a,b in zip(rows,rows[1:])):
+                  return False
+              return digest(canonical_tsv(rows))==EXPECTED_TSV_SHA256
+
+
+          def validate_source_files(root:Path)->dict[str,Any]:
+              result={}
+              for name in FILE_NAMES:
+                  file=root/name
+                  if file.is_symlink() or not file.is_file():
+                      raise ValueError('R14_MISSING_OR_SYMLINK_SOURCE:'+name)
+                  raw=file.read_bytes()
+                  # Apply basic validation even to raw HTML; no row count required in raw shell.
+                  if not 100<len(raw)<10_000_000 or b'\0' in raw:
+                      raise ValueError('R14_BAD_OR_EMPTY_SOURCE:'+name)
+                  if '<html' not in raw[:3000].decode('utf-8-sig','strict').lower() and '<!doctype' not in raw[:3000].decode('utf-8-sig','strict').lower():
+                      raise ValueError('R14_NO_HTML_SIGNATURE:'+name)
+                  result[name]={'sha256':digest(raw),'bytes':len(raw)}
+              return result
+
+
+          def build_receipt(root:Path, *, run_id:str='PENDING', chrome_version:str='UNVERIFIED') -> dict[str,Any]:
+              files=validate_source_files(root)
+              roles={}
+              for role in ('m7','mc'):
+                  rows=extract_rows((root/f'{role}.rendered.html').read_bytes())
+                  if not rows_match_r13(rows):
+                      raise ValueError('R14_RENDERED_ROSTER_NOT_MATCHING_R13:'+role)
+                  # Repo-held R13 log is not user-provided runtime context in public CI;
+                  # compare to pinned cryptographic checksum of R13 log reconstruction.
+                  roles[role]={'source_url':SOURCE_URLS[role],'display_rows':len(rows),
+                               'distinct_dex':len({d for d,_ in rows}),
+                               'display_tsv_sha256':digest(canonical_tsv(rows)),
+                               'raw_sha256':files[f'{role}.raw.html']['sha256'],
+                               'rendered_sha256':files[f'{role}.rendered.html']['sha256'],
+                               'prior_r12_render_sha256_exact':files[f'{role}.rendered.html']['sha256']==EXPECTED_PREVIOUS_R12_RENDER_SHA256,
+                               'ambiguous_form_931':'UNRESOLVED'}
+              if roles['m7']['display_tsv_sha256']!=roles['mc']['display_tsv_sha256']:
+                  raise ValueError('R14_M7_MC_MISMATCH')
+              receipt={'schema':SCHEMA,'repo':REPO,'run_id':str(run_id),'chrome_version':str(chrome_version),
+                  'season':'M-7','regulation':'M-C','files':files,'roles':roles,
+                  'source_capture':'PUBLIC_GITHUB_ACTIONS_OFFICIAL_URL_HTML_AND_CHROME_DOM',
+                  'html_archived_in_artifact':True,'dom_archived_in_artifact':True,
+                  'original_bytes_in_private_R14_zip':False,
+                  'external_publisher_signature':'NOT_PRESENT',
+                  'canonical_db_certified':False,'t011_certified':False,
+                  'native33':'0/33','exact34':'0/34','stage15_historical':'560/3500',
+                  'stage1_pure_ingress':'DENY','formal_promotion':'DENY',
+                  'unresolved':['exact form IDs incl No.0931','game patch/master-data parity',
+                                'learnsets','abilities','items','Mega','66P','real-game native validation']}
+              receipt['receipt_integrity_sha256']=digest(canonical(receipt))
+              return receipt
+
+
+          def save_receipt(root:Path,*,run_id:str='PENDING',chrome_version:str='UNVERIFIED')->dict[str,Any]:
+              receipt=build_receipt(root,run_id=run_id,chrome_version=chrome_version)
+              path=root/'receipt.json'
+              path.write_text(json.dumps(receipt,ensure_ascii=False,sort_keys=True,indent=2)+'\n',encoding='utf-8')
+              for role in ('m7','mc'):
+                  rendered=(root/f'{role}.rendered.html').read_bytes()
+                  (root/f'{role}.rows.tsv').write_bytes(canonical_tsv(extract_rows(rendered)))
+              verify_receipt(root)
+              return receipt
+
+
+          def verify_receipt(root:Path)->dict[str,Any]:
+              path=root/'receipt.json'
+              if path.is_symlink() or not path.is_file():raise ValueError('R14_RECEIPT_MISSING')
+              record=json.loads(path.read_text(encoding='utf-8'))
+              if record.get('schema')!=SCHEMA:raise ValueError('R14_BAD_SCHEMA')
+              tag=record.get('receipt_integrity_sha256')
+              if tag!=digest(canonical({k:v for k,v in record.items() if k!='receipt_integrity_sha256'})):
+                  raise ValueError('R14_MANIFEST_INTEGRITY_ERROR')
+              expected=build_receipt(root,run_id=record['run_id'],chrome_version=record['chrome_version'])
+              if record!=expected:raise ValueError('R14_SOURCE_OR_RECEIPT_MISMATCH')
+              for role in ('m7','mc'):
+                  f=root/f'{role}.rows.tsv'
+                  if f.is_symlink() or not f.is_file() or f.read_bytes()!=canonical_tsv(extract_rows((root/f'{role}.rendered.html').read_bytes())):
+                      raise ValueError('R14_ROSTER_TSV_MISMATCH')
+              return {'status':'PASS_PUBLIC_SOURCE_CAPTURE_ARTIFACT_READBACK__NOT_CANONICAL',
+                      'display_rows':EXPECTED_ROWS,'national_dex':EXPECTED_DEX,
+                      'native33':'0/33','exact34':'0/34','formal_increment':0}
+
+          import sys
+          root=Path(sys.argv[1])
+          receipt=save_receipt(root,run_id=sys.argv[2],chrome_version=sys.argv[3])
+          assert verify_receipt(root)["display_rows"] == 262
+          print("PASS_T010_R14_ORIGINAL_HTML_DOM_CAPTURE_AND_READBACK__NOT_CANONICAL")
+          print("R14_RUN",receipt["run_id"],"R14_MANIFEST",receipt["receipt_integrity_sha256"])
+          print("NOT_CERTIFIED: full form IDs, learnsets, abilities, items, Mega, 66P, real game parity; Native33=0/33 Exact34=0/34 Stage1.5 historical 560/3500")
+          PY
+      - name: Archive four original HTML files and readback receipt
+        if: always() && env.REPO_PRIVATE == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: t010-r14-official-public-html-dom-${{ github.run_id }}
+          path: ${{ runner.temp }}/t010_r14/
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 6
