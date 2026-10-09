@@ -1,0 +1,288 @@
+name: R27.22 public RNG branching and observation noninterference
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2722-public-rng-observation-manual
+  cancel-in-progress: false
+jobs:
+  research_only:
+    name: Pinned M-C future RNG and private observation research
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch fixed public Showdown and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/showdown"
+          cd "$RUNNER_TEMP/showdown"
+          git init -q
+          git remote add origin https://github.com/smogon/pokemon-showdown.git
+          git fetch --depth 1 origin aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse 'HEAD^{tree}')" = 98c9038b81fa5ed7f1e9818736b701918920501e
+          test "$(node --version)" = v22.18.0
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Verify fixed distribution digest
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_DIST'
+          from pathlib import Path
+          import hashlib
+          dist=Path('dist')
+          items=list(dist.rglob('*'))
+          assert not any(p.is_symlink() for p in items)
+          files=sorted((p for p in items if p.is_file()),key=lambda p:p.relative_to(dist).as_posix())
+          assert len(files)==1094,len(files)
+          h=hashlib.sha256()
+          for p in files:
+              n=p.relative_to(dist).as_posix().encode()
+              h.update(len(n).to_bytes(8,'big'))
+              h.update(n)
+              h.update(hashlib.sha256(p.read_bytes()).digest())
+          assert h.hexdigest()=='3697be28e9736b691f005bc5ad7b56789523fbf4ef04d838fcc91f6cfae9c3df'
+          print('R2722_PINNED_DIST_PASS',len(files),h.hexdigest())
+          PY_DIST
+      - name: Recover exact R27.20 parent source
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/6b0d3daa8c3957821604fcbd410287e0f7f389d1/.github/workflows/r2720-public-faint-forced-switch-terminal.yml' -o ./r2720-public-workflow-source.yml
+          printf '%s  %s\n' '75dc810599d0d91b747f77bb37e1278f6fa7b782364b537c907591f21454933c' ./r2720-public-workflow-source.yml | sha256sum -c -
+          python3 - <<'PY_EXTRACT'
+          from pathlib import Path
+          wf=Path('r2720-public-workflow-source.yml').read_text()
+          marker="          cat > ./r2720-faint-force-switch-win.cjs <<'R2720_SOURCE'\n"
+          assert wf.count(marker)==1
+          blob=wf.split(marker,1)[1].split('\n          R2720_SOURCE\n',1)[0]
+          source='\n'.join(line[10:] for line in blob.split('\n'))+'\n'
+          Path('r2720-faint-force-switch-win.cjs').write_text(source)
+          PY_EXTRACT
+          printf '%s  %s\n' '2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b' ./r2720-faint-force-switch-win.cjs | sha256sum -c -
+          node --check ./r2720-faint-force-switch-win.cjs
+      - name: Execute public RNG and observation isolation controls
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          cat > ./r2722-rng-observation-boundaries.cjs <<'R2722_SOURCE'
+          #!/usr/bin/env node
+          'use strict';
+          /** Public Showdown pinned M-C only. Not a certified Champions Battle AI. */
+          const assert=require('node:assert/strict');
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const crypto=require('node:crypto');
+          const {Battle,extractChannelMessages}=require('./dist/sim/battle');
+          const {Dex}=require('./dist/sim/dex');
+          const {PRNG}=require('./dist/sim/prng');
+          const {State}=require('./dist/sim/state');
+          const {TeamValidator}=require('./dist/sim/team-validator');
+          const {runOnce,teams}=require('./r2720-faint-force-switch-win.cjs');
+          const PIN='aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const SEED='1,2,3,4';
+          const clone=x=>JSON.parse(JSON.stringify(x));
+          function canonical(x){
+            if(Array.isArray(x))return x.map(canonical);
+            if(x&&typeof x==='object')return Object.fromEntries(Object.keys(x).sort().map(k=>[k,canonical(x[k])]));
+            return x;
+          }
+          function sha(x){return crypto.createHash('sha256').update(JSON.stringify(canonical(x))).digest('hex');}
+          function snap(b){return clone(b.toJSON());}
+          function normalized(s){return State.normalize(clone(s));}
+          function viewer(b,player){
+            const slot=player==='p1'?1:2;
+            const channels=extractChannelMessages(b.log.join('\n'),[1,2]);
+            assert(Array.isArray(channels[slot]));
+            // Only the requesting player's side-scoped request and the corresponding public protocol.
+            // Never embed Battle.toJSON(), the opponent roster, RNG, or omniscient protocol in this object.
+            return {phase:b.requestState,turn:b.turn,own_request:clone(b.getSide(player).activeRequest),
+              visible_protocol:State.normalizeLog(channels[slot])};
+          }
+          function verifySnapshot(source,tag){
+            assert.deepEqual(normalized(snap(Battle.fromJSON(JSON.stringify(source)))),normalized(source),tag+' roundtrip');
+          }
+          function observedHiddenInformation(){
+            const format=Dex.formats.get('gen9championsbssregmc');
+            assert(format.exists&&format.mod==='champions');
+            const dex=Dex.forFormat(format),validator=TeamValidator.get(format);
+            const baseline=teams(dex),alternative=teams(dex);
+            assert.equal(baseline.p2[3].species,'Charizard');
+            // Both changes are unobserved at team preview and before either is revealed by an action.
+            alternative.p2[3].moves=['willowisp','protect','endure','rest'];
+            alternative.p2[3].item='sitrusberry';
+            for(const [label,roster] of [['base',baseline],['alternative',alternative]]){
+              for(const p of ['p1','p2'])assert.equal(validator.validateTeam(roster[p]),null,label+' '+p+' illegal');
+            }
+            function make(roster){
+              const b=new Battle({formatid:format.id,seed:SEED,strictChoices:true,
+                p1:{name:'Public-P1',team:roster.p1},p2:{name:'Public-P2',team:roster.p2}});
+              b.makeChoices('team 456','team 456');
+              assert.equal(b.requestState,'move');
+              return b;
+            }
+            const a=make(baseline),b=make(alternative);
+            assert.notEqual(sha(normalized(snap(a))),sha(normalized(snap(b))),'hidden control is ineffective');
+            const beforeA=viewer(a,'p1'),beforeB=viewer(b,'p1');
+            assert.deepEqual(beforeA,beforeB,'opponent hidden move/item contaminated p1 pre-action observation');
+            assert(!JSON.stringify(beforeA).includes('willowisp'),'private move leaked before being used');
+            assert(!JSON.stringify(beforeB).includes('sitrusberry'),'private item leaked before being revealed');
+            assert(!Object.hasOwn(beforeA,'state')&&!Object.hasOwn(beforeA,'rng'),'omniscient fields in public output');
+            const p2A=viewer(a,'p2'),p2B=viewer(b,'p2');
+            assert.notDeepEqual(p2A,p2B,'opponent-owned private request did not differ');
+            assert(JSON.stringify(p2B).includes('willowisp'),'owner did not see own hidden move');
+            // Negative control: the noninterference assertion must detect a deliberately injected secret.
+            const faulty={...beforeB,opponent_hidden_item:'sitrusberry'};
+            assert.notDeepEqual(beforeA,faulty,'fault injection must be detected');
+            const unmodifiedA=snap(a),unmodifiedB=snap(b);
+            // Both sides choose the same visible Protect action; neither secret is revealed.
+            a.makeChoices('move 3','move 2');
+            b.makeChoices('move 3','move 2');
+            assert.deepEqual(viewer(a,'p1'),viewer(b,'p1'),'hidden data altered public observation after identical reveals');
+            verifySnapshot(unmodifiedA,'base prefix');
+            verifySnapshot(unmodifiedB,'variant prefix');
+            return {before_observation_hash:sha(beforeA),after_observation_hash:sha(viewer(a,'p1')),
+              owner_observation_differs:true,hidden_snapshot_differs:true,
+              invisible_move:'willowisp',invisible_item:'sitrusberry',negative_control_detected:true,
+              public_before:beforeA,public_after:viewer(a,'p1')};
+          }
+          function rngBranches(){
+            const parent=runOnce();
+            const root=parent.states[0].state;
+            verifySnapshot(root,'rng root');
+            const source=Battle.fromJSON(JSON.stringify(root));
+            const prefix=viewer(source,'p1');
+            const original=normalized(snap(source));
+            const prefixHash=sha(prefix),originHash=sha(original);
+            assert.equal(source.requestState,'move');
+            assert.equal(source.p1.active[0].species.name,'Rhyperior');
+            assert.equal(source.p2.active[0].species.name,'Charizard');
+            const examples={},counts={hit:0,miss:0};
+            let attempts=0;
+            // Fixed bounded seed sweep: future RNG only, never manipulate the prior battle state.
+            for(let i=1;i<=256;i++){
+              const proposed=[(i*15731+51)&65535,(i*45007+13)&65535,
+                (i*23197+333)&65535,(i*60493+103)&65535].join(',');
+              const b=Battle.fromJSON(JSON.stringify(root));
+              assert.deepEqual(viewer(b,'p1'),prefix,'restore changed pre-action public observation');
+              b.prng.setSeed(proposed); // Deliberate fork of future RNG state, not a replay of the original path.
+              assert.deepEqual(viewer(b,'p1'),prefix,'future RNG changed historical public observation');
+              assert.equal(sha(normalized(snap(source))),originHash,'future fork mutated original source state');
+              b.makeChoices('move 2','move 1'); // Rock Slide (90% accuracy) vs Swords Dance.
+              const observation=viewer(b,'p1');
+              const lines=observation.visible_protocol;
+              const category=lines.some(x=>x.startsWith('|-miss|p1a: Probe4|'))?'miss':
+                lines.some(x=>x.startsWith('|-damage|p2a: Target4|'))?'hit':'other';
+              assert.notEqual(category,'other','neither Rock Slide hit nor miss was observable');
+              counts[category]++;attempts++;
+              const evidence={seed:proposed,result:category,post_phase:b.requestState,
+                target_hp:b.p2.active[0].hp,post_state_hash:sha(normalized(snap(b))),
+                public_post_hash:sha(observation),visible_events:lines.slice(prefix.visible_protocol.length)};
+              if(!examples[category]){
+                const retry=Battle.fromJSON(JSON.stringify(root));
+                retry.prng.setSeed(proposed);
+                retry.makeChoices('move 2','move 1');
+                assert.deepEqual(normalized(snap(retry)),normalized(snap(b)),'same RNG fork did not replay exactly');
+                examples[category]=evidence;
+              }
+              if(examples.hit&&examples.miss)break;
+            }
+            assert(examples.hit&&examples.miss,'bounded 256-seed search did not exhibit hit/miss divergence');
+            assert.notEqual(examples.hit.post_state_hash,examples.miss.post_state_hash,'future branches did not diverge');
+            assert.equal(sha(viewer(source,'p1')),prefixHash,'prefix observation mutated after RNG alternatives');
+            assert.equal(sha(normalized(snap(source))),originHash,'source root mutated by alternatives');
+            // Do not assume two future branches will have identical public observations after the RNG result.
+            return {attempted_seeds:attempts,counts,shared_pre_observation_sha256:prefixHash,
+              unchanged_parent_state_sha256:originHash,examples};
+          }
+          function run(){
+            const x=observedHiddenInformation(),y=rngBranches();
+            return {privacy:x,rng:y};
+          }
+          function main(){
+            const result=run();
+            const out=path.resolve(process.argv[2]||'r2722-evidence');
+            fs.mkdirSync(out,{recursive:true});
+            const put=(name,obj)=>fs.writeFileSync(path.join(out,name),JSON.stringify(obj,null,2)+'\n','utf8');
+            put('public-observation-noninterference.json',result.privacy);
+            put('future-rng-hit-miss-branches.json',result.rng);
+            const receipt={schema:'TRUE_PLAN_R2722_PUBLIC_RNG_OBSERVATION_V1',status:'PASS_PUBLIC_SYNTHETIC_ONLY',
+              pinned_showdown_commit:PIN,format:'[Gen 9 Champions] BSS Reg M-C',
+              counterfactual_hidden_move_item_same_before_after:true,public_observation_only:true,
+              deliberately_injected_hidden_leak_detected:result.privacy.negative_control_detected,
+              future_rng_hit_miss_divergence:true,seed_attempts:result.rng.attempted_seeds,
+              prefix_unchanged:true,same_seed_replay:true,
+              normalized_public_prefix_hash:result.rng.shared_pre_observation_sha256,
+              future_outcome_hash_hit:result.rng.examples.hit.post_state_hash,
+              future_outcome_hash_miss:result.rng.examples.miss.post_state_hash,
+              evidence_limitations:['two legal hidden variants only','one chosen reveal sequence',
+                'one battle state and one stochastic move','no exhaustive RNG space','no general belief AI audit',
+                'no full policy noninterference proof','not native Champions gameplay'],
+              certification:{native33:'0/33',exact34:'0/34',actual_game:'0/30',stage15_formal_increment:0,
+                gate:'DENY_FORMAL_CERTIFICATION'}};
+            put('r2722-receipt.json',receipt);
+            console.log('R2722_PUBLIC_RESULT '+JSON.stringify(receipt));
+          }
+          if(require.main===module)main();
+          module.exports={viewer,observedHiddenInformation,rngBranches,run};
+          R2722_SOURCE
+          printf '%s  %s\n' '0a4fe39d6e1f3ac1c208171b3c38c9d19a388d618baf1b4bfeab78e1c24b8d7e' ./r2722-rng-observation-boundaries.cjs | sha256sum -c -
+          node --check ./r2722-rng-observation-boundaries.cjs
+          node ./r2722-rng-observation-boundaries.cjs ./r2722-evidence | tee ./r2722-console-receipt.log
+          cp ./r2720-faint-force-switch-win.cjs ./r2722-evidence/
+          cp ./r2722-rng-observation-boundaries.cjs ./r2722-evidence/
+      - name: Independently audit receipt and evidence hashes
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_AUDIT'
+          from pathlib import Path
+          import hashlib,json
+          p=Path('r2722-evidence')
+          names={'r2720-faint-force-switch-win.cjs','r2722-rng-observation-boundaries.cjs',
+                 'public-observation-noninterference.json','future-rng-hit-miss-branches.json',
+                 'r2722-receipt.json'}
+          assert {f.name for f in p.iterdir()}==names
+          total=sum(f.stat().st_size for f in p.iterdir())
+          assert 0<total<=8*1024*1024,('ARTIFACT_BYTE_CAP',total)
+          assert hashlib.sha256((p/'r2720-faint-force-switch-win.cjs').read_bytes()).hexdigest()=='2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b'
+          assert hashlib.sha256((p/'r2722-rng-observation-boundaries.cjs').read_bytes()).hexdigest()=='0a4fe39d6e1f3ac1c208171b3c38c9d19a388d618baf1b4bfeab78e1c24b8d7e'
+          receipt=json.loads((p/'r2722-receipt.json').read_text())
+          pub=json.loads((p/'public-observation-noninterference.json').read_text())
+          rng=json.loads((p/'future-rng-hit-miss-branches.json').read_text())
+          assert receipt['status']=='PASS_PUBLIC_SYNTHETIC_ONLY'
+          assert receipt['counterfactual_hidden_move_item_same_before_after']
+          assert receipt['deliberately_injected_hidden_leak_detected']
+          assert receipt['future_rng_hit_miss_divergence']
+          assert receipt['prefix_unchanged'] and receipt['same_seed_replay']
+          assert 2<=receipt['seed_attempts']<=256
+          assert rng['counts']['miss']>=1 and rng['counts']['hit']>=1
+          assert rng['examples']['hit']['post_state_hash']!=rng['examples']['miss']['post_state_hash']
+          assert rng['shared_pre_observation_sha256']==receipt['normalized_public_prefix_hash']
+          assert pub['negative_control_detected']
+          assert receipt['certification']=={'native33':'0/33','exact34':'0/34',
+            'actual_game':'0/30','stage15_formal_increment':0,'gate':'DENY_FORMAL_CERTIFICATION'}
+          print('R2722_EVIDENCE_AUDIT_PASS',receipt['seed_attempts'],total)
+          PY_AUDIT
+          (cd ./r2722-evidence && sha256sum *.cjs *.json > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - name: Upload public synthetic research evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2722-public-rng-private-observation-proof
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/showdown/r2722-evidence/
