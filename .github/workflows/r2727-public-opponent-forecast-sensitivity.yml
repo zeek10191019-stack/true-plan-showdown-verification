@@ -1,0 +1,860 @@
+name: R27.27 public opponent forecast and sensitivity proof
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2727-public-opponent-forecast-manual
+  cancel-in-progress: false
+jobs:
+  public_research_only:
+    name: Pinned M-C public-only opponent forecast and leaf sensitivity
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch pinned public source and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/showdown"
+          cd "$RUNNER_TEMP/showdown"
+          git init -q
+          git remote add origin https://github.com/smogon/pokemon-showdown.git
+          git fetch --depth 1 origin aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse 'HEAD^{tree}')" = 98c9038b81fa5ed7f1e9818736b701918920501e
+          test "$(node --version)" = v22.18.0
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Verify pinned distribution bytewise
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_DIST'
+          from pathlib import Path
+          import hashlib
+          dist=Path('dist')
+          items=list(dist.rglob('*'))
+          assert not any(p.is_symlink() for p in items)
+          files=sorted((p for p in items if p.is_file()),key=lambda p:p.relative_to(dist).as_posix())
+          assert len(files)==1094,len(files)
+          h=hashlib.sha256()
+          for p in files:
+            n=p.relative_to(dist).as_posix().encode()
+            h.update(len(n).to_bytes(8,'big')); h.update(n)
+            h.update(hashlib.sha256(p.read_bytes()).digest())
+          assert h.hexdigest()=='3697be28e9736b691f005bc5ad7b56789523fbf4ef04d838fcc91f6cfae9c3df'
+          print('R2726_PINNED_DIST_PASS',len(files),h.hexdigest())
+          PY_DIST
+      - name: Restore publicly audited pinned source modules
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          fetch() { curl --fail --location --silent --show-error --retry 3 --retry-delay 2 "$1" -o "$2"; }
+          fetch 'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/6b0d3daa8c3957821604fcbd410287e0f7f389d1/.github/workflows/r2720-public-faint-forced-switch-terminal.yml' r2720.yml
+          fetch 'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/9992d08f6c53fcf487cea7c14da0e9fd916cb67c/.github/workflows/r2722-public-rng-observation-noninterference.yml' r2722.yml
+          fetch 'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/a376645c3096220eed6e9b30758cfd7713eedc06/.github/workflows/r2723-public-multiturn-belief-boundaries.yml' r2723.yml
+          fetch 'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/7080a2a37bb3a325e848ea2a910525b3e5ec56bf/.github/workflows/r2724-public-bayes-belief-action-prediction.yml' r2724.yml
+          fetch 'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/main/.github/workflows/r2725-public-baseline-legal-decision.yml' r2725.yml
+          # Pin R27.25 to the exact audited Git blob, even though retrieved via main.
+          test "$(git hash-object r2725.yml)" = 795ba67d33ae97ae817290b07fe627a463506068
+          printf '%s  %s\n' \
+            75dc810599d0d91b747f77bb37e1278f6fa7b782364b537c907591f21454933c r2720.yml \
+            e59183d4b3e8e01604d94a05bebb8911114448e69d8e906f0739da0becf187a4 r2722.yml \
+            5fe1c97be8714313c82392f7901e21debbe036b7b97dadbe32c472654f015b84 r2723.yml \
+            e50c3eafc6523a81a236d8f9a2210353f43b29207b482c594a7c0c5b01bc7d83 r2724.yml | sha256sum -c -
+          python3 - <<'PY_EXTRACT'
+          from pathlib import Path
+          mapping=[
+            ('r2720.yml','r2720-faint-force-switch-win.cjs','R2720_SOURCE','2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b'),
+            ('r2722.yml','r2722-rng-observation-boundaries.cjs','R2722_SOURCE','0a4fe39d6e1f3ac1c208171b3c38c9d19a388d618baf1b4bfeab78e1c24b8d7e'),
+            ('r2723.yml','r2723-multiturn-belief-boundaries.cjs','R2723_SOURCE','fed3b7e13eb09f0ffd2bfcb6fb8497ac39da502781994c56c16dbb846a566c49'),
+            ('r2724.yml','r2724-bayesian-belief-action-forecast.cjs','R2724_SOURCE','7291d1fc69850a06ff58e06b5ffb48576e116f106acea3abc1b618947bbf8e44'),
+            ('r2725.yml','r2725-baseline-decision-core.cjs','R2725_CORE','bbfd2bf654709c41184ad69fa1d33deb6bdacbac301a824ad054a25cb9d2ff63')]
+          import hashlib
+          for source,dest,tag,expected in mapping:
+            contents=Path(source).read_text()
+            marker="          cat > ./"+dest+" <<'"+tag+"'\n"
+            assert contents.count(marker)==1,source
+            block=contents.split(marker,1)[1].split('\n          '+tag+'\n',1)[0]
+            code='\n'.join(line[10:] for line in block.split('\n'))+'\n'
+            assert hashlib.sha256(code.encode()).hexdigest()==expected,(source,dest)
+            Path(dest).write_text(code)
+          PY_EXTRACT
+      - name: Build and execute R27.26 corrected information-set expectimax
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          cat > ./r2726-search-core.cjs <<'R2726_SEARCH'
+          'use strict';
+          /** Two-joint-turn public-information-set contingent expectimax.
+           * Future action maximization is performed ONCE per publicly distinguishable
+           * information set, not separately per hidden Showdown particle. Results are
+           * synthetic deterministic rollouts and are not calibrated win probabilities.
+           */
+          const assert=require('node:assert/strict');
+          const crypto=require('node:crypto');
+          const canonical=x=>Array.isArray(x)?x.map(canonical):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,canonical(x[k])])):x;
+          const hash=x=>crypto.createHash('sha256').update(JSON.stringify(canonical(x))).digest('hex');
+          const near=(a,b)=>Math.abs(a-b)<=1e-8;
+          const ALLOWED=['phase','turn','own_request','visible_protocol'];
+          function publicContract(o){
+           assert(o&&typeof o==='object'&&!Array.isArray(o),'public observation missing');
+           assert.deepEqual(Object.keys(o).sort(),[...ALLOWED].sort(),'public-only root/continuation contract');
+           assert(['move','switch'].includes(o.phase),'unsupported public phase');
+           assert(Number.isInteger(o.turn)&&o.turn>0,'invalid public turn');
+           assert(Array.isArray(o.visible_protocol)&&o.visible_protocol.every(x=>typeof x==='string'),'invalid public protocol');
+           assert(o.own_request&&typeof o.own_request==='object'&&!Array.isArray(o.own_request),'own request absent');
+           const forbidden=/^(?:prng|rng|battle|state|omniscient|opponent_hidden_.*|opponent_secret_.*|full_state)$/i;
+           function checkNested(x){
+            if(!x||typeof x!=='object')return;
+            for(const [k,v] of Object.entries(x)){
+             assert(!forbidden.test(k),'non-public nested field: '+k);
+             if(v&&typeof v==='object')checkNested(v);
+            }
+           }
+           checkNested(o.own_request);
+           return true;
+          }
+          function actionsValid(actions){
+           assert(Array.isArray(actions)&&actions.length>0,'no legal actions');
+           assert(actions.every(x=>typeof x==='string'&&/^(?:move|switch) [1-6]$/.test(x)),'unsupported legal action string');
+           assert.equal(new Set(actions).size,actions.length,'duplicate action');
+          }
+          function probability(branches){
+           assert(Array.isArray(branches)&&branches.length>0,'opponent branches missing');
+           assert(branches.every(x=>x&&typeof x.choice==='string'&&x.choice&&Number.isFinite(x.p)&&x.p>0),'bad opponent probability');
+           assert(near(branches.reduce((s,x)=>s+x.p,0),1),'opponent branches not normalized');
+           assert.equal(new Set(branches.map(x=>x.choice)).size,branches.length,'duplicate opponent choice');
+          }
+          function choose({observation,particles,actions,opponent,transition,leaf,continuation,legalSecond,maxNodes=10000}){
+           publicContract(observation); actionsValid(actions);
+           assert(Array.isArray(particles)&&particles.length>0,'no belief particles');
+           assert(particles.every(p=>p&&Number.isFinite(p.p)&&p.p>0&&p.state),'bad weighted particle');
+           assert(near(particles.reduce((s,p)=>s+p.p,0),1),'particle weights not normalized');
+           for(const f of [opponent,transition,leaf,continuation,legalSecond])assert.equal(typeof f,'function','missing search callback');
+           assert(Number.isInteger(maxNodes)&&maxNodes>=actions.length*particles.length,'node budget too small');
+           const rootHash=hash(observation),sourceHashes=particles.map(p=>hash(p.state));
+           let joint=0,second=0,terminals=0,switches=0,groupsCount=0,contingent=0;
+           const results=[];
+           const rootOpponent=opponent(observation,'root'); // Only public input. Never pass secret particle to policy.
+           probability(rootOpponent);
+           for(const root of actions){
+            let expected=0;
+            const infosets=new Map();
+            for(const p of particles){
+             for(const b of rootOpponent){
+              assert(++joint<=maxNodes,'node budget exceeded: fail closed');
+              const step=transition(p.state,root,b.choice);
+              assert(step&&step.state&&typeof step.terminal==='boolean','bad native transition');
+              const weight=p.p*b.p;
+              if(step.switchOccurred)switches++;
+              if(step.terminal){
+               const value=leaf(step.state);assert(Number.isFinite(value),'invalid terminal utility');
+               expected+=weight*value;terminals++;
+              } else {
+               const next=continuation(step.state);
+               publicContract(next);
+               assert.equal(next.phase,'move','forced switch unresolved before next search action');
+               assert(next.turn>observation.turn,'future turn did not advance');
+               // Particles with the same PUBLIC observation must share a single future action.
+               const key=hash(next);
+               if(!infosets.has(key))infosets.set(key,{observation:next,members:[]});
+               else assert.deepEqual(infosets.get(key).observation,next,'information-set hash collision');
+               infosets.get(key).members.push({state:step.state,weight});
+              }
+             }
+            }
+            groupsCount+=infosets.size;
+            for(const {observation:next,members} of infosets.values()){
+             const options=legalSecond(next);actionsValid(options);
+             const branches=opponent(next,'next');probability(branches);
+             let best=-Infinity,bestChoice=null;
+             for(const own of options){
+              let weighted=0;
+              for(const m of members){
+               for(const b of branches){
+                assert(++joint<=maxNodes,'node budget exceeded: fail closed');
+                const step=transition(m.state,own,b.choice);
+                assert(step&&step.state&&typeof step.terminal==='boolean','bad second transition');
+                const u=leaf(step.state);assert(Number.isFinite(u),'invalid future utility');
+                weighted+=m.weight*b.p*u;
+                second++;
+                if(step.terminal)terminals++;
+                if(step.switchOccurred)switches++;
+               }
+              }
+              if(weighted>best+1e-10 || (near(weighted,best)&& (bestChoice===null||own<bestChoice))){best=weighted;bestChoice=own;}
+             }
+             assert(bestChoice!==null,'future policy missing');
+             expected+=best;contingent++;
+            }
+            results.push({choice:root,value:Number(expected.toFixed(9)),public_followup_groups:infosets.size});
+           }
+           assert.equal(hash(observation),rootHash,'root observation mutated');
+           for(let i=0;i<particles.length;i++)assert.equal(hash(particles[i].state),sourceHashes[i],'belief particle mutated');
+           results.sort((a,b)=>b.value-a.value||a.choice.localeCompare(b.choice));
+           return {selected:results[0].choice,ranked:results,
+            stats:{joint_nodes:joint,second_turn_nodes:second,terminal_branches:terminals,
+             switch_branches:switches,public_information_sets:groupsCount,
+             contingent_second_turn_decisions:contingent,depth_joint_turns:2,particles:particles.length},
+            model:'UNCALIBRATED_PUBLIC_INFORMATION_SET_CONTINGENT_EXPECTIMAX_TWO_TURNS'};
+          }
+          module.exports={choose,probability,hash,publicContract};
+          R2726_SEARCH
+          cat > ./test_r2726_core.cjs <<'R2726_TEST'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const {choose,hash}=require('./r2726-search-core.cjs');
+          const obs={phase:'move',turn:1,own_request:{request:'PUBLIC_FIXTURE'},visible_protocol:['|turn|1']};
+          const altObs={phase:'move',turn:2,own_request:{request:'PUBLIC_FIXTURE'},visible_protocol:['|turn|1','|turn|2']};
+          const particles=[{p:.5,state:{world:'a',score:0}},{p:.5,state:{world:'b',score:0}}];
+          // Root 1 has a secret-state tempting second move: omniscient planning falsely scores it 55.
+          // Correct PUBLIC-information-set planning scores it 10 and prefers root 2 (score 12).
+          let transitions=0;
+          const transition=(s,own,opp)=>{
+           transitions++;const t={...s};
+           if(own==='move 1')return {state:{...t,stage:2},terminal:false,switchOccurred:false};
+           if(own==='switch 2')return {state:{...t,score:12},terminal:true,switchOccurred:true};
+           if(own==='move 2')return {state:{...t,score:10},terminal:true,switchOccurred:false};
+           if(own==='move 3')return {state:{...t,score:t.world==='a'?100:-100},terminal:true,switchOccurred:false};
+           throw Error('unhandled '+own);
+          };
+          const publicContinuation=()=>altObs;
+          const opts=()=>['move 2','move 3'];
+          const base={observation:obs,particles,actions:['move 1','switch 2'],
+           opponent:(o,depth)=>{assert(o&&o.visible_protocol);assert(['root','next'].includes(depth));return [{choice:'move 1',p:1}];},
+           transition,continuation:publicContinuation,legalSecond:opts,leaf:s=>s.score};
+          const correct=choose(base),replay=choose(base);
+          assert.deepEqual(correct,replay);
+          assert.equal(correct.selected,'switch 2');
+          assert.equal(correct.ranked.find(x=>x.choice==='move 1').value,10);
+          assert.equal(correct.ranked.find(x=>x.choice==='switch 2').value,12);
+          assert(correct.stats.second_turn_nodes>=4);
+          assert(correct.stats.switch_branches>0);
+          assert.equal(correct.stats.public_information_sets,1);
+          assert.equal(particles[0].state.score,0);
+          // Revealing a distinguishable observation makes a different continuation legal.
+          const revealed={...base,continuation:s=>({...altObs,visible_protocol:[...altObs.visible_protocol,'|public|'+s.world]})};
+          const adaptive=choose(revealed);
+          assert.equal(adaptive.selected,'move 1');
+          assert.equal(adaptive.ranked.find(x=>x.choice==='move 1').value,55);
+          assert.equal(adaptive.stats.public_information_sets,2);
+          // Rejected non-public input and misleading probability or transition contracts.
+          assert.throws(()=>choose({...base,observation:{...obs,opponent_item:'private'}}),/public-only/);
+          assert.throws(()=>choose({...base,observation:{...obs,own_request:{...obs.own_request,battle:{secret:'a'}}}}),/non-public nested/);
+          assert.throws(()=>choose({...base,particles:[{p:.6,state:particles[0].state}]}),/not normalized/);
+          assert.throws(()=>choose({...base,opponent:()=>[{choice:'move 1',p:.9}]}),/not normalized/);
+          assert.throws(()=>choose({...base,maxNodes:1}),/budget/);
+          assert.throws(()=>choose({...base,continuation:()=>({...altObs,prng:'SECRET'})}),/public-only/);
+          assert.throws(()=>choose({...base,legalSecond:()=>['move 1','move 1']}),/duplicate/);
+          assert.throws(()=>choose({...base,transition:()=>({state:{},terminal:'no'})}),/bad native transition/);
+          assert.equal(hash(base.observation),hash(obs));
+          console.log('R2726_HARDENED_LOCAL_PASS',JSON.stringify({replays:2,deterministic:correct.selected,adaptive:adaptive.selected,
+           guarded_information_sets:true,negative_controls:8,transitions}));
+          R2726_TEST
+          cat > ./r2726-future-public-legal.cjs <<'R2726_LEGAL'
+          'use strict';
+          const assert=require('node:assert/strict');
+          /** R27.26-only fixture extension for second-turn choices. It consumes strictly the
+           * owner's PUBLIC Showdown request, including party HP and current active moves;
+           * it never reads the omniscient Battle state to construct the action set.
+           */
+          function legalSecond(obs){
+           assert.deepEqual(Object.keys(obs).sort(),['own_request','phase','turn','visible_protocol'].sort());
+           assert.equal(obs.phase,'move','only settled move phase supported');
+           const req=obs.own_request;
+           assert(req&&req.side?.id==='p1','wrong owner request');
+           assert(Array.isArray(req.side.pokemon)&&req.side.pokemon.length===3,'need three owner mons');
+           assert.equal(req.side.pokemon.filter(p=>p.active===true).length,1,'exactly one active mon');
+           assert(Array.isArray(req.active)&&req.active.length===1,'expected one active request');
+           const act=req.active[0];
+           assert(!act.maybeTrapped,'ambiguous trapping: fail closed');
+           for(const k of ['canMegaEvo','canMegaEvoX','canMegaEvoY','canDynamax','canTerastallize','canZMove']){
+            assert(!act[k],'unsupported battle mechanic in fixture: '+k);
+           }
+           assert(Array.isArray(act.moves)&&act.moves.length===4,'four-move synthetic fixture only');
+           const choices=[];
+           for(let i=0;i<act.moves.length;i++){
+            const m=act.moves[i];
+            assert(m&&typeof m.id==='string'&&Number.isInteger(m.pp)&&m.pp>=0,'invalid public move request');
+            assert(typeof m.disabled==='boolean','ambiguous public disabled flag');
+            if(m.pp>0&&!m.disabled)choices.push('move '+(i+1));
+           }
+           if(!act.trapped)for(let i=0;i<req.side.pokemon.length;i++){
+            const p=req.side.pokemon[i];
+            assert(p&&typeof p.condition==='string','invalid public party status');
+            if(p.active||/\bfnt\b/.test(p.condition)||/^0(?:\/0)?(?:\s|$)/.test(p.condition))continue;
+            choices.push('switch '+(i+1));
+           }
+           assert(choices.length>0&&new Set(choices).size===choices.length,'no unambiguous legal second actions');
+           return choices;
+          }
+          module.exports={legalSecond};
+          R2726_LEGAL
+          cat > ./test_r2726_legal.cjs <<'R2726_LEGAL_TEST'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const {legalSecond}=require('./r2726-future-public-legal.cjs');
+          const dup=x=>JSON.parse(JSON.stringify(x));
+          const obs={phase:'move',turn:2,visible_protocol:['|turn|2'],own_request:{
+            side:{id:'p1',pokemon:[{active:true,condition:'145/190'},{active:false,condition:'170/170'},{active:false,condition:'175/175'}]},
+            active:[{moves:[
+             {id:'bite',pp:15,disabled:false},{id:'thunderwave',pp:18,disabled:false},
+             {id:'protect',pp:9,disabled:false},{id:'endure',pp:11,disabled:false}
+            ]}]
+           }};
+          assert.deepEqual(legalSecond(obs),['move 1','move 2','move 3','move 4','switch 2','switch 3']);
+          const trapped=dup(obs);trapped.own_request.active[0].trapped=true;
+          assert.deepEqual(legalSecond(trapped),['move 1','move 2','move 3','move 4']);
+          const maybe=dup(obs);maybe.own_request.active[0].maybeTrapped=true;
+          assert.throws(()=>legalSecond(maybe),/ambiguous trapping/);
+          const faint=dup(obs);faint.own_request.side.pokemon[1].condition='0 fnt';
+          assert.deepEqual(legalSecond(faint),['move 1','move 2','move 3','move 4','switch 3']);
+          const pp=dup(obs);pp.own_request.active[0].moves[1].pp=0;
+          assert.deepEqual(legalSecond(pp),['move 1','move 3','move 4','switch 2','switch 3']);
+          const disable=dup(obs);disable.own_request.active[0].moves[0].disabled=true;
+          assert.deepEqual(legalSecond(disable),['move 2','move 3','move 4','switch 2','switch 3']);
+          for(const m of ['canMegaEvo','canDynamax','canTerastallize','canZMove']){
+           const x=dup(obs);x.own_request.active[0][m]=true;
+           assert.throws(()=>legalSecond(x),/unsupported battle mechanic/);
+          }
+          const hidden=dup(obs);hidden.opponent_secret_item='';assert.throws(()=>legalSecond(hidden));
+          const noRequest=dup(obs);delete noRequest.own_request.active;assert.throws(()=>legalSecond(noRequest));
+          assert.equal(JSON.stringify(obs),JSON.stringify(dup(obs)));
+          console.log('R2726_FUTURE_PUBLIC_LEGAL_LOCAL_PASS',JSON.stringify({normal:6,trap:4,faint:5,pp:5,disabled:5,negative_controls:7}));
+          R2726_LEGAL_TEST
+          cat > ./r2726-native-rollout.cjs <<'R2726_NATIVE'
+          'use strict';
+          /** Pinned Showdown research-only, two-joint-turn forward rollout with explicit hidden-world marginalization.
+           * Research-grade behavior fixture, not a Champions physics or policy certification.
+           */
+          const assert=require('node:assert/strict');
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const {Battle}=require('./dist/sim/battle');
+          const {viewer}=require('./r2722-rng-observation-boundaries.cjs');
+          const {makeVariants}=require('./r2723-multiturn-belief-boundaries.cjs');
+          const {PublicBelief}=require('./r2724-bayesian-belief-action-forecast.cjs');
+          const {legalActions,decide}=require('./r2725-baseline-decision-core.cjs');
+          const {choose,hash}=require('./r2726-search-core.cjs');
+          const {legalSecond}=require('./r2726-future-public-legal.cjs');
+          const PREFIX=[['move 3','move 2'],['move 4','move 3'],['move 3','move 2'],['move 4','move 3']];
+          const PUBLIC_OPPONENT=Object.freeze([{choice:'move 1',p:0.5},{choice:'move 2',p:0.5}]);
+          const copy=x=>JSON.parse(JSON.stringify(x));
+          function fresh(format,w){
+           const b=new Battle({formatid:format.id,seed:'1,2,3,4',strictChoices:true,
+            p1:{name:'Public-P1',team:w.teams.p1},p2:{name:'Public-P2',team:w.teams.p2}});
+           assert.equal(b.requestState,'teampreview');b.makeChoices('team 456','team 456');
+           assert.equal(b.requestState,'move');return b;
+          }
+          function reveal(format,dex,w){
+           const b=fresh(format,w),belief=new PublicBelief(dex);
+           belief.observe(copy(viewer(b,'p1')));
+           for(const step of PREFIX){b.makeChoices(...step);belief.observe(copy(viewer(b,'p1')));}
+           assert.equal(b.requestState,'move');
+           b.makeChoices('move 3','move 1');
+           assert.equal(b.requestState,'move','unexpected post-reveal phase');
+           const obs=copy(viewer(b,'p1'));
+           const posterior=belief.observe(obs);
+           return {state:copy(b.toJSON()),observation:obs,posterior};
+          }
+          function choiceForSide(b,who){
+           const side=b.getSide(who),req=side.activeRequest;
+           if(b.requestState==='switch'){
+            if(side.requestState!=='switch')return '';
+            assert.deepEqual(req.forceSwitch,[true],'unsupported multi-active forced switch');
+            const idx=side.pokemon.findIndex(p=>!p.isActive&&!p.fainted&&p.hp>0);
+            assert(idx>=0,'no viable replacement');return 'switch '+(idx+1);
+           }
+           if(b.requestState==='move'){
+            assert.equal(side.requestState,'move');
+            const moves=req?.active?.[0]?.moves;
+            assert(Array.isArray(moves),'move request missing');
+            const idx=moves.findIndex(m=>m&&m.pp>0&&m.disabled===false);
+            assert(idx>=0,'no supported PP move');return 'move '+(idx+1);
+           }
+           throw Error('unsupported continuation phase: '+b.requestState);
+          }
+          function settleSwitches(b){
+           let count=0;
+           while(!b.ended&&b.requestState==='switch'){
+            assert(++count<=3,'forced-switch loop');
+            const p1=choiceForSide(b,'p1'),p2=choiceForSide(b,'p2');
+            assert(p1||p2,'empty forced-switch action');
+            b.makeChoices(p1,p2);
+           }
+           if(!b.ended)assert.equal(b.requestState,'move','unresolved phase after forced switch');
+           return count;
+          }
+          function transition(s,own,opp){
+           const b=Battle.fromJSON(JSON.stringify(s));
+           assert.equal(b.requestState,'move','root/next transition must begin in move phase');
+           const beforeTurn=b.turn;
+           b.makeChoices(own,opp);
+           const forced=settleSwitches(b);
+           assert(b.ended||b.turn>beforeTurn,'turn did not progress');
+           return {state:copy(b.toJSON()),terminal:b.ended,switchOccurred:forced>0};
+          }
+          function leaf(s){
+           const b=Battle.fromJSON(JSON.stringify(s));
+           if(b.ended){if(b.winner==='Public-P1')return 100;
+            if(b.winner==='Public-P2')return -100;return 0;}
+           function squad(side){
+            assert.equal(side.pokemon.length,3,'expected bring-three fixture');
+            return side.pokemon.reduce((sum,p)=>sum+(p.fainted||p.hp<=0?-1:(p.hp/p.maxhp)),0);
+           }
+           const diff=squad(b.p1)-squad(b.p2);
+           const boost=side=>side.active[0]&&side.active[0].boosts?side.active[0].boosts: {};
+           const boostSum=side=>['atk','spa','spe'].reduce((v,k)=>v+(boost(side)[k]||0),0);
+           return 10*diff+0.3*(boostSum(b.p1)-boostSum(b.p2));
+          }
+          function continuation(s){
+           const b=Battle.fromJSON(JSON.stringify(s));
+           assert.equal(b.requestState,'move','unresolved forced switch');
+           return copy(viewer(b,'p1'));
+          }
+          function decideOne(v,format,dex,cases,worldByID){
+           const seen=reveal(format,dex,v),post=seen.posterior;
+           const ids=post.posterior.filter(x=>x.p>0).map(x=>x.id);
+           assert.equal(ids.length,2,'post reveal must retain 2 hidden-item worlds');
+           const total=post.posterior.reduce((s,x)=>s+x.p,0);
+           assert(Math.abs(total-1)<1e-8);
+           const particles=post.posterior.filter(x=>x.p>0).map(h=>({p:h.p/total,state:worldByID[h.id].state}));
+           const obs=seen.observation,actions=legalActions(obs).map(x=>x.choice);
+           const baseline=decide(obs,post.next_action_prediction);
+           assert.deepEqual(baseline.legal_choices,actions);
+           const before=particles.map(x=>hash(x.state));
+           const search=choose({observation:obs,particles,actions,
+            opponent:(_publicObs,_depth)=>PUBLIC_OPPONENT,
+            transition,continuation,legalSecond,leaf,maxNodes:12000});
+           assert.deepEqual(particles.map(x=>hash(x.state)),before,'search changed source worlds');
+           assert.equal(search.ranked.length,6);
+           assert(search.stats.second_turn_nodes>0,'no second-turn nodes evaluated');
+           assert(search.stats.public_information_sets>0,'future public observations were not grouped');
+           assert(search.stats.contingent_second_turn_decisions>0,'no contingent public policy chosen');
+           return {variant:v.id,public_hash:hash(obs),belief:post.posterior,baseline_selected:baseline.selected,
+            search_selected:search.selected,search_ranked:search.ranked,stats:search.stats};
+          }
+          function run(){
+           const {format,dex,cases}=makeVariants();
+           const prepared=Object.fromEntries(cases.map(w=>[w.id,reveal(format,dex,w)]));
+           const once=cases.map(v=>decideOne(v,format,dex,cases,prepared));
+           const twice=cases.map(v=>decideOne(v,format,dex,cases,prepared));
+           assert.deepEqual(once,twice,'same-seed search replay mismatch');
+           for(const move of ['swordsdance','willowisp','flamethrower']){
+            const group=once.filter(x=>x.variant.startsWith(move+'__'));
+            assert.equal(group.length,2);
+            const [a,b]=group;
+            assert.equal(a.public_hash,b.public_hash,'unrevealed item changed observation');
+            assert.deepEqual(a.search_ranked,b.search_ranked,'item secret changed search');
+            assert.equal(a.search_selected,b.search_selected);
+           }
+           assert(once.every(x=>x.stats.depth_joint_turns===2&&x.stats.particles===2));
+           return {receipt:{schema:'TRUE_PLAN_R2726_PUBLIC_TWO_JOINT_TURN_INFOSET_EXPECTIMAX_V2',
+            status:'PASS_PUBLIC_SYNTHETIC_ONLY',format:format.name,pinned_commit:'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',
+            hidden_worlds:6,posterior_particles:2,root_legal_actions:6,
+            tested_two_turns:true,public_information_set_future_max:true,simultaneous_opponent_actions:PUBLIC_OPPONENT,
+            aggregate_native_joint_nodes:once.reduce((s,x)=>s+x.stats.joint_nodes,0),
+            aggregate_second_turn_nodes:once.reduce((s,x)=>s+x.stats.second_turn_nodes,0),
+            aggregate_forced_switch_branches:once.reduce((s,x)=>s+x.stats.switch_branches,0),
+            aggregate_future_public_information_sets:once.reduce((s,x)=>s+x.stats.public_information_sets,0),
+            same_seed_independent_replay:true,hidden_item_noninterference:true,
+            limitations:['fixed public research fixture only; deterministic RNG seed is not a sampled RNG distribution','opponent action probabilities fixed and uncalibrated',
+              'second-turn action optimized per public observation group using heuristic leaf, not trained or globally optimal','leaf is heuristic HP/boost estimate',
+              'does not establish best-action correctness or Champions mechanics equivalence',
+              'no live game interaction or formal Stage1.5 credits'],
+            certification:{native33:'0/33',exact34:'0/34',actual_game:'0/30',formal_increment:0,gate:'DENY'}},traces:once};
+          }
+          function main(){const out=path.resolve(process.argv[2]||'r2726-evidence');
+           const {receipt,traces}=run();fs.mkdirSync(out,{recursive:true});
+           fs.writeFileSync(path.join(out,'r2726-receipt.json'),JSON.stringify(receipt,null,2)+'\n');
+           fs.writeFileSync(path.join(out,'r2726-search-traces.json'),JSON.stringify(traces,null,2)+'\n');
+           console.log('R2726_PUBLIC_RESULT '+JSON.stringify(receipt));}
+          if(require.main===module)main();
+          module.exports={run,reveal,transition,leaf,continuation,legalSecond};
+          R2726_NATIVE
+          printf '%s  %s\n'             a78e821d295dbfd888d67e9e226ed8cb6b509362cf81bf50566be1420616077c r2726-search-core.cjs             8d60536cb391de820b37c65f4d53e4a7a674a71b00b3a906c6a05291900a69fd test_r2726_core.cjs             79b077a4b33caf690a6f9d731d0261178b87d6fb7e6665149eefe2a06566036b r2726-future-public-legal.cjs             15f8f241bf3a792a6ef17c2db14e39c06687c2556e09e94612275c821319a9be test_r2726_legal.cjs             8421b1fdfa009b610943a6f776c5f88f41e28e9a0a087f2d2f6698a48c14ce82 r2726-native-rollout.cjs | sha256sum -c -
+          node --check r2726-search-core.cjs
+          node --check test_r2726_core.cjs
+          node --check r2726-future-public-legal.cjs
+          node --check test_r2726_legal.cjs
+          node --check r2726-native-rollout.cjs
+          node test_r2726_core.cjs
+          node test_r2726_legal.cjs
+          node r2726-native-rollout.cjs ./r2726-evidence | tee r2726-console.log
+          cp r2726-search-core.cjs test_r2726_core.cjs r2726-future-public-legal.cjs test_r2726_legal.cjs r2726-native-rollout.cjs r2726-evidence/
+      - name: Verify pinned R27.26 baseline and execute R27.27 public sensitivity research
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_PARENT_RECEIPT'
+          import json
+          from pathlib import Path
+          p=Path('r2726-evidence/r2726-receipt.json')
+          assert p.exists()
+          r=json.loads(p.read_text())
+          assert r['schema']=='TRUE_PLAN_R2726_PUBLIC_TWO_JOINT_TURN_INFOSET_EXPECTIMAX_V2'
+          assert r['status']=='PASS_PUBLIC_SYNTHETIC_ONLY'
+          assert (r['aggregate_native_joint_nodes'],r['aggregate_second_turn_nodes'],r['aggregate_forced_switch_branches'],r['aggregate_future_public_information_sets'])==(1872,1728,164,72)
+          assert r['certification']=={'native33':'0/33','exact34':'0/34','actual_game':'0/30','formal_increment':0,'gate':'DENY'}
+          print('R2727_PARENT_RECEIPT_EXACT_PASS')
+          PY_PARENT_RECEIPT
+          cat > ./r2727-public-policy.cjs <<'R2727_POLICY'
+          'use strict';
+          /** R27.27: only public event + public posterior forecast; no hidden opponent state.
+           * Research fixture move 1 is a PUBLICLY revealed move, move 2 is Protect.
+           * Confidence alpha interpolates neutral uniform (0) and class forecast (1).
+           * This is a modeling assumption, not a learned/calibrated opponent policy.
+           */
+          const assert=require('node:assert/strict');
+          const {publicContract}=require('./r2726-search-core.cjs');
+          const NAMES=Object.freeze({'Swords Dance':'setup','Will-O-Wisp':'status','Flamethrower':'attack'});
+          const EXPECTED=Object.freeze(['attack','setup','status','defend']);
+          const uniform=()=>[{choice:'move 1',p:0.5},{choice:'move 2',p:0.5}];
+          function forecastValid(f){
+           assert(f&&typeof f==='object'&&!Array.isArray(f),'missing class forecast');
+           assert.deepEqual(Object.keys(f).sort(),[...EXPECTED].sort(),'forecast class contract');
+           assert(EXPECTED.every(k=>typeof f[k]==='number'&&Number.isFinite(f[k])&&f[k]>=0&&f[k]<=1),'forecast contains invalid probability');
+           assert(Math.abs(EXPECTED.reduce((s,k)=>s+f[k],0)-1)<1e-8,'forecast not normalized');
+          }
+          function publicActorAndReveals(observation){
+           publicContract(observation);
+           let actor=null;
+           const revealed=new Map();
+           for(const line of observation.visible_protocol){
+            const switched=line.match(/^\|(?:switch|drag|replace)\|p2a: ([^|]+)\|/);
+            if(switched)actor=switched[1];
+            const faint=line.match(/^\|faint\|p2a: ([^|]+)$/);
+            if(faint&&actor===faint[1])actor=null;
+            const moved=line.match(/^\|move\|p2a: ([^|]+)\|([^|]+)\|/);
+            if(moved){
+             const prior=revealed.get(moved[1])||new Set();prior.add(moved[2]);revealed.set(moved[1],prior);
+            }
+           }
+           return {actor,knownMoves:[...(revealed.get(actor)||[])]};
+          }
+          function policy(observation,forecast,alpha){
+           forecastValid(forecast);
+           assert(typeof alpha==='number'&&Number.isFinite(alpha)&&alpha>=0&&alpha<=1,'invalid confidence');
+           const {actor,knownMoves}=publicActorAndReveals(observation);
+           if(actor!=='Target4')return uniform(); // No public map for the new opponent; fail safe to neutral.
+           const known=knownMoves.filter(x=>Object.hasOwn(NAMES,x));
+           assert(known.length<=1,'ambiguous revealed private first move');
+           if(!known.length)return uniform();
+           const cls=NAMES[known[0]];
+           const denominator=forecast[cls]+forecast.defend;
+           assert(denominator>0,'zero public mapping probability');
+           const raw=forecast[cls]/denominator;
+           const p1=(1-alpha)*0.5+alpha*Math.max(0.01,Math.min(0.99,raw));
+           return [{choice:'move 1',p:p1},{choice:'move 2',p:1-p1}];
+          }
+          module.exports={policy,publicActorAndReveals,forecastValid,uniform};
+          R2727_POLICY
+          cat > ./r2727-public-policy.test.cjs <<'R2727_POLICY_TEST'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const {policy,publicActorAndReveals,forecastValid}=require('./r2727-public-policy.cjs');
+          const proto=['|switch|p2a: Target4|Charizard, L50|100/100','|move|p2a: Target4|Swords Dance|p2a: Target4','|turn|2'];
+          const fixture={phase:'move',turn:2,own_request:{request:'PUBLIC'},visible_protocol:proto};
+          const f={attack:.05,setup:.75,status:.05,defend:.15};
+          assert.deepEqual(policy(fixture,f,0),[{choice:'move 1',p:.5},{choice:'move 2',p:.5}]);
+          const p=policy(fixture,f,1);assert(Math.abs(p[0].p-5/6)<1e-12);assert(p[0].p>p[1].p);
+          const status=policy({...fixture,visible_protocol:[proto[0],'|move|p2a: Target4|Will-O-Wisp|p2a: Target4']},f,1);
+          assert(status[0].p<.5);
+          const switchProto=[...proto,'|switch|p2a: Target5|Talonflame, L50|100/100'];
+          const changed={...fixture,visible_protocol:switchProto};
+          assert.deepEqual(policy(changed,f,1),[{choice:'move 1',p:.5},{choice:'move 2',p:.5}]);
+          assert.equal(publicActorAndReveals(fixture).actor,'Target4');
+          assert.throws(()=>policy({...fixture,opponent_hidden_item:'item'},f,1),/public-only/);
+          assert.throws(()=>policy({...fixture,own_request:{battle:{hidden:'yes'}}},f,1),/non-public nested/);
+          assert.throws(()=>policy(fixture,{...f,hidden:1},1),/forecast class contract/);
+          assert.throws(()=>policy(fixture,f,2),/invalid confidence/);
+          assert.throws(()=>policy(fixture,{...f,setup:NaN},1),/invalid probability/);
+          assert.throws(()=>policy({...fixture,visible_protocol:[...proto,'|move|p2a: Target4|Flamethrower|p2a: Target4']},f,.5),/ambiguous/);
+          const itemA=JSON.parse(JSON.stringify(fixture)),itemB=JSON.parse(JSON.stringify(fixture));
+          assert.deepEqual(policy(itemA,f,.65),policy(itemB,f,.65));
+          assert.equal(JSON.stringify(itemA),JSON.stringify(fixture));
+          console.log('R2727_POLICY_LOCAL_PASS',JSON.stringify({tests:13,public_actor_only:true,neutral_fallback:true,probability_sensitivity:true}));
+          R2727_POLICY_TEST
+          cat > ./r2727-evaluation.cjs <<'R2727_EVAL'
+          'use strict';
+          /** R27.27 multi-factor leaf: NOT win probability or learned function. */
+          const assert=require('node:assert/strict');
+          function scoreFeatures(side){
+           assert(side&&Array.isArray(side.pokemon)&&side.pokemon.length===3,'unsupported bring-three state');
+           let hp=0,fainted=0,status=0;
+           for(const p of side.pokemon){
+            assert(Number.isFinite(p.hp)&&Number.isFinite(p.maxhp)&&p.maxhp>0,'unsupported HP');
+            hp+=Math.max(0,Math.min(1,p.hp/p.maxhp));
+            if(p.fainted||p.hp<=0)fainted++;
+            if(!(p.fainted||p.hp<=0)&&p.status&&p.status!=='')status++;
+           }
+           const a=side.active&&side.active[0];
+           const b=a&&a.boosts?a.boosts:{};
+           const boosts=['atk','spa','spe','def','spd'].reduce((s,k)=>{
+            const v=b[k]||0;assert(Number.isInteger(v)&&v>=-6&&v<=6,'unsupported boost');return s+v;
+           },0);
+           return {hp,fainted,status,boosts};
+          }
+          function scoreBattle(b){
+           assert(b&&b.p1&&b.p2&&typeof b.ended==='boolean','missing battle state');
+           if(b.ended){if(b.winner==='Public-P1')return 100;if(b.winner==='Public-P2')return -100;return 0;}
+           const a=scoreFeatures(b.p1),o=scoreFeatures(b.p2);
+           // Equal weights between opponents; terminal rewards dominate bounded 3v3 heuristic.
+           const value=12*(a.hp-o.hp)+16*(o.fainted-a.fainted)+2*(o.status-a.status)+0.5*(a.boosts-o.boosts);
+           assert(Number.isFinite(value)&&Math.abs(value)<100,'leaf magnitude exceeded terminal reward');
+           return Number(value.toFixed(9));
+          }
+          function makeLeaf(Battle){
+           assert(Battle&&typeof Battle.fromJSON==='function','missing battle engine');
+           return state=>scoreBattle(Battle.fromJSON(JSON.stringify(state)));
+          }
+          module.exports={scoreFeatures,scoreBattle,makeLeaf};
+          R2727_EVAL
+          cat > ./r2727-evaluation.test.cjs <<'R2727_EVAL_TEST'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const {scoreFeatures,scoreBattle}=require('./r2727-evaluation.cjs');
+          const mon=(hp=100,status='',boosts={})=>({hp,maxhp:100,fainted:hp===0,status,boosts});
+          const mk=(a,b,ended=false,winner='')=>({ended,winner,p1:{pokemon:a,active:[a[0]]},p2:{pokemon:b,active:[b[0]]}});
+          const a=[mon(),mon(),mon()],b=[mon(),mon(),mon()];
+          assert.equal(scoreBattle(mk(a,b)),0);
+          assert.equal(scoreBattle(mk([mon(0),...a.slice(1)],b)),-28);
+          assert.equal(scoreBattle(mk(a,[mon(0),...b.slice(1)])),28);
+          assert.equal(scoreBattle(mk([mon(100,'brn'),...a.slice(1)],b)),-2);
+          assert.equal(scoreBattle(mk(a,[mon(100,'brn'),...b.slice(1)])),2);
+          assert.equal(scoreBattle(mk([mon(100,'',{atk:2}),...a.slice(1)],b)),1);
+          assert.equal(scoreBattle(mk(a,b,true,'Public-P1')),100);
+          assert.equal(scoreBattle(mk(a,b,true,'Public-P2')),-100);
+          assert.equal(scoreBattle(mk(a,b,true,'')),0);
+          assert.throws(()=>scoreBattle(mk([mon()],b)),/bring-three/);
+          assert.throws(()=>scoreBattle(mk([{...mon(),maxhp:0},...a.slice(1)],b)),/unsupported HP/);
+          assert.throws(()=>scoreBattle(mk([mon(100,'',{atk:8}),...a.slice(1)],b)),/unsupported boost/);
+          assert.deepEqual(scoreFeatures({pokemon:a,active:[a[0]]}),{hp:3,fainted:0,status:0,boosts:0});
+          console.log('R2727_LEAF_LOCAL_PASS',JSON.stringify({tests:13,multi_factor:true,terminal_separation:true}));
+          R2727_EVAL_TEST
+          cat > ./r2727-transition-cache.cjs <<'R2727_CACHE'
+          'use strict';
+          /** Research-only bounded transition cache. Full simulator states are NEVER passed
+           * to opponent policy; stored only internally for identical deterministic rollouts.
+           * The hash includes RNG state, so distinct stochastic states cannot alias.
+           */
+          const assert=require('node:assert/strict');
+          const {hash}=require('./r2726-search-core.cjs');
+          const copy=x=>JSON.parse(JSON.stringify(x));
+          function makeTransitionCache(transition,limit=5000){
+           assert.equal(typeof transition,'function');
+           assert(Number.isInteger(limit)&&limit>0&&limit<=50000,'unsafe cache limit');
+           const table=new Map();let hits=0,misses=0,evictions=0;
+           const wrapped=(state,own,opp)=>{
+            assert(state&&typeof state==='object'&&typeof own==='string'&&typeof opp==='string','invalid deterministic transition input');
+            const key=hash({state,own,opp});
+            if(table.has(key)){hits++;return copy(table.get(key));}
+            const result=transition(state,own,opp);
+            assert(result&&result.state&&typeof result.terminal==='boolean','invalid simulator result');
+            misses++;
+            if(table.size>=limit){table.delete(table.keys().next().value);evictions++;}
+            table.set(key,copy(result));
+            return copy(result);
+           };
+           return {transition:wrapped,stats:()=>({hits,misses,evictions,entries:table.size,limit})};
+          }
+          module.exports={makeTransitionCache};
+          R2727_CACHE
+          cat > ./r2727-transition-cache.test.cjs <<'R2727_CACHE_TEST'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const {makeTransitionCache}=require('./r2727-transition-cache.cjs');
+          let invocations=0;
+          const cache=makeTransitionCache((s,own,opp)=>{invocations++;return {state:{...s,turn:s.turn+1,own,opp},terminal:false,switchOccurred:false};},2);
+          const s={turn:1,prng:'1,2,3,4',private:'a'};
+          const a=cache.transition(s,'move 1','move 2');
+          a.state.turn=999;
+          const b=cache.transition(s,'move 1','move 2');
+          assert.equal(b.state.turn,2,'cached output aliased caller mutation');
+          assert.equal(invocations,1,'cache failed to reuse exact deterministic transition');
+          cache.transition({...s,prng:'4,3,2,1'},'move 1','move 2');
+          assert.equal(invocations,2,'RNG-different states incorrectly shared');
+          cache.transition({...s,private:'b'},'move 1','move 2');
+          assert.equal(invocations,3,'hidden states incorrectly merged');
+          assert.equal(cache.stats().evictions,1);
+          assert.equal(cache.stats().hits,1);
+          assert.equal(cache.stats().entries,2);
+          assert.throws(()=>makeTransitionCache(()=>{},0),/unsafe cache/);
+          assert.throws(()=>cache.transition(null,'move 1','move 2'),/invalid deterministic/);
+          const original=JSON.stringify(s);
+          cache.transition(s,'move 1','move 2');assert.equal(JSON.stringify(s),original);
+          console.log('R2727_CACHE_LOCAL_PASS',JSON.stringify({tests:10,source_immutable:true,rng_isolated:true}));
+          R2727_CACHE_TEST
+          cat > ./r2727-native-integration.cjs <<'R2727_NATIVE'
+          'use strict';
+          /** R27.27 research evaluation on pinned Showdown fixture; no real-game certification.
+           * Forecast weights conditioned on public reveal; second turn reuses root forecast
+           * (does NOT update Bayes posterior from future hypothetical events).
+           */
+          const assert=require('node:assert/strict');
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const {Battle}=require('./dist/sim/battle');
+          const {makeVariants}=require('./r2723-multiturn-belief-boundaries.cjs');
+          const {legalActions,decide}=require('./r2725-baseline-decision-core.cjs');
+          const {choose,hash}=require('./r2726-search-core.cjs');
+          const {legalSecond}=require('./r2726-future-public-legal.cjs');
+          const {reveal,transition,continuation}=require('./r2726-native-rollout.cjs');
+          const {policy}=require('./r2727-public-policy.cjs');
+          const {makeLeaf}=require('./r2727-evaluation.cjs');
+          const {makeTransitionCache}=require('./r2727-transition-cache.cjs');
+          const CONFIDENCES=Object.freeze([0,0.5,1]);
+          const leaf=makeLeaf(Battle);
+          const copy=x=>JSON.parse(JSON.stringify(x));
+          function evaluateVariant(variant,prepared){
+           const seen=prepared[variant.id],posterior=seen.posterior;
+           const eligible=posterior.posterior.filter(h=>h.p>0);
+           assert.equal(eligible.length,2);
+           const mass=eligible.reduce((s,h)=>s+h.p,0);assert(Math.abs(mass-1)<1e-8);
+           const particles=eligible.map(h=>({p:h.p/mass,state:prepared[h.id].state}));
+           const observation=seen.observation;
+           const actions=legalActions(observation).map(x=>x.choice);
+           assert.equal(actions.length,6);
+           const forecast=posterior.next_action_prediction;
+           const baseline=decide(observation,forecast);
+           const inputHash=hash(observation),particleHashes=particles.map(p=>hash(p.state));
+           const cached=makeTransitionCache(transition,5000);
+           const results=CONFIDENCES.map(alpha=>{
+            const branches=policy(observation,forecast,alpha);
+            const search=choose({observation,particles,actions,
+             opponent:(publicObservation,depth)=>{assert(['root','next'].includes(depth));return policy(publicObservation,forecast,alpha);},
+             transition:cached.transition,continuation,legalSecond,leaf,maxNodes:12000});
+            assert(search.stats.second_turn_nodes>0);
+            assert(search.stats.public_information_sets>0);
+            assert.equal(search.stats.depth_joint_turns,2);
+            assert.equal(search.ranked.length,6);
+            return {alpha,root_branches:branches,selected:search.selected,
+             ranking:search.ranked,margin:Number((search.ranked[0].value-search.ranked[1].value).toFixed(9)),stats:search.stats};
+           });
+           assert.equal(hash(observation),inputHash,'public observation mutated');
+           assert.deepEqual(particles.map(p=>hash(p.state)),particleHashes,'hidden source state mutated');
+           return {variant:variant.id,public_hash:inputHash,posterior:posterior.posterior,
+            baseline_one_ply:baseline.selected,model_class_forecast:copy(forecast),runs:results,
+            decision_stable_across_confidence:new Set(results.map(r=>r.selected)).size===1,
+            cache:cached.stats()};
+          }
+          function run(){
+           const {format,dex,cases}=makeVariants();assert.equal(cases.length,6);
+           const prepared=Object.fromEntries(cases.map(v=>[v.id,reveal(format,dex,v)]));
+           const once=cases.map(v=>evaluateVariant(v,prepared));
+           const again=cases.map(v=>evaluateVariant(v,prepared));
+           assert.deepEqual(once,again,'independent same-seed trace diverged');
+           for(const move of ['swordsdance','willowisp','flamethrower']){
+            const same=once.filter(v=>v.variant.startsWith(move+'__'));
+            assert.equal(same.length,2);
+            assert.equal(same[0].public_hash,same[1].public_hash,'hidden item altered public input');
+            assert.deepEqual(same[0].runs,same[1].runs,'hidden item altered search results');
+            assert.deepEqual(same[0].model_class_forecast,same[1].model_class_forecast);
+           }
+           const raw=once.flatMap(x=>x.runs),sum=k=>raw.reduce((s,x)=>s+x.stats[k],0);
+           const receipt={schema:'TRUE_PLAN_R2727_PUBLIC_OPPONENT_POLICY_SENSITIVITY_V1',
+            status:'PASS_PUBLIC_SYNTHETIC_ONLY',
+            parent:'R27.26_ARTIFACT_AUDITED_SHA256_8510d4835986c9a1d3ffe7d157431e40cd7b5f4e66aeaf73ca3fb4b517e029ea',
+            pinned_commit:'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',
+            format:format.name,variants:6,blends:CONFIDENCES,search_runs:raw.length,
+            replayed_runs:again.length*CONFIDENCES.length,
+            aggregate_joint_nodes:sum('joint_nodes'),aggregate_second_turn_nodes:sum('second_turn_nodes'),
+            aggregate_forced_switch_branches:sum('switch_branches'),
+            stable_variant_count:once.filter(x=>x.decision_stable_across_confidence).length,
+            varying_variant_count:once.filter(x=>!x.decision_stable_across_confidence).length,
+            hidden_item_pairs_identical:3,posterior_input_only:true,
+            aggregate_cache_hits:once.reduce((s,x)=>s+x.cache.hits,0),
+            aggregate_cache_misses:once.reduce((s,x)=>s+x.cache.misses,0),
+            evaluator:'UNTRAINED_HP_FAINT_STATUS_BOOST_TERMINAL_UTILITY',
+            opponent_policy:'PUBLIC_REVEAL_CLASS_MAPPING_MIXTURE_NOT_CALIBRATED',
+            limitations:[
+             'public pinned Showdown fixture only; no real Champions gameplay','all simulations use fixed deterministic RNG and limited action choices',
+             'class mapping move 1 versus Protect is fixture-specific, not general legal-opponent move modeling',
+             'future chance branch weights reuse current class posterior; no hypothetical posterior update',
+             'multifeature heuristic is not learned or calibrated as a win probability',
+             'cache reduces repeated native transitions; wall-clock improvement not separately benchmarked',
+             'no statistical evidence of playing-strength gain from sensitivity diagnostics',
+             'formal Stage1.5, Native33, Exact34, field and gate unchanged'],
+            certification:{native33:'0/33',exact34:'0/34',actual_game:'0/30',formal_increment:0,gate:'DENY'}};
+           return {receipt,traces:once};
+          }
+          function main(){
+           const out=path.resolve(process.argv[2]||'r2727-evidence');const {receipt,traces}=run();
+           fs.mkdirSync(out,{recursive:true});
+           fs.writeFileSync(path.join(out,'r2727-receipt.json'),JSON.stringify(receipt,null,2)+'\n');
+           fs.writeFileSync(path.join(out,'r2727-search-traces.json'),JSON.stringify(traces,null,2)+'\n');
+           console.log('R2727_PUBLIC_RESULT '+JSON.stringify(receipt));
+          }
+          if(require.main===module)main();
+          module.exports={run,evaluateVariant};
+          R2727_NATIVE
+          printf '%s  %s\n' \
+            3854c0e837ae0a3def090a84037292a9a4f28e0edc56da5ea88edea4297f86cc r2727-public-policy.cjs \
+            55f7f483a2d149705070793a56a20075e25292bf4e8d2b5a2efd046acbadb802 r2727-public-policy.test.cjs \
+            706399bf199c07cbcfe86a04b1df0c2b3149e9c6f8afc2f8ae557bfd426c118e r2727-evaluation.cjs \
+            39f53f2dd378a3752a5e1153e6eaad76ec33ae54efc9e2694b58a725ee265d5e r2727-evaluation.test.cjs \
+            f7b9d798c1f7c6b54e33037a74a3852b8af1785095cb3fca50077f6e2659b2a4 r2727-transition-cache.cjs \
+            4351d272eec0e12ffc04e8d1de37df8d3aed637ac82fe46de905041022ef96ef r2727-transition-cache.test.cjs \
+            fc83d928d026edb658945bcddcb2747e8271ed29d22f581413cc5d0274206c47 r2727-native-integration.cjs | sha256sum -c -
+          node --check r2727-public-policy.cjs
+          node --check r2727-public-policy.test.cjs
+          node --check r2727-evaluation.cjs
+          node --check r2727-evaluation.test.cjs
+          node --check r2727-transition-cache.cjs
+          node --check r2727-transition-cache.test.cjs
+          node --check r2727-native-integration.cjs
+          node r2727-public-policy.test.cjs
+          node r2727-evaluation.test.cjs
+          node r2727-transition-cache.test.cjs
+          node r2727-native-integration.cjs ./r2727-evidence | tee r2727-console.log
+          cp r2727-public-policy.cjs r2727-public-policy.test.cjs r2727-evaluation.cjs r2727-evaluation.test.cjs r2727-transition-cache.cjs r2727-transition-cache.test.cjs r2727-native-integration.cjs r2727-evidence/
+      - name: Verify R27.27 public results and hard certification limits
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_AUDIT'
+          import json
+          from pathlib import Path
+          p=Path('r2727-evidence')
+          required={
+            'r2727-receipt.json','r2727-search-traces.json',
+            'r2727-public-policy.cjs','r2727-public-policy.test.cjs',
+            'r2727-evaluation.cjs','r2727-evaluation.test.cjs','r2727-transition-cache.cjs','r2727-transition-cache.test.cjs','r2727-native-integration.cjs'}
+          assert {x.name for x in p.iterdir()}==required
+          assert sum(x.stat().st_size for x in p.iterdir())<8*1024*1024
+          r=json.loads((p/'r2727-receipt.json').read_text())
+          traces=json.loads((p/'r2727-search-traces.json').read_text())
+          assert r['schema']=='TRUE_PLAN_R2727_PUBLIC_OPPONENT_POLICY_SENSITIVITY_V1'
+          assert r['status']=='PASS_PUBLIC_SYNTHETIC_ONLY'
+          assert r['search_runs']==18 and r['replayed_runs']==18
+          assert len(traces)==6 and all(len(t['runs'])==3 for t in traces)
+          assert all([run['alpha'] for run in x['runs']]==[0,.5,1] for x in traces)
+          assert r['hidden_item_pairs_identical']==3
+          assert r['aggregate_second_turn_nodes']>0
+          assert r['aggregate_cache_hits']>0 and r['aggregate_cache_misses']>0
+          assert r['certification']=={'native33':'0/33','exact34':'0/34','actual_game':'0/30','formal_increment':0,'gate':'DENY'}
+          assert r['stable_variant_count']+r['varying_variant_count']==6
+          assert all(all(abs(sum(b['p'] for b in run['root_branches'])-1)<1e-9 for run in t['runs']) for t in traces)
+          print('R2727_EVIDENCE_AUDIT_PASS',r['search_runs'],r['aggregate_joint_nodes'])
+          PY_AUDIT
+          (cd r2727-evidence && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - name: Upload public synthetic R27.27 evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2727-public-opponent-forecast-sensitivity-proof
+          path: ${{ runner.temp }}/showdown/r2727-evidence
+          retention-days: 7
+          if-no-files-found: error
