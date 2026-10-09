@@ -1,0 +1,310 @@
+name: R27.20 public faint forced-switch and terminal proof
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2720-public-faint-switch-manual
+  cancel-in-progress: false
+jobs:
+  public_research_only:
+    name: Pinned M-C three faints two forced switches final win
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch exact pinned public Showdown and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/showdown"
+          cd "$RUNNER_TEMP/showdown"
+          git init -q
+          git remote add origin https://github.com/smogon/pokemon-showdown.git
+          git fetch --depth 1 origin aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse 'HEAD^{tree}')" = 98c9038b81fa5ed7f1e9818736b701918920501e
+          test "$(node --version)" = v22.18.0
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Verify full pinned distribution digest
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_DIST'
+          import pathlib,hashlib
+          dist=pathlib.Path('dist')
+          items=list(dist.rglob('*'))
+          assert not any(p.is_symlink() for p in items)
+          files=sorted([p for p in items if p.is_file()],key=lambda p:p.relative_to(dist).as_posix())
+          assert len(files)==1094,len(files)
+          h=hashlib.sha256()
+          for p in files:
+              n=p.relative_to(dist).as_posix().encode()
+              h.update(len(n).to_bytes(8,'big'))
+              h.update(n)
+              h.update(hashlib.sha256(p.read_bytes()).digest())
+          assert h.hexdigest()=='3697be28e9736b691f005bc5ad7b56789523fbf4ef04d838fcc91f6cfae9c3df'
+          print('R2720_PINNED_DIST_PASS',len(files),h.hexdigest())
+          PY_DIST
+      - name: Replay three faints two forced switches and winner
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          cat > ./r2720-faint-force-switch-win.cjs <<'R2720_SOURCE'
+          #!/usr/bin/env node
+          'use strict';
+          /** R27.20 | public pinned Showdown Champions M-C synthetic state machine. */
+          const assert=require('node:assert/strict');
+          const crypto=require('node:crypto');
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const {Battle,extractChannelMessages}=require('./dist/sim/battle');
+          const {Dex}=require('./dist/sim/dex');
+          const {State}=require('./dist/sim/state');
+          const {TeamValidator}=require('./dist/sim/team-validator');
+          const PIN='aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const SEED='1,2,3,4';
+          const FORMAT='gen9championsbssregmc';
+          const EXPECTED=['Charizard','Talonflame','Volcarona'];
+          function stable(v){
+            if(Array.isArray(v))return v.map(stable);
+            if(v&&typeof v==='object')return Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])]));
+            return v;
+          }
+          function sha(v){return crypto.createHash('sha256').update(JSON.stringify(stable(v))).digest('hex');}
+          function snap(b){return JSON.parse(JSON.stringify(b.toJSON()));}
+          function norm(state){return State.normalize(JSON.parse(JSON.stringify(state)));}
+          function textNorm(x){return State.normalizeLog(x);}
+          function makeSet(dex,species,name,moves){
+            const mon=dex.species.get(species);
+            assert(mon.exists&&mon.abilities['0'],'missing species '+species);
+            for(const move of moves)assert(dex.moves.get(move).exists,'unknown move '+move);
+            return {species,name,level:50,ability:mon.abilities['0'],item:'',nature:'Hardy',
+              moves,evs:{hp:0,atk:0,def:0,spa:0,spd:0,spe:0}};
+          }
+          function teams(dex){
+            const filler=(s,n)=>makeSet(dex,s,n,['protect','endure','rest']);
+            return {
+              p1:[filler('Venusaur','Probe1'),filler('Blastoise','Probe2'),filler('Snorlax','Probe3'),
+                makeSet(dex,'Rhyperior','Probe4',['smackdown','rockslide','protect','endure']),
+                makeSet(dex,'Gyarados','Probe5',['bite','thunderwave','protect','endure']),
+                makeSet(dex,'Azumarill','Probe6',['waterfall','charm','protect','endure'])],
+              p2:[filler('Venusaur','Target1'),filler('Blastoise','Target2'),filler('Snorlax','Target3'),
+                makeSet(dex,'Charizard','Target4',['swordsdance','protect','endure','rest']),
+                makeSet(dex,'Talonflame','Target5',['swordsdance','protect','endure','rest']),
+                makeSet(dex,'Volcarona','Target6',['quiverdance','protect','endure','rest'])]
+            };
+          }
+          function requestMove(b,who,id){
+            const side=b.getSide(who),request=side.activeRequest?.active?.[0];
+            assert.equal(side.requestState,'move','expected move request '+who);
+            assert(Array.isArray(request?.moves),'missing legal move request '+who);
+            const ix=request.moves.findIndex(m=>m.id===id&&!m.disabled&&m.pp>0);
+            assert(ix>=0,'requested move is unavailable '+who+' '+id+' '+JSON.stringify(request.moves));
+            return 'move '+(ix+1);
+          }
+          function visibleSnapshot(b){
+            const channels=extractChannelMessages(b.log.join('\n'),[1,2]);
+            assert(Array.isArray(channels[1])&&Array.isArray(channels[2]));
+            return {p1:channels[1],p2:channels[2]};
+          }
+          function transition(b,kind,choices,index,states,steps){
+            const previous=snap(b),viewBefore=visibleSnapshot(b),clone=Battle.fromJSON(JSON.stringify(previous));
+            assert.deepEqual(stable(norm(snap(clone))),stable(norm(previous)),'restore roundtrip '+index);
+            clone.makeChoices(choices.p1,choices.p2);
+            b.makeChoices(choices.p1,choices.p2);
+            const current=snap(b),replayed=snap(clone);
+            assert.deepEqual(stable(norm(replayed)),stable(norm(current)),'immediate replay '+index);
+            const after=visibleSnapshot(b);
+            const visible={p1:after.p1.slice(viewBefore.p1.length),p2:after.p2.slice(viewBefore.p2.length)};
+            states.push({index,turn:b.turn,request_state:b.requestState,ended:b.ended,state:current});
+            steps.push({index,kind,choices,request_after:b.requestState,ended_after:b.ended,
+              visible,pre_sha256:sha(previous),post_sha256:sha(current)});
+            return visible;
+          }
+          function assertPublicFaint(victim,visible){
+            const line='|faint|p2a: '+victim;
+            for(const view of ['p1','p2']){
+              assert.equal(visible[view].filter(s=>s===line).length,1,'faint not visible to '+view+': '+victim);
+            }
+          }
+          function checkPublicSwitch(victim,species,visible){
+            const results={};
+            const identities=[];
+            for(const view of ['p1','p2']){
+              const events=visible[view].filter(s=>s.startsWith('|switch|p2a: '+victim+'|'));
+              assert.equal(events.length,1,'missing forced switch '+view+': '+victim);
+              const fields=events[0].split('|');
+              assert.equal(fields[0],'');assert.equal(fields[1],'switch');
+              assert.equal(fields[2],'p2a: '+victim);
+              assert(fields[3].startsWith(species+','),'unexpected switch species');
+              assert(/^[0-9]+\/[0-9]+(?: [a-z]{3})?$/.test(fields[4]),'bad HP display');
+              identities.push(fields.slice(0,4));
+              results[view]=fields[4];
+            }
+            assert.deepEqual(identities[0],identities[1],'switch identity mismatch across viewers');
+            return results;
+          }
+          function canonicalTrace(t){
+            return {format:t.format,seed:t.seed,
+              states:t.states.map(({index,turn,request_state,ended,state})=>({index,turn,request_state,ended,state:norm(state)})),
+              transitions:t.transitions.map(x=>({...x,visible:{p1:textNorm(x.visible.p1),p2:textNorm(x.visible.p2)}})),
+              viewers:{p1:textNorm(t.viewers.p1),p2:textNorm(t.viewers.p2)},
+              omni:textNorm(t.omni),counters:t.counters,winner:t.winner};
+          }
+          function runOnce(){
+            const format=Dex.formats.get(FORMAT);
+            assert(format.exists&&format.mod==='champions','pinned M-C format missing');
+            const dex=Dex.forFormat(format),validator=TeamValidator.get(format);
+            assert(validator.ruleTable.has('speciesclause'),'species clause missing');
+            const roster=teams(dex);
+            for(const [who,team] of Object.entries(roster)){
+              assert.equal(validator.validateTeam(team),null,'invalid 6-member team '+who);
+            }
+            const b=new Battle({formatid:format.id,seed:SEED,strictChoices:true,
+              p1:{name:'Public-P1',team:roster.p1},p2:{name:'Public-P2',team:roster.p2}});
+            assert.equal(b.requestState,'teampreview');
+            b.makeChoices('team 456','team 456');
+            assert.equal(b.requestState,'move');
+            assert.equal(b.p1.active[0].species.name,'Rhyperior');
+            assert.equal(b.p2.active[0].species.name,'Charizard');
+            assert.equal(b.p1.pokemon.length,3,'p1 not exactly 3 selected');
+            assert.equal(b.p2.pokemon.length,3,'p2 not exactly 3 selected');
+            const states=[{index:0,turn:b.turn,request_state:b.requestState,ended:b.ended,state:snap(b)}];
+            const transitions=[];
+            const counters={faint:0,forced_switch_requests:0,forced_switches:0,public_switches:0,
+              battle_wins:0,attacker_moves:0};
+            for(let i=0;i<EXPECTED.length;i++){
+              const victim='Target'+(i+4);
+              assert(!b.ended,'premature terminal');
+              assert.equal(b.requestState,'move','move request before target '+i);
+              assert.equal(b.p1.active[0].species.name,'Rhyperior');
+              assert.equal(b.p2.active[0].species.name,EXPECTED[i]);
+              const move2=i===2?'quiverdance':'swordsdance';
+              const visible=transition(b,'attacking_faint_'+(i+1),
+                {p1:requestMove(b,'p1','smackdown'),p2:requestMove(b,'p2',move2)},
+                transitions.length+1,states,transitions);
+              counters.attacker_moves++;
+              const fainted=b.p2.pokemon.filter(x=>x.fainted||x.hp<=0);
+              assert.equal(fainted.length,i+1,'expected consecutive KOs; found '+fainted.length);
+              assertPublicFaint(victim,visible);
+              counters.faint++;
+              if(i<EXPECTED.length-1){
+                assert.equal(b.requestState,'switch','EXPECTED_FORCE_SWITCH_AFTER_FAINT_'+i);
+                assert.equal(b.p2.requestState,'switch');
+                assert.deepEqual(b.p2.activeRequest?.forceSwitch,[true]);
+                counters.forced_switch_requests++;
+                const next='Target'+(i+5);
+                const sv=transition(b,'forced_switch_'+(i+1),{p1:'',p2:'switch '+(i+2)},
+                  transitions.length+1,states,transitions);
+                assert.equal(b.p2.active[0].name,next,'wrong forced replacement');
+                assert.equal(b.requestState,'move','request did not return to move');
+                const hp=checkPublicSwitch(next,EXPECTED[i+1],sv);
+                counters.forced_switches++;counters.public_switches++;
+                transitions[transitions.length-1].per_viewer_switch_hp=hp;
+              }
+            }
+            assert(b.ended,'battle did not end after third selected KO');
+            assert.equal(b.winner,'Public-P1','unexpected winner');
+            assert.equal(b.requestState,'','terminal state still requests actions');
+            assert.equal(b.p2.pokemon.filter(x=>x.fainted||x.hp<=0).length,3);
+            const view=visibleSnapshot(b);
+            for(const player of ['p1','p2']){
+              assert.equal(view[player].filter(x=>x==='|win|Public-P1').length,1,'winner not visible '+player);
+            }
+            counters.battle_wins=1;
+            const omni=b.log.join('\n');
+            return {format:format.name,seed:SEED,counters,winner:b.winner,states,
+              transitions,viewers:view,omni};
+          }
+          function main(){
+            const x=runOnce(),y=runOnce();
+            assert.equal(x.states.length,6,'expected initial+five state transitions');
+            assert.equal(x.transitions.length,5,'three KOs plus two forced switches');
+            assert.deepEqual(x.counters,{faint:3,forced_switch_requests:2,forced_switches:2,
+              public_switches:2,battle_wins:1,attacker_moves:3});
+            const normalizedA=canonicalTrace(x),normalizedB=canonicalTrace(y);
+            assert.equal(sha(normalizedA),sha(normalizedB),'independent same-seed mismatch');
+            for(let i=0;i<x.transitions.length;i++){
+              const step=x.transitions[i],before=x.states[i],after=x.states[i+1];
+              assert.equal(sha(before.state),step.pre_sha256,'pre mismatch '+i);
+              assert.equal(sha(after.state),step.post_sha256,'post mismatch '+i);
+              const restored=Battle.fromJSON(JSON.stringify(before.state));
+              restored.makeChoices(step.choices.p1,step.choices.p2);
+              assert.deepEqual(stable(norm(snap(restored))),stable(norm(after.state)),
+                'archived state replay mismatch at '+i);
+            }
+            const output=path.resolve(process.argv[2]||'r2720-evidence');
+            fs.mkdirSync(output,{recursive:true});
+            const put=(n,v)=>fs.writeFileSync(path.join(output,n),v,'utf8');
+            const jsonl=list=>list.map(x=>JSON.stringify(x)).join('\n')+'\n';
+            put('all-six-state-snapshots.jsonl',jsonl(x.states));
+            put('all-five-transitions.jsonl',jsonl(x.transitions));
+            put('omniscient-protocol.log',x.omni+'\n');
+            put('public-p1-events.log',x.viewers.p1.join('\n')+'\n');
+            put('public-p2-events.log',x.viewers.p2.join('\n')+'\n');
+            const receipt={schema:'TRUE_PLAN_R2720_PUBLIC_FAINT_SWITCH_TERMINAL_V1',
+              status:'PASS_PUBLIC_SYNTHETIC_ONLY',pinned_showdown_commit:PIN,
+              format:x.format,seed:x.seed,states:6,transitions:5,
+              independent_normalized_hash_a:sha(normalizedA),independent_normalized_hash_b:sha(normalizedB),
+              raw_hash_a:sha(x),raw_hash_b:sha(y),counters:x.counters,winner:x.winner,
+              public_private_separation:'dual viewer evidence retained verbatim; omniscient snapshots used only for offline audit',
+              certification:{native33:'0/33',exact34:'0/34',actual_game:'0/30',
+                stage15_formal_increment:0,gate:'DENY_FORMAL_CERTIFICATION'}};
+            put('r2720-receipt.json',JSON.stringify(receipt,null,2)+'\n');
+            console.log('R2720_PUBLIC_RESULT '+JSON.stringify(receipt));
+          }
+          if(require.main===module)main();
+          module.exports={runOnce,canonicalTrace,checkPublicSwitch,assertPublicFaint,teams,sha};
+          R2720_SOURCE
+          printf '%s  %s\n' '2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b' r2720-faint-force-switch-win.cjs | sha256sum -c -
+          node --check ./r2720-faint-force-switch-win.cjs
+          node ./r2720-faint-force-switch-win.cjs ./r2720-evidence | tee ./r2720-console-receipt.json
+          cp ./r2720-faint-force-switch-win.cjs ./r2720-evidence/
+      - name: Audit state transitions receipt and file checksums
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_AUDIT'
+          import json,hashlib,pathlib
+          p=pathlib.Path('r2720-evidence')
+          expected={'r2720-faint-force-switch-win.cjs','all-six-state-snapshots.jsonl',
+          'all-five-transitions.jsonl','omniscient-protocol.log',
+          'public-p1-events.log','public-p2-events.log','r2720-receipt.json'}
+          assert {x.name for x in p.iterdir()}==expected
+          total=sum(x.stat().st_size for x in p.iterdir())
+          assert 0<total<=8*1024*1024,('EVIDENCE_EXCEEDS_8MIB',total)
+          states=[json.loads(x) for x in (p/'all-six-state-snapshots.jsonl').read_text().splitlines()]
+          steps=[json.loads(x) for x in (p/'all-five-transitions.jsonl').read_text().splitlines()]
+          receipt=json.loads((p/'r2720-receipt.json').read_text())
+          assert len(states)==6 and [x['index'] for x in states]==list(range(6))
+          assert len(steps)==5 and [x['index'] for x in steps]==list(range(1,6))
+          assert [x['kind'] for x in steps]==['attacking_faint_1','forced_switch_1',
+            'attacking_faint_2','forced_switch_2','attacking_faint_3']
+          assert receipt['independent_normalized_hash_a']==receipt['independent_normalized_hash_b']
+          assert receipt['counters']=={'faint':3,'forced_switch_requests':2,'forced_switches':2,
+          'public_switches':2,'battle_wins':1,'attacker_moves':3}
+          assert receipt['winner']=='Public-P1'
+          assert states[-1]['ended'] is True and states[-1]['request_state']==''
+          assert receipt['certification']=={'native33':'0/33','exact34':'0/34',
+          'actual_game':'0/30','stage15_formal_increment':0,'gate':'DENY_FORMAL_CERTIFICATION'}
+          assert hashlib.sha256((p/'r2720-faint-force-switch-win.cjs').read_bytes()).hexdigest()=='2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b'
+          print('R2720_COMPLETE_PUBLIC_EVIDENCE_PASS',len(states),len(steps),total)
+          PY_AUDIT
+          (cd ./r2720-evidence && sha256sum *.cjs *.json *.jsonl *.log > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - name: Preserve public synthetic research artifact for seven days
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2720-public-faint-forced-switch-terminal-evidence
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/showdown/r2720-evidence/
