@@ -1,0 +1,334 @@
+name: R27.23 public multi-turn hidden-set and belief boundary proof
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2723-public-belief-manual
+  cancel-in-progress: false
+jobs:
+  research_only:
+    name: Pinned M-C six hidden hypotheses four turns and public reveal
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch fixed Showdown and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/showdown"
+          cd "$RUNNER_TEMP/showdown"
+          git init -q
+          git remote add origin https://github.com/smogon/pokemon-showdown.git
+          git fetch --depth 1 origin aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse 'HEAD^{tree}')" = 98c9038b81fa5ed7f1e9818736b701918920501e
+          test "$(node --version)" = v22.18.0
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Verify fixed compiled distribution
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_DIST'
+          from pathlib import Path
+          import hashlib
+          dist=Path('dist')
+          items=list(dist.rglob('*'))
+          assert not any(p.is_symlink() for p in items)
+          files=sorted((p for p in items if p.is_file()),key=lambda p:p.relative_to(dist).as_posix())
+          assert len(files)==1094,len(files)
+          h=hashlib.sha256()
+          for p in files:
+              n=p.relative_to(dist).as_posix().encode()
+              h.update(len(n).to_bytes(8,'big'))
+              h.update(n)
+              h.update(hashlib.sha256(p.read_bytes()).digest())
+          assert h.hexdigest()=='3697be28e9736b691f005bc5ad7b56789523fbf4ef04d838fcc91f6cfae9c3df'
+          print('R2723_PINNED_DIST_PASS',len(files),h.hexdigest())
+          PY_DIST
+      - name: Retrieve hash-pinned prior public research sources
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/6b0d3daa8c3957821604fcbd410287e0f7f389d1/.github/workflows/r2720-public-faint-forced-switch-terminal.yml' -o ./r2720-workflow-source.yml
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/9992d08f6c53fcf487cea7c14da0e9fd916cb67c/.github/workflows/r2722-public-rng-observation-noninterference.yml' -o ./r2722-workflow-source.yml
+          printf '%s  %s\n' '75dc810599d0d91b747f77bb37e1278f6fa7b782364b537c907591f21454933c' ./r2720-workflow-source.yml | sha256sum -c -
+          printf '%s  %s\n' 'e59183d4b3e8e01604d94a05bebb8911114448e69d8e906f0739da0becf187a4' ./r2722-workflow-source.yml | sha256sum -c -
+          python3 - <<'PY_PARENT'
+          from pathlib import Path
+          files=[
+            ('r2720-workflow-source.yml','r2720-faint-force-switch-win.cjs','R2720_SOURCE'),
+            ('r2722-workflow-source.yml','r2722-rng-observation-boundaries.cjs','R2722_SOURCE')]
+          for wf,name,tag in files:
+              text=Path(wf).read_text()
+              marker="          cat > ./"+name+" <<'"+tag+"'\n"
+              assert text.count(marker)==1,(wf,'ambiguous marker')
+              block=text.split(marker,1)[1].split('\n          '+tag+'\n',1)[0]
+              source='\n'.join(line[10:] for line in block.split('\n'))+'\n'
+              Path(name).write_text(source)
+          PY_PARENT
+          printf '%s  %s\n' '2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b' ./r2720-faint-force-switch-win.cjs | sha256sum -c -
+          printf '%s  %s\n' '0a4fe39d6e1f3ac1c208171b3c38c9d19a388d618baf1b4bfeab78e1c24b8d7e' ./r2722-rng-observation-boundaries.cjs | sha256sum -c -
+          node --check ./r2720-faint-force-switch-win.cjs
+          node --check ./r2722-rng-observation-boundaries.cjs
+      - name: Validate multi-turn hidden hypotheses and observable belief filtering
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          cat > ./r2723-multiturn-belief-boundaries.cjs <<'R2723_SOURCE'
+          #!/usr/bin/env node
+          'use strict';
+          /** Public pinned Showdown synthetic, not an implementation or certification of a general Belief AI. */
+          const assert=require('node:assert/strict');
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const crypto=require('node:crypto');
+          const {Battle,extractChannelMessages}=require('./dist/sim/battle');
+          const {Dex}=require('./dist/sim/dex');
+          const {State}=require('./dist/sim/state');
+          const {TeamValidator}=require('./dist/sim/team-validator');
+          const {teams}=require('./r2720-faint-force-switch-win.cjs');
+          const {viewer}=require('./r2722-rng-observation-boundaries.cjs');
+          const PIN='aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const SEED='1,2,3,4';
+          const MOVES=['swordsdance','willowisp','flamethrower'];
+          const ITEMS=['','sitrusberry'];
+          const PREFIX=[['move 3','move 2'],['move 4','move 3'],['move 3','move 2'],['move 4','move 3']];
+          const EXPECTED_KEYS=['own_request','phase','turn','visible_protocol'];
+          const stable=x=>Array.isArray(x)?x.map(stable):x&&typeof x==='object'?
+            Object.fromEntries(Object.keys(x).sort().map(k=>[k,stable(x[k])])):x;
+          const digest=x=>crypto.createHash('sha256').update(JSON.stringify(stable(x))).digest('hex');
+          const copy=x=>JSON.parse(JSON.stringify(x));
+          const snapshot=b=>copy(b.toJSON());
+          const norm=x=>State.normalize(copy(x));
+          function publicContract(o){
+            assert.deepEqual(Object.keys(o).sort(),EXPECTED_KEYS,'public observation shape violation');
+            assert(Array.isArray(o.visible_protocol),'missing player-specific protocol');
+            assert(o.own_request&&typeof o.own_request==='object','missing own scoped request');
+            for(const key of ['state','battle','prng','rng','omniscient','opponent_hidden_item','opponent_hidden_move']){
+              assert(!Object.hasOwn(o,key),'forbidden key: '+key);
+            }
+            return digest(o);
+          }
+          function makeVariants(){
+            const format=Dex.formats.get('gen9championsbssregmc');
+            assert(format.exists&&format.mod==='champions');
+            const dex=Dex.forFormat(format),validator=TeamValidator.get(format);
+            const cases=[];
+            for(const move of MOVES)for(const item of ITEMS){
+              const t=teams(dex);
+              t.p2[3].moves=[move,'protect','endure','rest'];
+              t.p2[3].item=item;
+              // Two selected but hidden bench members also have alternative, never-selected moves.
+              t.p2[4].moves=[item?'agility':'swordsdance','protect','endure','rest'];
+              t.p2[5].moves=[item?'flamethrower':'quiverdance','protect','endure','rest'];
+              for(const p of ['p1','p2'])assert.equal(validator.validateTeam(t[p]),null,
+                'illegal '+move+'/'+(item||'none')+' '+p);
+              cases.push({id:move+'__'+(item||'none'),move,item,teams:t});
+            }
+            assert.equal(cases.length,6);
+            return {format,dex,cases};
+          }
+          function fresh(format,t){
+            const b=new Battle({formatid:format.id,seed:SEED,strictChoices:true,
+              p1:{name:'Public-P1',team:t.p1},p2:{name:'Public-P2',team:t.p2}});
+            assert.equal(b.requestState,'teampreview');
+            b.makeChoices('team 456','team 456');
+            assert.equal(b.requestState,'move');
+            assert.equal(b.p2.active[0].name,'Target4');
+            return b;
+          }
+          function runVariant(format,v){
+            const b=fresh(format,v.teams),observations=[],steps=[],states=[];
+            const capture=()=>{
+              const o=copy(viewer(b,'p1'));
+              publicContract(o);
+              assert(!JSON.stringify(o).includes('sitrusberry'),'hidden opposing item leaked');
+              assert(!JSON.stringify(o).includes('willowisp'),'unused opposing hidden move leaked');
+              return o;
+            };
+            states.push(snapshot(b));observations.push(capture());
+            for(let i=0;i<PREFIX.length;i++){
+              const pre=snapshot(b),choices=PREFIX[i],prior=observations.at(-1);
+              assert.equal(b.requestState,'move','prefix ended unexpectedly '+i);
+              const immediate=Battle.fromJSON(JSON.stringify(pre));
+              assert.deepEqual(norm(snapshot(immediate)),norm(pre),'state roundtrip '+i);
+              immediate.makeChoices(...choices);
+              b.makeChoices(...choices);
+              assert.deepEqual(norm(snapshot(immediate)),norm(snapshot(b)),'replay mismatch '+i);
+              const obs=capture();
+              assert.deepEqual(obs.visible_protocol.slice(0,prior.visible_protocol.length),prior.visible_protocol,
+                'past visible protocol changed '+i);
+              // No hidden candidate has acted on its private, first move or triggered its held item.
+              const newEvents=obs.visible_protocol.slice(prior.visible_protocol.length);
+              assert(!newEvents.some(line=>line.startsWith('|move|p2a: Target4|') &&
+                !(/\|(Protect|Endure)\|/.test(line))),'unexpected opponent move in prefix '+i);
+              states.push(snapshot(b));observations.push(obs);
+              steps.push({index:i+1,choices,pre_digest:digest(norm(pre)),
+                post_digest:digest(norm(snapshot(b))),observation_digest:digest(obs)});
+            }
+            assert.equal(b.turn,5,'unexpected four-turn prefix count');
+            assert.equal(b.requestState,'move');
+            const p2Before=viewer(b,'p2');
+            assert(JSON.stringify(p2Before).includes(v.move),'owner request did not contain owned move');
+            if(v.item)assert(JSON.stringify(p2Before).includes(v.item),'owner request did not contain owned item');
+            const before=observations.at(-1),preReveal=snapshot(b);
+            const retry=Battle.fromJSON(JSON.stringify(preReveal));
+            // Reveal the opponent's first move. The item remains unrevealed.
+            b.makeChoices('move 3','move 1');
+            retry.makeChoices('move 3','move 1');
+            assert.deepEqual(norm(snapshot(retry)),norm(snapshot(b)),'reveal replay mismatch');
+            const after=copy(viewer(b,'p1'));
+            publicContract(after);
+            const delta=after.visible_protocol.slice(before.visible_protocol.length);
+            const display=Dex.forFormat(format).moves.get(v.move).name;
+            assert(delta.some(line=>line.startsWith('|move|p2a: Target4|'+display+'|')),
+              'chosen move was not publicly revealed '+v.id);
+            assert(!JSON.stringify(after).includes('sitrusberry'),'unrevealed item leaked after move');
+            const posterior=beliefFilter(MOVES.flatMap(move=>ITEMS.map(item=>({id:move+'__'+(item||'none'),move,item}))),
+              delta,Dex.forFormat(format));
+            assert.equal(posterior.length,2,'hidden item should remain ambiguous after move reveal');
+            assert(posterior.every(h=>h.move===v.move),'revealed move filtering failed');
+            assert.deepEqual(posterior.map(h=>h.item).sort(),[...ITEMS].sort());
+            return {id:v.id,move:v.move,item:v.item,states:states.length,steps,
+              prefix:observations.map(o=>({turn:o.turn,digest:digest(o)})),
+              pre_reveal_public:digest(before),reveal_public:digest(after),reveal_events:delta,
+              posterior:posterior.map(h=>h.id),end_state:digest(norm(snapshot(b)))};
+          }
+          function beliefFilter(hypotheses,events,dex){
+            assert(Array.isArray(events),'events must be viewer-specific array');
+            const moves=events.filter(line=>line.startsWith('|move|p2a: Target4|'));
+            assert.equal(moves.length,1,'expected exactly one public move reveal');
+            const moveName=moves[0].split('|')[3];
+            return hypotheses.filter(h=>dex.moves.get(h.move).name===moveName);
+          }
+          function run(){
+            const {format,dex,cases}=makeVariants();
+            const once=cases.map(v=>runVariant(format,v));
+            const twice=cases.map(v=>runVariant(format,v));
+            assert.deepEqual(once,twice,'independent same-seed six-variant replay diverged');
+            const baseline=once[0].prefix.map(x=>x.digest);
+            for(const item of once){
+              assert.deepEqual(item.prefix.map(x=>x.digest),baseline,
+                'hidden set contaminated pre-reveal observations '+item.id);
+              assert.equal(item.pre_reveal_public,baseline.at(-1));
+            }
+            assert.equal(new Set(once.map(x=>x.end_state)).size>=3,true,
+              'private moves failed to create distinct true-state outcomes');
+            // Mandatory fail-closed negative controls: public schema forbids injected omniscient fields.
+            const fixture=fresh(format,cases[0].teams),observation=viewer(fixture,'p1');
+            assert.throws(()=>publicContract({...observation,prng:fixture.prng.getSeed()}),/shape violation/);
+            assert.throws(()=>publicContract({...observation,opponent_hidden_item:'sitrusberry'}),/shape violation/);
+            assert.throws(()=>publicContract({...observation,battle:fixture.toJSON()}),/shape violation/);
+            // Misuse test: a full-state signature can distinguish hypotheses even when the public view cannot.
+            const hiddenStateHashes=cases.map(v=>digest(norm(snapshot(fresh(format,v.teams)))));
+            assert.equal(new Set(hiddenStateHashes).size,6,'six distinct hidden states not established');
+            assert.equal(new Set(once.map(x=>x.prefix[0].digest)).size,1,
+              'initial public observations should be identical');
+            const itemAmbiguity=once.every(x=>x.posterior.length===2);
+            const receipt={schema:'TRUE_PLAN_R2723_PUBLIC_MULTITURN_BELIEF_BOUNDARY_V1',
+              status:'PASS_PUBLIC_SYNTHETIC_ONLY',pinned_showdown_commit:PIN,
+              format:format.name,hidden_hypotheses:6,shared_prefix_turns:4,
+              public_observation_checkpoints:5,full_state_variants:6,
+              public_prefix_equal_across_variants:true,independent_six_variant_replay:true,
+              reveal_cases:6,posterior_candidates_after_reveal:2,
+              unrevealed_item_ambiguity_preserved:itemAmbiguity,
+              negative_leak_controls:3,public_prefix_hashes:baseline,
+              limitations:['six synthetic legal hidden combinations only',
+                'scripted four-turn no-reveal prefix and one reveal choice',
+                'posterior filters one observable move, not a trained Belief AI',
+                'no exhaustive adversarial action or history coverage',
+                'not native Pokémon Champions gameplay'],
+              certification:{native33:'0/33',exact34:'0/34',actual_game:'0/30',
+                stage15_formal_increment:0,gate:'DENY_FORMAL_CERTIFICATION'}};
+            assert(itemAmbiguity);
+            return {receipt,variants:once,negative:{private_state_distinct:6,public_observation_distinct:1,
+              injected_prng_rejected:true,injected_item_rejected:true,injected_battle_rejected:true}};
+          }
+          function main(){
+            const result=run(),out=path.resolve(process.argv[2]||'r2723-evidence');
+            fs.mkdirSync(out,{recursive:true});
+            const put=(name,data)=>fs.writeFileSync(path.join(out,name),JSON.stringify(data,null,2)+'\n','utf8');
+            put('all-six-worlds-multiturn.json',result.variants);
+            put('public-private-negative-controls.json',result.negative);
+            put('r2723-receipt.json',result.receipt);
+            console.log('R2723_PUBLIC_RESULT '+JSON.stringify(result.receipt));
+          }
+          if(require.main===module)main();
+          module.exports={run,beliefFilter,publicContract,makeVariants};
+          R2723_SOURCE
+          printf '%s  %s\n' 'fed3b7e13eb09f0ffd2bfcb6fb8497ac39da502781994c56c16dbb846a566c49' ./r2723-multiturn-belief-boundaries.cjs | sha256sum -c -
+          node --check ./r2723-multiturn-belief-boundaries.cjs
+          node ./r2723-multiturn-belief-boundaries.cjs ./r2723-evidence | tee ./r2723-console-receipt.log
+          cp ./r2720-faint-force-switch-win.cjs ./r2723-evidence/
+          cp ./r2722-rng-observation-boundaries.cjs ./r2723-evidence/
+          cp ./r2723-multiturn-belief-boundaries.cjs ./r2723-evidence/
+      - name: Independently audit six-world receipts and source hashes
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_AUDIT'
+          from pathlib import Path
+          import json,hashlib
+          p=Path('r2723-evidence')
+          expect={'r2720-faint-force-switch-win.cjs','r2722-rng-observation-boundaries.cjs',
+            'r2723-multiturn-belief-boundaries.cjs','all-six-worlds-multiturn.json',
+            'public-private-negative-controls.json','r2723-receipt.json'}
+          assert {x.name for x in p.iterdir()}==expect
+          total=sum(x.stat().st_size for x in p.iterdir())
+          assert 0<total<=8*1024*1024
+          for file,expected in [
+            ('r2720-faint-force-switch-win.cjs','2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b'),
+            ('r2722-rng-observation-boundaries.cjs','0a4fe39d6e1f3ac1c208171b3c38c9d19a388d618baf1b4bfeab78e1c24b8d7e'),
+            ('r2723-multiturn-belief-boundaries.cjs','fed3b7e13eb09f0ffd2bfcb6fb8497ac39da502781994c56c16dbb846a566c49')]:
+              assert hashlib.sha256((p/file).read_bytes()).hexdigest()==expected
+          receipt=json.loads((p/'r2723-receipt.json').read_text())
+          worlds=json.loads((p/'all-six-worlds-multiturn.json').read_text())
+          negatives=json.loads((p/'public-private-negative-controls.json').read_text())
+          assert receipt['status']=='PASS_PUBLIC_SYNTHETIC_ONLY'
+          assert receipt['hidden_hypotheses']==len(worlds)==6
+          assert receipt['shared_prefix_turns']==4
+          assert receipt['public_observation_checkpoints']==5
+          assert receipt['reveal_cases']==6
+          assert receipt['posterior_candidates_after_reveal']==2
+          assert receipt['unrevealed_item_ambiguity_preserved']
+          assert receipt['negative_leak_controls']==3
+          assert negatives['private_state_distinct']==6
+          assert negatives['public_observation_distinct']==1
+          assert all(negatives[x] for x in ['injected_prng_rejected',
+              'injected_item_rejected','injected_battle_rejected'])
+          prefixes=receipt['public_prefix_hashes']
+          assert len(prefixes)==5 and len(set(prefixes))==5
+          assert len({x['id'] for x in worlds})==6
+          for w in worlds:
+              assert w['states']==5 and len(w['steps'])==4
+              assert [x['digest'] for x in w['prefix']]==prefixes
+              assert w['pre_reveal_public']==prefixes[-1]
+              assert len(w['posterior'])==2
+              assert w['move'] in {'swordsdance','willowisp','flamethrower'}
+          assert len({w['move'] for w in worlds})==3
+          assert receipt['certification']=={'native33':'0/33','exact34':'0/34',
+            'actual_game':'0/30','stage15_formal_increment':0,'gate':'DENY_FORMAL_CERTIFICATION'}
+          print('R2723_EVIDENCE_AUDIT_PASS',len(worlds),total)
+          PY_AUDIT
+          (cd ./r2723-evidence && sha256sum *.cjs *.json > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - name: Upload public synthetic research evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2723-public-multiturn-belief-boundary-proof
+          retention-days: 7
+          if-no-files-found: error
+          path: ${{ runner.temp }}/showdown/r2723-evidence/
