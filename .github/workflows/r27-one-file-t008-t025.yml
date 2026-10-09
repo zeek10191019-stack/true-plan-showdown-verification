@@ -170,18 +170,31 @@ jobs:
              assert.equal(b.requestState,'move','expected move request after team preview');
              b.makeChoices('move 1','move 1');
            }
-           function norm(b){return JSON.stringify(State.normalize(b.toJSON()));}
+           // Compare every snapshot field; JSON object insertion order has no state meaning.
+          // Keep array order and all keys/values, including HP, RNG and observed history.
+          function canonical(value){
+            if(Array.isArray(value)) return value.map(canonical);
+            if(value && typeof value==='object'){
+              const out={};
+              for(const key of Object.keys(value).sort()) out[key]=canonical(value[key]);
+              return out;
+            }
+            return value;
+          }
+          function norm(b){return JSON.stringify(canonical(State.normalize(b.toJSON())));}
            const original=start(); const reproduced=start();
            choose(original); choose(reproduced);
            const frozenJSON=JSON.stringify(original.toJSON());
+          // Deserialize immutable JSON bytes so no array/object references reach the live battle.
+          const restore=()=>Battle.fromJSON(frozenJSON);
            assert.equal(norm(original),norm(reproduced),'same prefix+seed must replay identically');
            const prefix=sha(JSON.stringify(original.inputLog));
-           const restored=Battle.fromJSON(original.toJSON());
+           const restored=restore();
            assert.equal(norm(original),norm(restored),'snapshot restore differs');
            assert.equal(sha(JSON.stringify(restored.inputLog)),prefix,'prefix changed on restore');
-           const snapA=Battle.fromJSON(original.toJSON());
-           const snapB=Battle.fromJSON(original.toJSON());
-           const snapC=Battle.fromJSON(original.toJSON());
+           const snapA=restore();
+           const snapB=restore();
+           const snapC=restore();
            // Set future RNG *only*, never resetRNG (which logs a message), no prefix replay.
            snapA.prng.setSeed('111,222,333,444');
            snapB.prng.setSeed('111,222,333,444');
@@ -203,8 +216,8 @@ jobs:
            snapB.makeChoices('move 1','move 1');
            assert.equal(norm(snapA),norm(snapB),'identical branch continuation diverged');
            assert.equal(JSON.stringify(original.toJSON()),frozenJSON,'branch continued into original');
-           const origReplay=Battle.fromJSON(original.toJSON());
-           const snapReplay=Battle.fromJSON(original.toJSON());
+           const origReplay=reproduced; // independently rebuilt prefix, without snapshot restoration
+           const snapReplay=restore();
            origReplay.makeChoices('move 1','move 1');
            snapReplay.makeChoices('move 1','move 1');
            assert.equal(norm(origReplay),norm(snapReplay),'prefix replay vs snapshot continuation mismatch');
@@ -454,18 +467,31 @@ jobs:
              assert.equal(b.requestState,'move','expected move request after team preview');
              b.makeChoices('move 1','move 1');
            }
-           function norm(b){return JSON.stringify(State.normalize(b.toJSON()));}
+           // Compare every snapshot field; JSON object insertion order has no state meaning.
+          // Keep array order and all keys/values, including HP, RNG and observed history.
+          function canonical(value){
+            if(Array.isArray(value)) return value.map(canonical);
+            if(value && typeof value==='object'){
+              const out={};
+              for(const key of Object.keys(value).sort()) out[key]=canonical(value[key]);
+              return out;
+            }
+            return value;
+          }
+          function norm(b){return JSON.stringify(canonical(State.normalize(b.toJSON())));}
            const original=start(); const reproduced=start();
            choose(original); choose(reproduced);
            const frozenJSON=JSON.stringify(original.toJSON());
+          // Deserialize immutable JSON bytes so no array/object references reach the live battle.
+          const restore=()=>Battle.fromJSON(frozenJSON);
            assert.equal(norm(original),norm(reproduced),'same prefix+seed must replay identically');
            const prefix=sha(JSON.stringify(original.inputLog));
-           const restored=Battle.fromJSON(original.toJSON());
+           const restored=restore();
            assert.equal(norm(original),norm(restored),'snapshot restore differs');
            assert.equal(sha(JSON.stringify(restored.inputLog)),prefix,'prefix changed on restore');
-           const snapA=Battle.fromJSON(original.toJSON());
-           const snapB=Battle.fromJSON(original.toJSON());
-           const snapC=Battle.fromJSON(original.toJSON());
+           const snapA=restore();
+           const snapB=restore();
+           const snapC=restore();
            // Set future RNG *only*, never resetRNG (which logs a message), no prefix replay.
            snapA.prng.setSeed('111,222,333,444');
            snapB.prng.setSeed('111,222,333,444');
@@ -487,8 +513,8 @@ jobs:
            snapB.makeChoices('move 1','move 1');
            assert.equal(norm(snapA),norm(snapB),'identical branch continuation diverged');
            assert.equal(JSON.stringify(original.toJSON()),frozenJSON,'branch continued into original');
-           const origReplay=Battle.fromJSON(original.toJSON());
-           const snapReplay=Battle.fromJSON(original.toJSON());
+           const origReplay=reproduced; // independently rebuilt prefix, without snapshot restoration
+           const snapReplay=restore();
            origReplay.makeChoices('move 1','move 1');
            snapReplay.makeChoices('move 1','move 1');
            assert.equal(norm(origReplay),norm(snapReplay),'prefix replay vs snapshot continuation mismatch');
