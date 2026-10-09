@@ -97,6 +97,30 @@ jobs:
             }
             return null;
           }
+          function validateActionAcrossViewers(action, p1Events, p2Events) {
+            // Only publicly shared action identity is comparable. Switch HP is viewer-specific.
+            const prefix=action.kind==='switch'?'|switch|'+action.actor+'a: '+action.nickname+'|':
+              '|move|'+action.actor+'a: '+action.nickname+'|';
+            const p1=p1Events.filter(line=>line.startsWith(prefix));
+            const p2=p2Events.filter(line=>line.startsWith(prefix));
+            assert.equal(p1.length,p2.length,'inconsistent visible action count');
+            assert(p1.length<=1,'duplicate visible action');
+            if(action.kind==='switch'&&p1.length===1){
+              const v1=p1[0].split('|'),v2=p2[0].split('|');
+              assert.equal(v1.length,5,'malformed p1 switch');
+              assert.equal(v2.length,5,'malformed p2 switch');
+              assert.deepEqual(v1.slice(0,4),v2.slice(0,4),'switch identity differs');
+              for(const hp of [v1[4],v2[4]]){
+                assert(/^(?:[0-9]+\/[0-9]+|0 fnt)(?: [a-z]{3})?$/.test(hp),'invalid HP display');
+              }
+              // Preserve both untouched HP representations for per-viewer privacy auditing.
+              return {announced:true,visible_hp:{p1:v1[4],p2:v2[4]}};
+            }
+            if(action.kind==='move'&&p1.length===1){
+              assert.deepEqual(p1,p2,'different publicly announced moves');
+            }
+            return {announced:p1.length===1};
+          }
           const mv=(id)=>({kind:'move',id});
           const sw=(n)=>({kind:'switch',nickname:'Horiz'+n});
           const plan=[
@@ -208,20 +232,20 @@ jobs:
               }
               const witnessed={};
               for(const a of [left,right]){
-                const prefix=a.kind==='switch'?'|switch|'+a.actor+'a: '+a.nickname+'|':'|move|'+a.actor+'a: '+a.nickname+'|';
-                const hits=visible.p1.filter(s=>s.startsWith(prefix));
-                assert.deepEqual(hits,visible.p2.filter(s=>s.startsWith(prefix)),'viewers disagree on public action');
+                const evidence=validateActionAcrossViewers(a,visible.p1,visible.p2);
                 if(a.kind==='switch'){
-                  assert.equal(hits.length,1,'switch not witnessed '+i);
+                  assert(evidence.announced,'switch not witnessed '+i);
                   assert.equal(b.getSide(a.actor).active[0].name,a.nickname,'wrong switch-in '+i);
                   counters.visible_switches++;
-                }else{
-                  assert(hits.length<=1,'duplicate move announcement');
-                  if(hits.length){assert(hits[0].includes('|'+modDex.moves.get(a.move).name+'|'),
-                    'incorrect move '+hits[0]+' expected '+a.move);counters.executed_moves++;}
+                }else if(evidence.announced){
+                  const tag='|move|'+a.actor+'a: '+a.nickname+'|';
+                  const announced=visible.p1.find(s=>s.startsWith(tag));
+                  assert(announced.includes('|'+modDex.moves.get(a.move).name+'|'),
+                    'incorrect move '+announced+' expected '+a.move);
+                  counters.executed_moves++;
                 }
                 counters[a.kind==='switch'?'planned_switches':'planned_moves']++;
-                witnessed[a.actor]={kind:a.kind,announced:hits.length>0};
+                witnessed[a.actor]={kind:a.kind,...evidence};
               }
               // Both views are public protocol channels; count effects only once using p1.
               for(const line of visible.p1){
@@ -285,9 +309,9 @@ jobs:
             console.log('R2719_MIXED_ACTION_PUBLIC_RECEIPT '+JSON.stringify(receipt));
           }
           if(require.main===module)main();
-          module.exports={normalizeTrace,firstDifference,plan,runOnce};
+          module.exports={normalizeTrace,firstDifference,validateActionAcrossViewers,plan,runOnce};
           R2719_JS_SOURCE
-          printf '%s  %s\n' 'e3148e6a4eecded08fb53d42fea1be7f4318ac000251f821a2afc1ba70d22543' ./r2719-mixed-action-evidence.cjs | sha256sum -c -
+          printf '%s  %s\n' '8512f3757110155a8ba81ad6d175f5f364b35b2c70ff0fde862c5ec298866cb3' ./r2719-mixed-action-evidence.cjs | sha256sum -c -
           node --check ./r2719-mixed-action-evidence.cjs
           node ./r2719-mixed-action-evidence.cjs ./r2719-evidence | tee ./r2719-console-receipt.json
           cp ./r2719-mixed-action-evidence.cjs ./r2719-evidence/
@@ -318,7 +342,7 @@ jobs:
           assert receipt['witnessed']['visible_switches']>=5
           assert receipt['certification']=={'native33':'0/33','exact34':'0/34',
           'actual_game':'0/30','stage15_formal_increment':0,'gate':'DENY_FORMAL_CERTIFICATION'}
-          assert hashlib.sha256((p/'r2719-mixed-action-evidence.cjs').read_bytes()).hexdigest()=='e3148e6a4eecded08fb53d42fea1be7f4318ac000251f821a2afc1ba70d22543'
+          assert hashlib.sha256((p/'r2719-mixed-action-evidence.cjs').read_bytes()).hexdigest()=='8512f3757110155a8ba81ad6d175f5f364b35b2c70ff0fde862c5ec298866cb3'
           print('R2719_EVIDENCE_VERIFIED',len(states),len(turns),total)
           PY_AUDIT
           (cd ./r2719-evidence && sha256sum *.cjs *.json *.jsonl *.log > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
