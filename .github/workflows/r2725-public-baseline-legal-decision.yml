@@ -1,0 +1,639 @@
+name: R27.25 public legal action and belief-conditioned baseline decision proof
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2725-public-baseline-decision-manual
+  cancel-in-progress: false
+jobs:
+  public_research_only:
+    name: Pinned M-C public legal move-switch ranking and Bayesian forecasts
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch pinned public Showdown and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/showdown"
+          cd "$RUNNER_TEMP/showdown"
+          git init -q
+          git remote add origin https://github.com/smogon/pokemon-showdown.git
+          git fetch --depth 1 origin aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse 'HEAD^{tree}')" = 98c9038b81fa5ed7f1e9818736b701918920501e
+          test "$(node --version)" = v22.18.0
+          npm ci --no-audit --no-fund
+          npm run build
+      - name: Verify pinned compiled distribution
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_DIST'
+          from pathlib import Path
+          import hashlib
+          dist=Path('dist')
+          items=list(dist.rglob('*'))
+          assert not any(p.is_symlink() for p in items)
+          files=sorted((p for p in items if p.is_file()),key=lambda p:p.relative_to(dist).as_posix())
+          assert len(files)==1094,len(files)
+          h=hashlib.sha256()
+          for p in files:
+              n=p.relative_to(dist).as_posix().encode()
+              h.update(len(n).to_bytes(8,'big'))
+              h.update(n)
+              h.update(hashlib.sha256(p.read_bytes()).digest())
+          assert h.hexdigest()=='3697be28e9736b691f005bc5ad7b56789523fbf4ef04d838fcc91f6cfae9c3df'
+          print('R2724_PINNED_DIST_PASS',len(files),h.hexdigest())
+          PY_DIST
+      - name: Retrieve three exact public parent sources
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/6b0d3daa8c3957821604fcbd410287e0f7f389d1/.github/workflows/r2720-public-faint-forced-switch-terminal.yml' -o './r2720-workflow.yml'
+          printf '%s  %s\n' '75dc810599d0d91b747f77bb37e1278f6fa7b782364b537c907591f21454933c' './r2720-workflow.yml' | sha256sum -c -
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/9992d08f6c53fcf487cea7c14da0e9fd916cb67c/.github/workflows/r2722-public-rng-observation-noninterference.yml' -o './r2722-workflow.yml'
+          printf '%s  %s\n' 'e59183d4b3e8e01604d94a05bebb8911114448e69d8e906f0739da0becf187a4' './r2722-workflow.yml' | sha256sum -c -
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/a376645c3096220eed6e9b30758cfd7713eedc06/.github/workflows/r2723-public-multiturn-belief-boundaries.yml' -o './r2723-workflow.yml'
+          printf '%s  %s\n' '5fe1c97be8714313c82392f7901e21debbe036b7b97dadbe32c472654f015b84' './r2723-workflow.yml' | sha256sum -c -
+          python3 - <<'PY_PARENT'
+          from pathlib import Path
+          sources=[
+            ('r2720-workflow.yml','r2720-faint-force-switch-win.cjs','R2720_SOURCE'),
+            ('r2722-workflow.yml','r2722-rng-observation-boundaries.cjs','R2722_SOURCE'),
+            ('r2723-workflow.yml','r2723-multiturn-belief-boundaries.cjs','R2723_SOURCE'),
+          ]
+          for wf,js,tag in sources:
+              contents=Path(wf).read_text()
+              marker="          cat > ./"+js+" <<'"+tag+"'\n"
+              assert contents.count(marker)==1,(wf,'ambiguous marker')
+              block=contents.split(marker,1)[1].split('\n          '+tag+'\n',1)[0]
+              source='\n'.join(line[10:] for line in block.split('\n'))+'\n'
+              Path(js).write_text(source)
+          PY_PARENT
+          printf '%s  %s\n' '2886cc68cc71f866bffb775c5c42d51d9d23eebf3136c9dcb399a610e8387f4b' './r2720-faint-force-switch-win.cjs' | sha256sum -c -
+          node --check ./r2720-faint-force-switch-win.cjs
+          printf '%s  %s\n' '0a4fe39d6e1f3ac1c208171b3c38c9d19a388d618baf1b4bfeab78e1c24b8d7e' './r2722-rng-observation-boundaries.cjs' | sha256sum -c -
+          node --check ./r2722-rng-observation-boundaries.cjs
+          printf '%s  %s\n' 'fed3b7e13eb09f0ffd2bfcb6fb8497ac39da502781994c56c16dbb846a566c49' './r2723-multiturn-belief-boundaries.cjs' | sha256sum -c -
+          node --check ./r2723-multiturn-belief-boundaries.cjs
+      - name: Retrieve R27.24 verified public Bayesian model
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/7080a2a37bb3a325e848ea2a910525b3e5ec56bf/.github/workflows/r2724-public-bayes-belief-action-prediction.yml' -o './r2724-workflow.yml'
+          printf '%s  %s\n' 'e50c3eafc6523a81a236d8f9a2210353f43b29207b482c594a7c0c5b01bc7d83' './r2724-workflow.yml' | sha256sum -c -
+          python3 - <<'PY_PARENT_24'
+          from pathlib import Path
+          source=Path('r2724-workflow.yml').read_text()
+          marker="          cat > ./r2724-bayesian-belief-action-forecast.cjs <<'R2724_SOURCE'\n"
+          assert source.count(marker)==1
+          block=source.split(marker,1)[1].split('\n          R2724_SOURCE\n',1)[0]
+          code='\n'.join(line[10:] for line in block.split('\n'))+'\n'
+          Path('r2724-bayesian-belief-action-forecast.cjs').write_text(code)
+          PY_PARENT_24
+          printf '%s  %s\n' '7291d1fc69850a06ff58e06b5ffb48576e116f106acea3abc1b618947bbf8e44' './r2724-bayesian-belief-action-forecast.cjs' | sha256sum -c -
+          node --check ./r2724-bayesian-belief-action-forecast.cjs
+      - name: Execute R27.25 public legal action adapter and expectation ranking
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          cat > ./r2725-baseline-decision-core.cjs <<'R2725_CORE'
+          #!/usr/bin/env node
+          'use strict';
+          /** R27.25 public-observation legal-action and illustrative one-ply utility adapter.
+           * Deliberately scoped to the pinned M-C single-active research fixture.
+           * No battle state, no RNG, no opponent roster, no hidden model inputs.
+           */
+          const assert=require('node:assert/strict');
+          const ACTIONS=Object.freeze(['attack','setup','status','defend']);
+          const ALLOWED_ROOT=Object.freeze(['phase','turn','own_request','visible_protocol']);
+          const UTILITY=Object.freeze({
+            'move 1':Object.freeze({attack:6,setup:7,status:5,defend:4}),
+            'move 2':Object.freeze({attack:8,setup:4,status:7,defend:2}),
+            'move 3':Object.freeze({attack:3,setup:-2,status:6,defend:0}),
+            'move 4':Object.freeze({attack:2,setup:-3,status:4,defend:-1}),
+            'switch 2':Object.freeze({attack:5,setup:3,status:2,defend:1}),
+            'switch 3':Object.freeze({attack:3,setup:4,status:5,defend:1}),
+          });
+          const SUPPORTED_MOVES=Object.freeze(['smackdown','rockslide','protect','endure']);
+          const clone=x=>JSON.parse(JSON.stringify(x));
+          const expectedKeys=(obj,keys,label)=>{
+            assert(obj&&typeof obj==='object'&&!Array.isArray(obj),label+' invalid object');
+            assert.deepEqual(Object.keys(obj).sort(),[...keys].sort(),label+' shape violation');
+          };
+          function publicContract(obs){
+            expectedKeys(obs,ALLOWED_ROOT,'public observation');
+            assert(['move','switch'].includes(obs.phase),'unsupported battle phase');
+            assert(Number.isInteger(obs.turn)&&obs.turn>=1,'invalid turn');
+            assert(Array.isArray(obs.visible_protocol)&&obs.visible_protocol.every(x=>typeof x==='string'),'invalid public protocol');
+            const req=obs.own_request;
+            assert(req&&typeof req==='object'&&!Array.isArray(req),'missing owner request');
+            assert(req.side&&req.side.id&&['p1','p2'].includes(req.side.id),'invalid owner side');
+            assert(Array.isArray(req.side.pokemon)&&req.side.pokemon.length===3,'unsupported owner team shape');
+            assert(req.side.pokemon.filter(p=>p.active===true).length===1,'unsupported active count');
+            assert(!('wait' in req)&&!('teamPreview' in req),'unsupported request subphase');
+            for(const key of ['canMegaEvo','canMegaEvoX','canMegaEvoY','canTerastallize','canDynamax','canZMove']){
+              if(req.active?.some(p=>p&&p[key]))throw Error('unsupported mechanic option: '+key);
+            }
+            return true;
+          }
+          function availableBench(req){
+            return req.side.pokemon.flatMap((p,i)=>{
+              assert(p&&typeof p==='object'&&typeof p.ident==='string'&&typeof p.condition==='string','unsupported party record');
+              if(p.active===true || /^0(?:\/0)?(?:\s|$)/.test(p.condition) || /\bfnt\b/.test(p.condition))return [];
+              const choice='switch '+(i+1);
+              assert(UTILITY[choice], 'unsupported switch slot '+choice);
+              return [{choice,kind:'switch',name:p.ident}];
+            });
+          }
+          function legalActions(obs){
+            publicContract(obs);
+            const req=obs.own_request;
+            let actions=[];
+            if(obs.phase==='switch'){
+              assert.deepEqual(req.forceSwitch,[true],'unsupported forced switch shape');
+              actions=availableBench(req);
+            }else{
+              assert(!req.forceSwitch,'move phase with switch request');
+              assert(Array.isArray(req.active)&&req.active.length===1,'unsupported move request shape');
+              const active=req.active[0];
+              assert(!active.maybeTrapped,'unknown trapping condition; fail closed');
+              assert(Array.isArray(active.moves)&&active.moves.length===4,'expected exactly four move slots');
+              for(let i=0;i<active.moves.length;i++){
+                const m=active.moves[i];
+                assert(m&&m.id===SUPPORTED_MOVES[i],'unsupported move slot identity');
+                assert(Number.isInteger(m.pp)&&m.pp>=0,'invalid current PP');
+                if(m.disabled===true||m.pp===0)continue;
+                assert(m.disabled===false,'ambiguous disabled flag');
+                actions.push({choice:'move '+(i+1),kind:'move',name:m.move});
+              }
+              if(!active.trapped)actions.push(...availableBench(req));
+            }
+            assert(actions.length>0,'no legal actions in supported fixture');
+            assert(new Set(actions.map(x=>x.choice)).size===actions.length,'duplicate action choices');
+            return actions;
+          }
+          function validateForecast(forecast){
+            expectedKeys(forecast,ACTIONS,'forecast');
+            for(const k of ACTIONS)assert(typeof forecast[k]==='number'&&Number.isFinite(forecast[k])&&forecast[k]>=0&&forecast[k]<=1,'invalid forecast '+k);
+            assert(Math.abs(ACTIONS.reduce((s,k)=>s+forecast[k],0)-1)<1e-9,'forecast must sum to one');
+            return true;
+          }
+          function rankActions(actions,forecast){
+            validateForecast(forecast);
+            assert(Array.isArray(actions)&&actions.length>0,'missing action candidates');
+            assert(new Set(actions.map(x=>x.choice)).size===actions.length,'duplicate ranked actions');
+            return actions.map(a=>{
+              assert(UTILITY[a.choice],'unsupported action utility '+a.choice);
+              const components=Object.fromEntries(ACTIONS.map(k=>[k,UTILITY[a.choice][k]*forecast[k]]));
+              const expected=ACTIONS.reduce((s,k)=>s+components[k],0);
+              return {...clone(a),expected_utility:Number(expected.toFixed(9)),components};
+            }).sort((a,b)=>b.expected_utility-a.expected_utility||a.choice.localeCompare(b.choice));
+          }
+          function decide(observation,forecast){
+            const candidates=legalActions(observation);
+            const ranked=rankActions(candidates,forecast);
+            assert(candidates.length===ranked.length,'lost actions');
+            return {turn:observation.turn,phase:observation.phase,legal_choices:candidates.map(x=>x.choice),ranked,
+              selected:ranked[0].choice,evaluator:'HAND_PARAMETERIZED_ONE_PLY_EXPECTED_UTILITY_NOT_DAMAGE'};
+          }
+          module.exports={ACTIONS,UTILITY,SUPPORTED_MOVES,publicContract,legalActions,rankActions,decide,validateForecast};
+          R2725_CORE
+          printf '%s  %s\n' 'bbfd2bf654709c41184ad69fa1d33deb6bdacbac301a824ad054a25cb9d2ff63' './r2725-baseline-decision-core.cjs' | sha256sum -c -
+          cat > ./r2725-public-decision-integration.cjs <<'R2725_INTEGRATION'
+          #!/usr/bin/env node
+          'use strict';
+          /** R27.25: public baseline choice ranking. All utilities illustrative, NOT damage nor win rates. */
+          const assert=require('node:assert/strict');
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const crypto=require('node:crypto');
+          const {Battle}=require('./dist/sim/battle');
+          const {Dex}=require('./dist/sim/dex');
+          const {State}=require('./dist/sim/state');
+          const {runOnce}=require('./r2720-faint-force-switch-win.cjs');
+          const {viewer}=require('./r2722-rng-observation-boundaries.cjs');
+          const {makeVariants}=require('./r2723-multiturn-belief-boundaries.cjs');
+          const {PublicBelief}=require('./r2724-bayesian-belief-action-forecast.cjs');
+          const {legalActions,decide,validateForecast,UTILITY}=require('./r2725-baseline-decision-core.cjs');
+          const SEED='1,2,3,4';
+          const PREFIX=[['move 3','move 2'],['move 4','move 3'],['move 3','move 2'],['move 4','move 3']];
+          const copy=x=>JSON.parse(JSON.stringify(x));
+          const canonical=x=>Array.isArray(x)?x.map(canonical):x&&typeof x==='object'?
+            Object.fromEntries(Object.keys(x).sort().map(k=>[k,canonical(x[k])])):x;
+          const sha=x=>crypto.createHash('sha256').update(JSON.stringify(canonical(x))).digest('hex');
+          function oracle(b,player,actions){
+            const base=sha(State.normalize(copy(b.toJSON())));
+            for(const action of actions){
+              const replica=Battle.fromJSON(JSON.stringify(b.toJSON()));
+              assert.equal(replica.getSide(player).choose(action.choice),true,'Showdown rejected candidate '+action.choice);
+              assert(!replica.getSide(player).choice.error,'Showdown recorded invalid action '+action.choice);
+              assert.equal(sha(State.normalize(copy(b.toJSON()))),base,'oracle mutated source battle');
+            }
+            return actions.length;
+          }
+          function makeBattle(format,teams){
+            const b=new Battle({formatid:format.id,seed:SEED,strictChoices:true,
+              p1:{name:'Public-P1',team:teams.p1},p2:{name:'Public-P2',team:teams.p2}});
+            assert.equal(b.requestState,'teampreview');
+            b.makeChoices('team 456','team 456');
+            assert.equal(b.requestState,'move');
+            return b;
+          }
+          function runWorld(format,dex,world){
+            const b=makeBattle(format,world.teams);
+            const belief=new PublicBelief(dex);
+            const timeline=[];
+            function capture(){
+              const observation=copy(viewer(b,'p1'));
+              const before=sha(observation);
+              const posterior=belief.observe(observation);
+              const forecast=posterior.next_action_prediction;
+              validateForecast(forecast);
+              const decision=decide(observation,forecast);
+              assert.equal(sha(observation),before,'decision changed observation');
+              assert.deepEqual(decision.legal_choices,['move 1','move 2','move 3','move 4','switch 2','switch 3']);
+              assert.equal(oracle(b,'p1',legalActions(observation)),6);
+              assert.equal(decision.ranked.length,decision.legal_choices.length);
+              assert(decision.ranked.every(x=>Number.isFinite(x.expected_utility)));
+              const record={checkpoint:timeline.length,phase:decision.phase,turn:decision.turn,
+                public_observation_sha256:before,belief_posterior:posterior.posterior,
+                belief_forecast:forecast,legal_choices:decision.legal_choices,
+                selected:decision.selected,ranking:decision.ranked.map(x=>({choice:x.choice,expected_utility:x.expected_utility})),
+                oracle_passed:6};
+              timeline.push(record);
+              return record;
+            }
+            capture();
+            for(const choices of PREFIX){
+              assert.equal(b.requestState,'move','unexpected scripted phase');
+              b.makeChoices(...choices);
+              capture();
+            }
+            assert.equal(timeline.length,5);
+            b.makeChoices('move 3','move 1');
+            assert.equal(b.requestState,'move','reveal unexpectedly ended selectable state');
+            const after=capture();
+            assert.equal(timeline.length,6);
+            assert.equal(after.belief_posterior.filter(x=>x.p>0).length,2);
+            const expected=world.move==='swordsdance'?'move 1':'move 2';
+            assert.equal(after.selected,expected,'reveal-dependent heuristic winner unexpectedly changed');
+            return {id:world.id,secret_move_for_offline_audit:world.move,secret_item_for_offline_audit:world.item,
+              checkpoints:timeline};
+          }
+          function forcedSwitchOracle(){
+            const source=runOnce();
+            const snap=source.states[1].state;
+            const b=Battle.fromJSON(JSON.stringify(snap));
+            assert.equal(b.requestState,'switch');
+            const obs=copy(viewer(b,'p2'));
+            const options=legalActions(obs);
+            assert.deepEqual(options.map(x=>x.choice),['switch 2','switch 3']);
+            assert.equal(oracle(b,'p2',options),2);
+            const forecast={attack:.25,setup:.25,status:.25,defend:.25};
+            const decision=decide(obs,forecast);
+            assert(decision.ranked.every(x=>x.choice.startsWith('switch ')),'forced switch permitted move');
+            return {phase:decision.phase,legal_choices:decision.legal_choices,selected:decision.selected,
+              oracle_passed:2,public_observation_sha256:sha(obs),
+              no_attack_choices:true};
+          }
+          function run(){
+            const {format,dex,cases}=makeVariants();
+            assert.equal(cases.length,6);
+            const worlds=cases.map(w=>runWorld(format,dex,w));
+            const again=cases.map(w=>runWorld(format,dex,w));
+            assert.deepEqual(worlds,again,'independent same-seed decision trace changed');
+            const prefix=worlds[0].checkpoints.slice(0,5);
+            for(const w of worlds){
+              assert.deepEqual(w.checkpoints.slice(0,5),prefix,'hidden state leaked into decisions before reveal');
+              assert.deepEqual(w.checkpoints.map(p=>p.legal_choices),worlds[0].checkpoints.map(p=>p.legal_choices));
+            }
+            for(const move of ['swordsdance','willowisp','flamethrower']){
+              const two=worlds.filter(w=>w.secret_move_for_offline_audit===move);
+              assert.equal(two.length,2);
+              assert.deepEqual(two[0].checkpoints[5],two[1].checkpoints[5],
+                'unrevealed held item changed action ranking');
+            }
+            assert.equal(new Set(worlds.map(w=>w.checkpoints[5].selected)).size,2,
+              'belief-conditioned selection did not respond to observed move');
+            const forced=forcedSwitchOracle();
+            const evidence={worlds,forced,utility_matrix:UTILITY};
+            const receipt={schema:'TRUE_PLAN_R2725_PUBLIC_BASELINE_DECISION_V1',
+              status:'PASS_PUBLIC_SYNTHETIC_ONLY',pinned_showdown_commit:'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',
+              format:format.name,model_kind:'HAND_PARAMETERIZED_PUBLIC_BELIEF_ONE_PLY_HEURISTIC',
+              worlds:6,checkpoints_per_world:6,pre_reveal_noninterference:true,
+              legal_choices_per_move_checkpoint:6,forced_switch_choices:2,
+              oracle_accepted_choices:6*6*6+2, // 6 worlds, 6 checkpoints, 6 choices, plus 2 forced switches
+              reveal_dependent_best_choices:2,hidden_item_noninterference:true,
+              independent_same_seed_replay:true,
+              limitations:['restricted fixed single-active three-of-six Showdown fixture',
+                'supports four configured moves and two bench choices only',
+                'hand-set utility scores are not damage, win probability, learned policy, or measured accuracy',
+                'no Mega, PP-struggle fallback, trapping-by-hidden-information, status edge cases or generalized priority',
+                'Showdown public research only; no native Champions gameplay certification'],
+              certification:{native33:'0/33',exact34:'0/34',actual_game:'0/30',stage15_formal_increment:0,
+                gate:'DENY_FORMAL_CERTIFICATION'}};
+            return {evidence,receipt};
+          }
+          function main(){
+            const out=path.resolve(process.argv[2]||'r2725-evidence');
+            const {evidence,receipt}=run();
+            fs.mkdirSync(out,{recursive:true});
+            const put=(n,v)=>fs.writeFileSync(path.join(out,n),JSON.stringify(v,null,2)+'\n');
+            put('six-worlds-legal-actions-and-utility.json',evidence.worlds);
+            put('forced-switch-legal-actions.json',evidence.forced);
+            put('heuristic-utility-matrix.json',evidence.utility_matrix);
+            put('r2725-receipt.json',receipt);
+            console.log('R2725_PUBLIC_RESULT '+JSON.stringify(receipt));
+          }
+          if(require.main===module)main();
+          module.exports={run,oracle,forcedSwitchOracle};
+          R2725_INTEGRATION
+          printf '%s  %s\n' '656fb82ab9275d9158ddfc637ec1effb087d5e1f4d291405bed0e7bf631d529f' './r2725-public-decision-integration.cjs' | sha256sum -c -
+          cat > ./test_r2725_core.cjs <<'R2725_UNIT'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const fs=require('node:fs');
+          const {decide,legalActions,rankActions,publicContract,validateForecast}=require('./r2725-baseline-decision-core.cjs');
+          const obs=JSON.parse(fs.readFileSync(__dirname+'/r2725-public-fixture.json'));
+          const fc={attack:.12,setup:.58,status:.1,defend:.2};
+          const fw={attack:.12,setup:.08,status:.55,defend:.25};
+          const ff={attack:.62,setup:.08,status:.05,defend:.25};
+          const choices=['move 1','move 2','move 3','move 4','switch 2','switch 3'];
+          assert.deepEqual(legalActions(obs).map(x=>x.choice),choices);
+          assert.equal(decide(obs,fc).selected,'move 1');
+          assert.equal(decide(obs,fw).selected,'move 2');
+          assert.equal(decide(obs,ff).selected,'move 2');
+          for(const forecast of [fc,fw,ff]){
+            const result=decide(obs,forecast);
+            assert.equal(result.ranked.length,6);
+            assert.deepEqual(new Set(result.legal_choices),new Set(choices));
+            assert.deepEqual(result.ranked.map(x=>x.expected_utility), [...result.ranked.map(x=>x.expected_utility)].sort((a,b)=>b-a));
+          }
+          const copy=x=>JSON.parse(JSON.stringify(x));
+          const bench=copy(obs);bench.phase='switch';bench.own_request={forceSwitch:[true],side:obs.own_request.side};
+          assert.deepEqual(legalActions(bench).map(x=>x.choice),['switch 2','switch 3']);
+          const trap=copy(obs);trap.own_request.active[0].trapped=true;
+          assert.deepEqual(legalActions(trap).map(x=>x.choice),choices.slice(0,4));
+          const maybe=copy(obs);maybe.own_request.active[0].maybeTrapped=true;
+          assert.throws(()=>legalActions(maybe),/unknown trapping/);
+          const disabled=copy(obs);disabled.own_request.active[0].moves[0].disabled=true;
+          assert.deepEqual(legalActions(disabled).map(x=>x.choice),choices.slice(1));
+          const noPP=copy(obs);noPP.own_request.active[0].moves[0].pp=0;
+          assert.deepEqual(legalActions(noPP).map(x=>x.choice),choices.slice(1));
+          const faint=copy(obs);faint.own_request.side.pokemon[1].condition='0 fnt';
+          assert.deepEqual(legalActions(faint).map(x=>x.choice),choices.filter(x=>x!=='switch 2'));
+          const disallowed=[
+            [{...obs,prng:'1,2,3,4'},/shape violation/],
+            [{...obs,opponent_hidden_item:'sitrusberry'},/shape violation/],
+            [{...obs,battle:{sides:[]}},/shape violation/],
+            [(()=>{let z=copy(obs);z.phase='team';return z})(),/unsupported battle phase/],
+            [(()=>{let z=copy(obs);z.own_request.active[0].moves[0].id='forged';return z})(),/unsupported move slot identity/],
+            [(()=>{let z=copy(obs);z.own_request.side.pokemon[2].active=true;return z})(),/unsupported active count/],
+          ];
+          for(const [x,pat] of disallowed)assert.throws(()=>legalActions(x),pat);
+          for(const x of [{attack:1,setup:1,status:0,defend:0},{attack:NaN,setup:0,status:0,defend:0},{...fw,hidden:1}]){
+           assert.throws(()=>validateForecast(x));
+          }
+          const prior=JSON.stringify(obs);decide(obs,fc);assert.equal(JSON.stringify(obs),prior,'decision mutated observation');
+          const tab=rankActions(legalActions(obs),fw);assert.equal(tab[0].choice,'move 2');
+          assert.equal(tab[0].components.attack,8*.12);
+          console.log('R2725_PURE_CORE_TEST_PASS',JSON.stringify({cases:30,legal:choices,forced_switch:['switch 2','switch 3'],winner_by_reveal:{swordsdance:'move 1',willowisp:'move 2',flamethrower:'move 2'}}));
+          R2725_UNIT
+          printf '%s  %s\n' '3cfd77961339c554296c9d29390e13c512aaf8b7b8654347663c6f90a1cd29c5' './test_r2725_core.cjs' | sha256sum -c -
+          cat > ./r2725-public-fixture.json <<'R2725_FIXTURE'
+          {
+            "phase": "move",
+            "turn": 1,
+            "own_request": {
+              "active": [
+                {
+                  "moves": [
+                    {
+                      "move": "Smack Down",
+                      "id": "smackdown",
+                      "pp": 16,
+                      "maxpp": 16,
+                      "target": "normal",
+                      "disabled": false
+                    },
+                    {
+                      "move": "Rock Slide",
+                      "id": "rockslide",
+                      "pp": 12,
+                      "maxpp": 12,
+                      "target": "allAdjacentFoes",
+                      "disabled": false
+                    },
+                    {
+                      "move": "Protect",
+                      "id": "protect",
+                      "pp": 8,
+                      "maxpp": 8,
+                      "target": "self",
+                      "disabled": false
+                    },
+                    {
+                      "move": "Endure",
+                      "id": "endure",
+                      "pp": 12,
+                      "maxpp": 12,
+                      "target": "self",
+                      "disabled": false
+                    }
+                  ]
+                }
+              ],
+              "side": {
+                "name": "Public-P1",
+                "id": "p1",
+                "pokemon": [
+                  {
+                    "ident": "p1: Probe4",
+                    "details": "Rhyperior, L50, M",
+                    "condition": "190/190",
+                    "active": true,
+                    "stats": {
+                      "atk": 160,
+                      "def": 150,
+                      "spa": 75,
+                      "spd": 75,
+                      "spe": 60
+                    },
+                    "moves": [
+                      "smackdown",
+                      "rockslide",
+                      "protect",
+                      "endure"
+                    ],
+                    "baseAbility": "lightningrod",
+                    "item": "",
+                    "pokeball": "pokeball",
+                    "ability": "lightningrod",
+                    "commanding": false,
+                    "reviving": false
+                  },
+                  {
+                    "ident": "p1: Probe5",
+                    "details": "Gyarados, L50, F",
+                    "condition": "170/170",
+                    "active": false,
+                    "stats": {
+                      "atk": 145,
+                      "def": 99,
+                      "spa": 80,
+                      "spd": 120,
+                      "spe": 101
+                    },
+                    "moves": [
+                      "bite",
+                      "thunderwave",
+                      "protect",
+                      "endure"
+                    ],
+                    "baseAbility": "intimidate",
+                    "item": "",
+                    "pokeball": "pokeball",
+                    "ability": "intimidate",
+                    "commanding": false,
+                    "reviving": false
+                  },
+                  {
+                    "ident": "p1: Probe6",
+                    "details": "Azumarill, L50, F",
+                    "condition": "175/175",
+                    "active": false,
+                    "stats": {
+                      "atk": 70,
+                      "def": 100,
+                      "spa": 80,
+                      "spd": 100,
+                      "spe": 70
+                    },
+                    "moves": [
+                      "waterfall",
+                      "charm",
+                      "protect",
+                      "endure"
+                    ],
+                    "baseAbility": "thickfat",
+                    "item": "",
+                    "pokeball": "pokeball",
+                    "ability": "thickfat",
+                    "commanding": false,
+                    "reviving": false
+                  }
+                ]
+              }
+            },
+            "visible_protocol": [
+              "|t:|",
+              "|gametype|singles",
+              "|player|p1|Public-P1||",
+              "|player|p2|Public-P2||",
+              "|gen|9",
+              "|tier|[Gen 9 Champions] BSS Reg M-C",
+              "|rule|Species Clause: Limit one of each Pok\u00e9mon",
+              "|rule|Item Clause: Limit 1 of each item",
+              "|clearpoke",
+              "|poke|p1|Venusaur, L50, M|",
+              "|poke|p1|Blastoise, L50, F|",
+              "|poke|p1|Snorlax, L50, F|",
+              "|poke|p1|Rhyperior, L50, M|",
+              "|poke|p1|Gyarados, L50, F|",
+              "|poke|p1|Azumarill, L50, F|",
+              "|poke|p2|Venusaur, L50, F|",
+              "|poke|p2|Blastoise, L50, M|",
+              "|poke|p2|Snorlax, L50, F|",
+              "|poke|p2|Charizard, L50, F|",
+              "|poke|p2|Talonflame, L50, M|",
+              "|poke|p2|Volcarona, L50, M|",
+              "|teampreview|3",
+              "|",
+              "|t:|",
+              "|teamsize|p1|3",
+              "|teamsize|p2|3",
+              "|start",
+              "|switch|p1a: Probe4|Rhyperior, L50, M|190/190",
+              "|switch|p2a: Target4|Charizard, L50, F|100/100",
+              "|turn|1"
+            ]
+          }
+          R2725_FIXTURE
+          printf '%s  %s\n' '975114a34eb3f0f496527d96032cc58f2b384eeb57dacd7b57639e6142ef0c53' './r2725-public-fixture.json' | sha256sum -c -
+          node --check ./r2725-baseline-decision-core.cjs
+          node --check ./r2725-public-decision-integration.cjs
+          node --check ./test_r2725_core.cjs
+          node ./test_r2725_core.cjs
+          node ./r2725-public-decision-integration.cjs ./r2725-evidence | tee ./r2725-console.log
+          cp ./r2720-faint-force-switch-win.cjs ./r2725-evidence/
+          cp ./r2722-rng-observation-boundaries.cjs ./r2725-evidence/
+          cp ./r2723-multiturn-belief-boundaries.cjs ./r2725-evidence/
+          cp ./r2724-bayesian-belief-action-forecast.cjs ./r2725-evidence/
+          cp ./r2725-baseline-decision-core.cjs ./r2725-evidence/
+          cp ./r2725-public-decision-integration.cjs ./r2725-evidence/
+          cp ./test_r2725_core.cjs ./r2725-evidence/
+          cp ./r2725-public-fixture.json ./r2725-evidence/
+      - name: Audit public baseline decision receipt and evidence
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          python3 - <<'PY_AUDIT'
+          from pathlib import Path
+          import hashlib,json,math
+          p=Path('r2725-evidence')
+          required={
+              'r2720-faint-force-switch-win.cjs',
+              'r2722-rng-observation-boundaries.cjs',
+              'r2723-multiturn-belief-boundaries.cjs',
+              'r2724-bayesian-belief-action-forecast.cjs',
+              'r2725-baseline-decision-core.cjs',
+              'r2725-public-decision-integration.cjs',
+              'test_r2725_core.cjs','r2725-public-fixture.json',
+              'six-worlds-legal-actions-and-utility.json',
+              'forced-switch-legal-actions.json',
+              'heuristic-utility-matrix.json','r2725-receipt.json',
+          }
+          assert {x.name for x in p.iterdir()}==required
+          size=sum(x.stat().st_size for x in p.iterdir())
+          assert 0<size<=8*1024*1024
+          r=json.loads((p/'r2725-receipt.json').read_text())
+          w=json.loads((p/'six-worlds-legal-actions-and-utility.json').read_text())
+          forced=json.loads((p/'forced-switch-legal-actions.json').read_text())
+          assert r['status']=='PASS_PUBLIC_SYNTHETIC_ONLY'
+          assert r['worlds']==len(w)==6 and r['checkpoints_per_world']==6
+          assert r['oracle_accepted_choices']==218
+          assert forced['legal_choices']==['switch 2','switch 3'] and forced['oracle_passed']==2
+          assert all(len(x['checkpoints'])==6 for x in w)
+          assert all(all(z['oracle_passed']==6 and len(z['legal_choices'])==6 for z in x['checkpoints']) for x in w)
+          assert r['certification']=={'native33':'0/33','exact34':'0/34','actual_game':'0/30',
+              'stage15_formal_increment':0,'gate':'DENY_FORMAL_CERTIFICATION'}
+          print('R2725_EVIDENCE_AUDIT_PASS',len(w),size)
+          PY_AUDIT
+          cd r2725-evidence
+          sha256sum * > SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
+      - name: Upload synthetic public R27.25 proof
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2725-public-legal-action-belief-decision-proof
+          path: ${{ runner.temp }}/showdown/r2725-evidence
+          retention-days: 7
+          if-no-files-found: error
