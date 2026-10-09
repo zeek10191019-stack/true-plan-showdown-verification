@@ -1,0 +1,135 @@
+name: T010 official roster browser-render diagnostic R12
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  roster-browser-diagnostic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      REPO_PRIVATE: ${{ github.event.repository.private }}
+      M7_URL: https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178955680104qaiodg/ja/pokemon.html
+      MC_URL: https://web-view.app.pokemonchampions.jp/battle/pages/events/rs178713870219xeaaio/ja/pokemon.html
+    steps:
+      - name: Public repository guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$REPO_PRIVATE" = false
+          echo PASS_PUBLIC_REPOSITORY_ONLY
+
+      - name: Fetch raw HTML and browser-rendered HTML
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/t010"
+          browser="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$browser" || { echo 'FAIL_NO_PREINSTALLED_CHROME'; exit 1; }
+          "$browser" --version
+          for tag in m7 mc; do
+            if [ "$tag" = m7 ]; then url="$M7_URL"; else url="$MC_URL"; fi
+            curl --proto '=https' --proto-redir '=https' --fail --location --max-redirs 2 --retry 1 --connect-timeout 15 --max-time 60 --silent --show-error --compressed \
+              --write-out "T010_CURL_$tag http=%{http_code} type=%{content_type} effective=%{url_effective} bytes=%{size_download}\n" \
+              "$url" --output "$RUNNER_TEMP/t010/$tag.raw.html"
+            timeout 90s "$browser" --headless=new --disable-gpu --disable-dev-shm-usage --no-first-run --no-default-browser-check \
+              --user-data-dir="$RUNNER_TEMP/t010/chrome-$tag" --virtual-time-budget=30000 --dump-dom "$url" \
+              > "$RUNNER_TEMP/t010/$tag.rendered.html" 2> "$RUNNER_TEMP/t010/$tag.browser-stderr.txt" || {
+              echo "FAIL_BROWSER_RENDER_$tag"
+              tail -n 8 "$RUNNER_TEMP/t010/$tag.browser-stderr.txt" || true
+              exit 1
+            }
+            test -s "$RUNNER_TEMP/t010/$tag.rendered.html" || { echo "FAIL_EMPTY_RENDER_$tag"; exit 1; }
+            sha256sum "$RUNNER_TEMP/t010/$tag.raw.html" "$RUNNER_TEMP/t010/$tag.rendered.html"
+          done
+
+      - name: Audit rendered visible rows and fail closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/t010" <<'PY'
+          import hashlib
+          import json
+          import re
+          import sys
+          import unicodedata
+          from collections import Counter
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          class Visible(HTMLParser):
+              block = {'div', 'p', 'li', 'tr', 'br', 'h1', 'h2', 'h3', 'section', 'article'}
+              skip = {'script', 'style', 'noscript', 'template', 'svg'}
+              def __init__(self):
+                  super().__init__(convert_charrefs=True)
+                  self.parts = []
+                  self.skip_stack = []
+              def handle_starttag(self, tag, attrs):
+                  if self.skip_stack:
+                      if tag in self.skip: self.skip_stack.append(tag)
+                      return
+                  if tag in self.skip: self.skip_stack.append(tag)
+                  elif tag in self.block: self.parts.append('\n')
+              def handle_endtag(self, tag):
+                  if self.skip_stack:
+                      if tag == self.skip_stack[-1]: self.skip_stack.pop()
+                      return
+                  if tag in self.block: self.parts.append('\n')
+              def handle_data(self, value):
+                  if not self.skip_stack: self.parts.append(value)
+
+          row_pattern = re.compile(r'^No[.．]\s*(\d{4})(?:\s+(.+))?$', re.I)
+          def inspect(tag, kind):
+              path = root / f'{tag}.{kind}.html'
+              raw = path.read_bytes()
+              if b'\0' in raw or len(raw) < 100 or len(raw) > 10_000_000:
+                  raise ValueError(f'BAD_HTML_BYTES_{tag}_{kind}')
+              html = raw.decode('utf-8-sig', 'strict')
+              view = Visible(); view.feed(html)
+              txt = unicodedata.normalize('NFKC', ''.join(view.parts))
+              lines = [x.strip() for x in txt.splitlines() if x.strip()]
+              candidates = [(i, row_pattern.match(x)) for i, x in enumerate(lines) if x.lower().startswith('no.')]
+              rows = []
+              for i, match in candidates:
+                  if match is None: continue
+                  dex = int(match.group(1))
+                  name = match.group(2) or (lines[i + 1] if i + 1 < len(lines) else '')
+                  if name.lower().startswith('no.') or not 1 <= dex <= 1025 or not 1 <= len(name) <= 100:
+                      continue
+                  rows.append((dex, name))
+              occurrences = Counter(rows)
+              report = {
+                  'source': tag, 'view': kind, 'raw_bytes': len(raw),
+                  'sha256': hashlib.sha256(raw).hexdigest(),
+                  'visible_text_length': len(txt), 'candidate_count': len(candidates),
+                  'row_count': len(rows), 'unique_display_rows': len(occurrences),
+                  'distinct_dex': len({n for n, _ in rows}),
+                  'duplicate_display_rows': [{'dex': d, 'name': n, 'count': count}
+                      for (d, n), count in sorted(occurrences.items()) if count > 1],
+                  'first_rows': rows[:5], 'last_rows': rows[-5:],
+              }
+              print('T010_R12_DIAGNOSTIC', json.dumps(report, ensure_ascii=False, sort_keys=True))
+              return rows
+
+          data = {}
+          for tag in ('m7', 'mc'):
+              raw_rows = inspect(tag, 'raw')
+              rendered_rows = inspect(tag, 'rendered')
+              data[tag] = rendered_rows
+              if not raw_rows and rendered_rows:
+                  print('PASS_JS_RENDER_RECOVERED', tag)
+          if len(data['m7']) < 100 or len(data['mc']) < 100:
+              raise ValueError('RENDERED_ROSTER_INCOMPLETE__NO_CERTIFICATION')
+          if data['m7'] != data['mc']:
+              raise ValueError('M7_MC_RENDERED_ROSTER_DIFFERENCE__AUDIT_REQUIRED')
+          for tag, rows in data.items():
+              for ordinal, (dex, name) in enumerate(rows, 1):
+                  print('T010_R12_ROW', json.dumps({'source': tag, 'ordinal': ordinal,
+                      'dex': dex, 'name': name}, ensure_ascii=False))
+          print('PASS_T010_R12_RENDERED_DISPLAY_ROSTER_COMPARISON__NOT_CANONICAL')
+          print('NOT_CERTIFIED: form identity, legal moves/items/abilities/mega, current game parity, T011, Native33=0/33, Exact34=0/34, Stage1.5 historical 560/3500')
+          PY
