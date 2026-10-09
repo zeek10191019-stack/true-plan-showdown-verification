@@ -1,0 +1,711 @@
+name: 'R27 one-file pinned dual build and Native snapshot probe'
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build_a:
+    name: R27 pinned build A
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      dist: ${{ steps.receipt.outputs.dist_root_sha256 }}
+      count: ${{ steps.receipt.outputs.dist_file_count }}
+      lock: ${{ steps.receipt.outputs.lock_sha256 }}
+      package: ${{ steps.receipt.outputs.package_sha256 }}
+      script: ${{ steps.receipt.outputs.champions_scripts_sha256 }}
+      sha: ${{ steps.receipt.outputs.verifier_sha }}
+      run: ${{ steps.receipt.outputs.run_id }}
+      attempt: ${{ steps.receipt.outputs.run_attempt }}
+    steps:
+      - name: Checkout ONLY public verifier (no private source)
+        uses: actions/checkout@v4
+      - name: R27 materialize public-only pinned verifier (no repo files required)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+          cat > tools/t008_emit_v2.py <<'R27_VERIFIER_PAYLOAD_EOF'
+          #!/usr/bin/env python3
+          """R26 T008 public source full-file dist digest, transferred only as workflow job outputs.
+          No artifact, private code, paid external API, or cache involved.
+          """
+          import argparse
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+          
+          PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          TREE = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          NODE = 'v22.18.0'
+          
+          
+          def sha_file(path):
+              h = hashlib.sha256()
+              with path.open('rb') as handle:
+                  for b in iter(lambda: handle.read(1024 * 1024), b''):
+                      h.update(b)
+              return h.hexdigest()
+          
+          
+          def dist_digest(dist):
+              if not dist.is_dir() or dist.is_symlink():
+                  raise ValueError('missing or symlinked dist directory')
+              entries = []
+              for p in sorted(dist.rglob('*')):
+                  if p.is_symlink():
+                      raise ValueError('dist contains symlink')
+                  if p.is_file():
+                      rel = p.relative_to(dist).as_posix()
+                      if '\n' in rel or '\r' in rel or '\0' in rel:
+                          raise ValueError('unsafe dist filename')
+                      entries.append((rel, sha_file(p)))
+              if not entries:
+                  raise ValueError('empty dist')
+              h = hashlib.sha256()
+              for rel, digest in entries:
+                  # Unambiguous length-prefixed binary encoding for paths and file digests.
+                  encoded = rel.encode('utf-8')
+                  h.update(len(encoded).to_bytes(8, 'big'))
+                  h.update(encoded)
+                  h.update(bytes.fromhex(digest))
+              return h.hexdigest(), entries
+          
+          
+          def cmd(*args, cwd):
+              return subprocess.check_output(args, cwd=cwd, text=True).strip()
+          
+          
+          def emit(source, lane, repo, run_id, run_attempt, verifier_sha):
+              if lane not in ('a', 'b'):
+                  raise ValueError('wrong lane')
+              if not repo or not repo.startswith('zeek10191019-stack/true-plan-showdown-verification'):
+                  raise ValueError('unexpected public verifier repository')
+              if not str(run_id).isdigit() or not str(run_attempt).isdigit():
+                  raise ValueError('missing Actions run identity')
+              if len(verifier_sha) != 40 or any(x not in '0123456789abcdef' for x in verifier_sha):
+                  raise ValueError('invalid verifier SHA')
+              source = pathlib.Path(source).resolve(strict=True)
+              if cmd('git', 'rev-parse', 'HEAD', cwd=source) != PIN:
+                  raise ValueError('source commit mismatch')
+              if cmd('git', 'rev-parse', 'HEAD^{tree}', cwd=source) != TREE:
+                  raise ValueError('source tree mismatch')
+              if cmd('node', '--version', cwd=source) != NODE:
+                  raise ValueError('Node version mismatch')
+              lock = source / 'package-lock.json'
+              package = source / 'package.json'
+              scripts = source / 'data/mods/champions/scripts.ts'
+              for p in (lock, package, scripts):
+                  if not p.is_file() or p.is_symlink():
+                      raise ValueError('missing/symlink source file ' + str(p))
+              root, entries = dist_digest(source / 'dist')
+              return dict(schema='TRUE_PLAN_T008_JOB_DIGEST_V2', lane=lane, verifier_repo=repo,
+                          run_id=int(run_id), run_attempt=int(run_attempt), verifier_sha=verifier_sha,
+                          pinned_commit=PIN, pinned_tree=TREE, node=NODE,
+                          dist_root_sha256=root, dist_file_count=len(entries),
+                          lock_sha256=sha_file(lock), package_sha256=sha_file(package),
+                          champions_scripts_sha256=sha_file(scripts))
+          
+          
+          def main():
+              p = argparse.ArgumentParser()
+              p.add_argument('--source', required=True)
+              p.add_argument('--lane', required=True)
+              p.add_argument('--output', required=True)
+              args = p.parse_args()
+              r = emit(args.source, args.lane, os.environ.get('GITHUB_REPOSITORY', ''),
+                       os.environ.get('GITHUB_RUN_ID', ''), os.environ.get('GITHUB_RUN_ATTEMPT', ''),
+                       os.environ.get('GITHUB_SHA', ''))
+              print('T008 public full dist digest receipt:', json.dumps(r, sort_keys=True))
+              with open(args.output, 'a', encoding='utf-8') as f:
+                  for k in ('dist_root_sha256','dist_file_count','lock_sha256','package_sha256',
+                            'champions_scripts_sha256','verifier_sha','run_id','run_attempt'):
+                      f.write(f'{k}={r[k]}\n')
+              print('T008 published only digest outputs, no artifact stored.')
+          
+          
+          if __name__ == '__main__':
+              main()
+          R27_VERIFIER_PAYLOAD_EOF
+          cat > tools/t025_native_mc_probe.js <<'R27_VERIFIER_PAYLOAD_EOF'
+          'use strict';
+          // Public/synthetic pinned Showdown M-C probe. Not actual Champions-game validation.
+          // Called: node t025_native_mc_probe.js /absolute/path/to/pinned-showdown-source out.json
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const crypto=require('node:crypto');
+          const cp=require('node:child_process');
+          const assert=require('node:assert/strict');
+          const ROOT=process.argv[2]&&path.resolve(process.argv[2]);
+          const OUT=process.argv[3]&&path.resolve(process.argv[3]);
+          const PIN='aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const TREE='98c9038b81fa5ed7f1e9818736b701918920501e';
+          const sha=(v)=>crypto.createHash('sha256').update(v).digest('hex');
+          const run=(cmd,args)=>cp.execFileSync(cmd,args,{cwd:ROOT,encoding:'utf8'}).trim();
+          const status={schema:'TRUE_PLAN_T025_MC_NATIVE_PROBE_V1',
+           status:'NOT_RUN',pinned_commit:PIN,tree:TREE,node:process.version,
+           native33:'0/33',exact34:'0/34',formal_battles_increment:0,
+           scope:'Public Showdown M-C synthetic-state deterministic/snapshot probe only'};
+          function fail(message){status.status='FAIL_UNCERTIFIED';status.error=String(message);}
+          try {
+           if(!ROOT||!OUT) throw Error('usage: node t025_native_mc_probe.js <source> <out.json>');
+           assert.equal(run('git',['rev-parse','HEAD']),PIN);
+           assert.equal(run('git',['rev-parse','HEAD^{tree}']),TREE);
+           assert.equal(process.version,'v22.18.0');
+           const {Battle}=require(path.join(ROOT,'dist/sim/battle'));
+           const {Dex}=require(path.join(ROOT,'dist/sim/dex'));
+           const {State}=require(path.join(ROOT,'dist/sim/state'));
+           const f=Dex.formats.get('gen9championsbssregmc');
+           assert(f.exists && f.mod==='champions','M-C format or mod not found');
+           status.format=f.name;status.mod=f.mod;
+           const teamNames=['Garchomp','Mimikyu','Gyarados','Sylveon','Delphox','Archaludon'];
+           const team=teamNames.map(species=>({species,level:50,moves:['tackle','protect']}));
+           function start(){return new Battle({formatid:f.id,seed:'1,2,3,4',
+             p1:{name:'Synthetic-P1',team:JSON.parse(JSON.stringify(team))},
+             p2:{name:'Synthetic-P2',team:JSON.parse(JSON.stringify(team))}});}
+           function choose(b){
+             if(b.requestState==='teampreview') b.makeChoices('team 123','team 123');
+             assert.equal(b.requestState,'move','expected move request after team preview');
+             b.makeChoices('move 1','move 1');
+           }
+           function norm(b){return JSON.stringify(State.normalize(b.toJSON()));}
+           const original=start(); const reproduced=start();
+           choose(original); choose(reproduced);
+           const frozenJSON=JSON.stringify(original.toJSON());
+           assert.equal(norm(original),norm(reproduced),'same prefix+seed must replay identically');
+           const prefix=sha(JSON.stringify(original.inputLog));
+           const restored=Battle.fromJSON(original.toJSON());
+           assert.equal(norm(original),norm(restored),'snapshot restore differs');
+           assert.equal(sha(JSON.stringify(restored.inputLog)),prefix,'prefix changed on restore');
+           const snapA=Battle.fromJSON(original.toJSON());
+           const snapB=Battle.fromJSON(original.toJSON());
+           const snapC=Battle.fromJSON(original.toJSON());
+           // Set future RNG *only*, never resetRNG (which logs a message), no prefix replay.
+           snapA.prng.setSeed('111,222,333,444');
+           snapB.prng.setSeed('111,222,333,444');
+           snapC.prng.setSeed('555,666,777,888');
+           assert.equal(sha(JSON.stringify(snapA.inputLog)),prefix,'future seed modified history');
+           assert.equal(sha(JSON.stringify(snapC.inputLog)),prefix,'alternate future seed modified history');
+           const futureA=Array.from({length:12},()=>snapA.random());
+           const futureB=Array.from({length:12},()=>snapB.random());
+           const futureC=Array.from({length:12},()=>snapC.random());
+           assert.deepEqual(futureA,futureB,'same future seed not deterministic');
+           assert.notDeepEqual(futureA,futureC,'different future seeds produce same draw sequence');
+           assert.equal(JSON.stringify(original.toJSON()),frozenJSON,'clones mutated original');
+           // Verify branch A and B have identical deterministic in-battle continuation after
+           // setting the *same* future seed again. Reusing arrays above consumed the streams.
+           snapA.prng.setSeed('111,222,333,444');
+           snapB.prng.setSeed('111,222,333,444');
+           assert.equal(snapA.requestState,'move');
+           snapA.makeChoices('move 1','move 1');
+           snapB.makeChoices('move 1','move 1');
+           assert.equal(norm(snapA),norm(snapB),'identical branch continuation diverged');
+           assert.equal(JSON.stringify(original.toJSON()),frozenJSON,'branch continued into original');
+           const origReplay=Battle.fromJSON(original.toJSON());
+           const snapReplay=Battle.fromJSON(original.toJSON());
+           origReplay.makeChoices('move 1','move 1');
+           snapReplay.makeChoices('move 1','move 1');
+           assert.equal(norm(origReplay),norm(snapReplay),'prefix replay vs snapshot continuation mismatch');
+           status.status='PASS_PUBLIC_NATIVE_NONCERTIFYING';
+           status.prefix_sha256=prefix;
+           status.initial_snapshot_sha256=sha(norm(original));
+           status.same_seed_future_stream_sha256=sha(JSON.stringify(futureA));
+           status.alternate_seed_stream_sha256=sha(JSON.stringify(futureC));
+           status.checks=['pinned_source_tree','M-C mod','prefix_deterministic','snapshot_roundtrip',
+            'history_immutable_on_future_seed','same_future_seed_equal','different_future_seed_diverges',
+            'clone_isolation','continued_battle_same_seed','prefix_vs_snapshot_continuation'];
+           status.limits='Cannot prove exact M-C stochastic distribution, actual game parity, 33/34 physics cases, or full private provider wiring.';
+          } catch(e){fail(e.stack||e.message||e);}
+          if(OUT){fs.mkdirSync(path.dirname(OUT),{recursive:true});fs.writeFileSync(OUT,JSON.stringify(status,null,2)+'\n');}
+          console.log(JSON.stringify(status,null,2));
+          if(status.status!=='PASS_PUBLIC_NATIVE_NONCERTIFYING')process.exitCode=1;
+          R27_VERIFIER_PAYLOAD_EOF
+          cat > tools/t025_receipt_check.py <<'R27_VERIFIER_PAYLOAD_EOF'
+          #!/usr/bin/env python3
+          """R25 T025 native probe receipt gate: evidence never self-certifies Champions mechanics."""
+          import argparse, json, pathlib, re
+          EXPECTED={'schema':'TRUE_PLAN_T025_MC_NATIVE_PROBE_V1','status':'PASS_PUBLIC_NATIVE_NONCERTIFYING',
+              'pinned_commit':'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',
+              'tree':'98c9038b81fa5ed7f1e9818736b701918920501e','node':'v22.18.0',
+              'native33':'0/33','exact34':'0/34','formal_battles_increment':0,'mod':'champions'}
+          REQUIRED={'pinned_source_tree','M-C mod','prefix_deterministic','snapshot_roundtrip',
+              'history_immutable_on_future_seed','same_future_seed_equal','different_future_seed_diverges',
+              'clone_isolation','continued_battle_same_seed','prefix_vs_snapshot_continuation'}
+          HEX=re.compile(r'[0-9a-f]{64}\Z')
+          def check(r):
+              if not isinstance(r,dict):return 'INVALID_RECEIPT'
+              if any(r.get(k)!=v for k,v in EXPECTED.items()):return 'INVALID_RECEIPT'
+              if not isinstance(r.get('checks'),list) or set(r['checks'])!=REQUIRED:return 'INVALID_RECEIPT'
+              if any(not isinstance(r.get(k),str) or not HEX.fullmatch(r[k]) for k in (
+                      'prefix_sha256','initial_snapshot_sha256','same_seed_future_stream_sha256','alternate_seed_stream_sha256')):
+                  return 'INVALID_RECEIPT'
+              if r['same_seed_future_stream_sha256']==r['alternate_seed_stream_sha256']:
+                  return 'INVALID_RECEIPT'
+              return 'NATIVE_PROBE_CLAIM_REQUIRES_INDEPENDENT_LOG_REVIEW'
+          if __name__=='__main__':
+              ap=argparse.ArgumentParser();ap.add_argument('receipt');ap.add_argument('--out',required=True);a=ap.parse_args()
+              try:s=check(json.loads(pathlib.Path(a.receipt).read_text()))
+              except (OSError,ValueError):s='INVALID_RECEIPT'
+              pathlib.Path(a.out).write_text(json.dumps({'status':s,'native33':'0/33','exact34':'0/34'},indent=2)+'\n')
+              print(s);raise SystemExit(0 if s.startswith('NATIVE_PROBE_CLAIM') else 2)
+          R27_VERIFIER_PAYLOAD_EOF
+      - name: Pin Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Retrieve exact public Showdown tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/showdown"
+          cd "$RUNNER_TEMP/showdown"
+          git init -q
+          git remote add origin https://github.com/smogon/pokemon-showdown.git
+          git fetch --depth 1 origin aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse 'HEAD^{tree}')" = 98c9038b81fa5ed7f1e9818736b701918920501e
+      - name: Fresh npm install and full build
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node -e 'const {Dex}=require("./dist/sim/dex");const f=Dex.formats.get("gen9championsbssregmc");if(!f.exists||f.mod!=="champions")process.exit(11);console.log("M-C SMOKE OK:", f.name)'
+      - name: Digest complete dist tree (no uploaded artifacts)
+        id: receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/t008_emit_v2.py --source "$RUNNER_TEMP/showdown" --lane a --output "$GITHUB_OUTPUT"
+      - name: Native M-C snapshot/PRNG noncertifying probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/t025_native_mc_probe.js "$RUNNER_TEMP/showdown" "$RUNNER_TEMP/t025.json"
+          python3 tools/t025_receipt_check.py "$RUNNER_TEMP/t025.json" --out "$RUNNER_TEMP/t025-check.json"
+          cat "$RUNNER_TEMP/t025-check.json"
+          echo 'T025 probe is research-only; does not increment Native33, Exact34, or match counts.'
+  build_b:
+    name: R27 pinned build B
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      dist: ${{ steps.receipt.outputs.dist_root_sha256 }}
+      count: ${{ steps.receipt.outputs.dist_file_count }}
+      lock: ${{ steps.receipt.outputs.lock_sha256 }}
+      package: ${{ steps.receipt.outputs.package_sha256 }}
+      script: ${{ steps.receipt.outputs.champions_scripts_sha256 }}
+      sha: ${{ steps.receipt.outputs.verifier_sha }}
+      run: ${{ steps.receipt.outputs.run_id }}
+      attempt: ${{ steps.receipt.outputs.run_attempt }}
+    steps:
+      - name: Checkout ONLY public verifier (no private source)
+        uses: actions/checkout@v4
+      - name: R27 materialize public-only pinned verifier (no repo files required)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+          cat > tools/t008_emit_v2.py <<'R27_VERIFIER_PAYLOAD_EOF'
+          #!/usr/bin/env python3
+          """R26 T008 public source full-file dist digest, transferred only as workflow job outputs.
+          No artifact, private code, paid external API, or cache involved.
+          """
+          import argparse
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import subprocess
+          
+          PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          TREE = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          NODE = 'v22.18.0'
+          
+          
+          def sha_file(path):
+              h = hashlib.sha256()
+              with path.open('rb') as handle:
+                  for b in iter(lambda: handle.read(1024 * 1024), b''):
+                      h.update(b)
+              return h.hexdigest()
+          
+          
+          def dist_digest(dist):
+              if not dist.is_dir() or dist.is_symlink():
+                  raise ValueError('missing or symlinked dist directory')
+              entries = []
+              for p in sorted(dist.rglob('*')):
+                  if p.is_symlink():
+                      raise ValueError('dist contains symlink')
+                  if p.is_file():
+                      rel = p.relative_to(dist).as_posix()
+                      if '\n' in rel or '\r' in rel or '\0' in rel:
+                          raise ValueError('unsafe dist filename')
+                      entries.append((rel, sha_file(p)))
+              if not entries:
+                  raise ValueError('empty dist')
+              h = hashlib.sha256()
+              for rel, digest in entries:
+                  # Unambiguous length-prefixed binary encoding for paths and file digests.
+                  encoded = rel.encode('utf-8')
+                  h.update(len(encoded).to_bytes(8, 'big'))
+                  h.update(encoded)
+                  h.update(bytes.fromhex(digest))
+              return h.hexdigest(), entries
+          
+          
+          def cmd(*args, cwd):
+              return subprocess.check_output(args, cwd=cwd, text=True).strip()
+          
+          
+          def emit(source, lane, repo, run_id, run_attempt, verifier_sha):
+              if lane not in ('a', 'b'):
+                  raise ValueError('wrong lane')
+              if not repo or not repo.startswith('zeek10191019-stack/true-plan-showdown-verification'):
+                  raise ValueError('unexpected public verifier repository')
+              if not str(run_id).isdigit() or not str(run_attempt).isdigit():
+                  raise ValueError('missing Actions run identity')
+              if len(verifier_sha) != 40 or any(x not in '0123456789abcdef' for x in verifier_sha):
+                  raise ValueError('invalid verifier SHA')
+              source = pathlib.Path(source).resolve(strict=True)
+              if cmd('git', 'rev-parse', 'HEAD', cwd=source) != PIN:
+                  raise ValueError('source commit mismatch')
+              if cmd('git', 'rev-parse', 'HEAD^{tree}', cwd=source) != TREE:
+                  raise ValueError('source tree mismatch')
+              if cmd('node', '--version', cwd=source) != NODE:
+                  raise ValueError('Node version mismatch')
+              lock = source / 'package-lock.json'
+              package = source / 'package.json'
+              scripts = source / 'data/mods/champions/scripts.ts'
+              for p in (lock, package, scripts):
+                  if not p.is_file() or p.is_symlink():
+                      raise ValueError('missing/symlink source file ' + str(p))
+              root, entries = dist_digest(source / 'dist')
+              return dict(schema='TRUE_PLAN_T008_JOB_DIGEST_V2', lane=lane, verifier_repo=repo,
+                          run_id=int(run_id), run_attempt=int(run_attempt), verifier_sha=verifier_sha,
+                          pinned_commit=PIN, pinned_tree=TREE, node=NODE,
+                          dist_root_sha256=root, dist_file_count=len(entries),
+                          lock_sha256=sha_file(lock), package_sha256=sha_file(package),
+                          champions_scripts_sha256=sha_file(scripts))
+          
+          
+          def main():
+              p = argparse.ArgumentParser()
+              p.add_argument('--source', required=True)
+              p.add_argument('--lane', required=True)
+              p.add_argument('--output', required=True)
+              args = p.parse_args()
+              r = emit(args.source, args.lane, os.environ.get('GITHUB_REPOSITORY', ''),
+                       os.environ.get('GITHUB_RUN_ID', ''), os.environ.get('GITHUB_RUN_ATTEMPT', ''),
+                       os.environ.get('GITHUB_SHA', ''))
+              print('T008 public full dist digest receipt:', json.dumps(r, sort_keys=True))
+              with open(args.output, 'a', encoding='utf-8') as f:
+                  for k in ('dist_root_sha256','dist_file_count','lock_sha256','package_sha256',
+                            'champions_scripts_sha256','verifier_sha','run_id','run_attempt'):
+                      f.write(f'{k}={r[k]}\n')
+              print('T008 published only digest outputs, no artifact stored.')
+          
+          
+          if __name__ == '__main__':
+              main()
+          R27_VERIFIER_PAYLOAD_EOF
+          cat > tools/t025_native_mc_probe.js <<'R27_VERIFIER_PAYLOAD_EOF'
+          'use strict';
+          // Public/synthetic pinned Showdown M-C probe. Not actual Champions-game validation.
+          // Called: node t025_native_mc_probe.js /absolute/path/to/pinned-showdown-source out.json
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const crypto=require('node:crypto');
+          const cp=require('node:child_process');
+          const assert=require('node:assert/strict');
+          const ROOT=process.argv[2]&&path.resolve(process.argv[2]);
+          const OUT=process.argv[3]&&path.resolve(process.argv[3]);
+          const PIN='aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const TREE='98c9038b81fa5ed7f1e9818736b701918920501e';
+          const sha=(v)=>crypto.createHash('sha256').update(v).digest('hex');
+          const run=(cmd,args)=>cp.execFileSync(cmd,args,{cwd:ROOT,encoding:'utf8'}).trim();
+          const status={schema:'TRUE_PLAN_T025_MC_NATIVE_PROBE_V1',
+           status:'NOT_RUN',pinned_commit:PIN,tree:TREE,node:process.version,
+           native33:'0/33',exact34:'0/34',formal_battles_increment:0,
+           scope:'Public Showdown M-C synthetic-state deterministic/snapshot probe only'};
+          function fail(message){status.status='FAIL_UNCERTIFIED';status.error=String(message);}
+          try {
+           if(!ROOT||!OUT) throw Error('usage: node t025_native_mc_probe.js <source> <out.json>');
+           assert.equal(run('git',['rev-parse','HEAD']),PIN);
+           assert.equal(run('git',['rev-parse','HEAD^{tree}']),TREE);
+           assert.equal(process.version,'v22.18.0');
+           const {Battle}=require(path.join(ROOT,'dist/sim/battle'));
+           const {Dex}=require(path.join(ROOT,'dist/sim/dex'));
+           const {State}=require(path.join(ROOT,'dist/sim/state'));
+           const f=Dex.formats.get('gen9championsbssregmc');
+           assert(f.exists && f.mod==='champions','M-C format or mod not found');
+           status.format=f.name;status.mod=f.mod;
+           const teamNames=['Garchomp','Mimikyu','Gyarados','Sylveon','Delphox','Archaludon'];
+           const team=teamNames.map(species=>({species,level:50,moves:['tackle','protect']}));
+           function start(){return new Battle({formatid:f.id,seed:'1,2,3,4',
+             p1:{name:'Synthetic-P1',team:JSON.parse(JSON.stringify(team))},
+             p2:{name:'Synthetic-P2',team:JSON.parse(JSON.stringify(team))}});}
+           function choose(b){
+             if(b.requestState==='teampreview') b.makeChoices('team 123','team 123');
+             assert.equal(b.requestState,'move','expected move request after team preview');
+             b.makeChoices('move 1','move 1');
+           }
+           function norm(b){return JSON.stringify(State.normalize(b.toJSON()));}
+           const original=start(); const reproduced=start();
+           choose(original); choose(reproduced);
+           const frozenJSON=JSON.stringify(original.toJSON());
+           assert.equal(norm(original),norm(reproduced),'same prefix+seed must replay identically');
+           const prefix=sha(JSON.stringify(original.inputLog));
+           const restored=Battle.fromJSON(original.toJSON());
+           assert.equal(norm(original),norm(restored),'snapshot restore differs');
+           assert.equal(sha(JSON.stringify(restored.inputLog)),prefix,'prefix changed on restore');
+           const snapA=Battle.fromJSON(original.toJSON());
+           const snapB=Battle.fromJSON(original.toJSON());
+           const snapC=Battle.fromJSON(original.toJSON());
+           // Set future RNG *only*, never resetRNG (which logs a message), no prefix replay.
+           snapA.prng.setSeed('111,222,333,444');
+           snapB.prng.setSeed('111,222,333,444');
+           snapC.prng.setSeed('555,666,777,888');
+           assert.equal(sha(JSON.stringify(snapA.inputLog)),prefix,'future seed modified history');
+           assert.equal(sha(JSON.stringify(snapC.inputLog)),prefix,'alternate future seed modified history');
+           const futureA=Array.from({length:12},()=>snapA.random());
+           const futureB=Array.from({length:12},()=>snapB.random());
+           const futureC=Array.from({length:12},()=>snapC.random());
+           assert.deepEqual(futureA,futureB,'same future seed not deterministic');
+           assert.notDeepEqual(futureA,futureC,'different future seeds produce same draw sequence');
+           assert.equal(JSON.stringify(original.toJSON()),frozenJSON,'clones mutated original');
+           // Verify branch A and B have identical deterministic in-battle continuation after
+           // setting the *same* future seed again. Reusing arrays above consumed the streams.
+           snapA.prng.setSeed('111,222,333,444');
+           snapB.prng.setSeed('111,222,333,444');
+           assert.equal(snapA.requestState,'move');
+           snapA.makeChoices('move 1','move 1');
+           snapB.makeChoices('move 1','move 1');
+           assert.equal(norm(snapA),norm(snapB),'identical branch continuation diverged');
+           assert.equal(JSON.stringify(original.toJSON()),frozenJSON,'branch continued into original');
+           const origReplay=Battle.fromJSON(original.toJSON());
+           const snapReplay=Battle.fromJSON(original.toJSON());
+           origReplay.makeChoices('move 1','move 1');
+           snapReplay.makeChoices('move 1','move 1');
+           assert.equal(norm(origReplay),norm(snapReplay),'prefix replay vs snapshot continuation mismatch');
+           status.status='PASS_PUBLIC_NATIVE_NONCERTIFYING';
+           status.prefix_sha256=prefix;
+           status.initial_snapshot_sha256=sha(norm(original));
+           status.same_seed_future_stream_sha256=sha(JSON.stringify(futureA));
+           status.alternate_seed_stream_sha256=sha(JSON.stringify(futureC));
+           status.checks=['pinned_source_tree','M-C mod','prefix_deterministic','snapshot_roundtrip',
+            'history_immutable_on_future_seed','same_future_seed_equal','different_future_seed_diverges',
+            'clone_isolation','continued_battle_same_seed','prefix_vs_snapshot_continuation'];
+           status.limits='Cannot prove exact M-C stochastic distribution, actual game parity, 33/34 physics cases, or full private provider wiring.';
+          } catch(e){fail(e.stack||e.message||e);}
+          if(OUT){fs.mkdirSync(path.dirname(OUT),{recursive:true});fs.writeFileSync(OUT,JSON.stringify(status,null,2)+'\n');}
+          console.log(JSON.stringify(status,null,2));
+          if(status.status!=='PASS_PUBLIC_NATIVE_NONCERTIFYING')process.exitCode=1;
+          R27_VERIFIER_PAYLOAD_EOF
+          cat > tools/t025_receipt_check.py <<'R27_VERIFIER_PAYLOAD_EOF'
+          #!/usr/bin/env python3
+          """R25 T025 native probe receipt gate: evidence never self-certifies Champions mechanics."""
+          import argparse, json, pathlib, re
+          EXPECTED={'schema':'TRUE_PLAN_T025_MC_NATIVE_PROBE_V1','status':'PASS_PUBLIC_NATIVE_NONCERTIFYING',
+              'pinned_commit':'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',
+              'tree':'98c9038b81fa5ed7f1e9818736b701918920501e','node':'v22.18.0',
+              'native33':'0/33','exact34':'0/34','formal_battles_increment':0,'mod':'champions'}
+          REQUIRED={'pinned_source_tree','M-C mod','prefix_deterministic','snapshot_roundtrip',
+              'history_immutable_on_future_seed','same_future_seed_equal','different_future_seed_diverges',
+              'clone_isolation','continued_battle_same_seed','prefix_vs_snapshot_continuation'}
+          HEX=re.compile(r'[0-9a-f]{64}\Z')
+          def check(r):
+              if not isinstance(r,dict):return 'INVALID_RECEIPT'
+              if any(r.get(k)!=v for k,v in EXPECTED.items()):return 'INVALID_RECEIPT'
+              if not isinstance(r.get('checks'),list) or set(r['checks'])!=REQUIRED:return 'INVALID_RECEIPT'
+              if any(not isinstance(r.get(k),str) or not HEX.fullmatch(r[k]) for k in (
+                      'prefix_sha256','initial_snapshot_sha256','same_seed_future_stream_sha256','alternate_seed_stream_sha256')):
+                  return 'INVALID_RECEIPT'
+              if r['same_seed_future_stream_sha256']==r['alternate_seed_stream_sha256']:
+                  return 'INVALID_RECEIPT'
+              return 'NATIVE_PROBE_CLAIM_REQUIRES_INDEPENDENT_LOG_REVIEW'
+          if __name__=='__main__':
+              ap=argparse.ArgumentParser();ap.add_argument('receipt');ap.add_argument('--out',required=True);a=ap.parse_args()
+              try:s=check(json.loads(pathlib.Path(a.receipt).read_text()))
+              except (OSError,ValueError):s='INVALID_RECEIPT'
+              pathlib.Path(a.out).write_text(json.dumps({'status':s,'native33':'0/33','exact34':'0/34'},indent=2)+'\n')
+              print(s);raise SystemExit(0 if s.startswith('NATIVE_PROBE_CLAIM') else 2)
+          R27_VERIFIER_PAYLOAD_EOF
+      - name: Pin Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Retrieve exact public Showdown tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/showdown"
+          cd "$RUNNER_TEMP/showdown"
+          git init -q
+          git remote add origin https://github.com/smogon/pokemon-showdown.git
+          git fetch --depth 1 origin aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git checkout -q --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse 'HEAD^{tree}')" = 98c9038b81fa5ed7f1e9818736b701918920501e
+      - name: Fresh npm install and full build
+        shell: bash
+        working-directory: ${{ runner.temp }}/showdown
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          node -e 'const {Dex}=require("./dist/sim/dex");const f=Dex.formats.get("gen9championsbssregmc");if(!f.exists||f.mod!=="champions")process.exit(11);console.log("M-C SMOKE OK:", f.name)'
+      - name: Digest complete dist tree (no uploaded artifacts)
+        id: receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/t008_emit_v2.py --source "$RUNNER_TEMP/showdown" --lane b --output "$GITHUB_OUTPUT"
+      - name: Native M-C snapshot/PRNG noncertifying probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/t025_native_mc_probe.js "$RUNNER_TEMP/showdown" "$RUNNER_TEMP/t025.json"
+          python3 tools/t025_receipt_check.py "$RUNNER_TEMP/t025.json" --out "$RUNNER_TEMP/t025-check.json"
+          cat "$RUNNER_TEMP/t025-check.json"
+          echo 'T025 probe is research-only; does not increment Native33, Exact34, or match counts.'
+  compare:
+    name: R27 corroborate two public runner jobs
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    needs: [build_a, build_b]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout public verifier
+        uses: actions/checkout@v4
+      - name: R27 materialize public-only pinned verifier (no repo files required)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+          cat > tools/t008_verify_jobs_v2.py <<'R27_VERIFIER_PAYLOAD_EOF'
+          #!/usr/bin/env python3
+          """R26 T008 job metadata crosscheck with official GitHub Actions jobs API.
+          Use only in public GitHub Actions verification repository. No artificial PASS on errors.
+          """
+          import json
+          import os
+          import re
+          import sys
+          import urllib.request
+          
+          REPO = 'zeek10191019-stack/true-plan-showdown-verification'
+          SHA = re.compile(r'^[0-9a-f]{64}$')
+          SHA40 = re.compile(r'^[0-9a-f]{40}$')
+          
+          
+          def verify(a, b, api, repo, run_id, attempt, head_sha):
+              required = {'dist_root_sha256', 'lock_sha256', 'package_sha256', 'champions_scripts_sha256'}
+              for lane in (a, b):
+                  if not required.issubset(lane) or any(not SHA.fullmatch(str(lane.get(k, ''))) for k in required):
+                      return 'INVALID_DIGEST_OUTPUTS'
+                  if not isinstance(lane.get('dist_file_count'), int) or lane['dist_file_count'] <= 0:
+                      return 'INVALID_DIGEST_OUTPUTS'
+                  if lane.get('verifier_sha') != head_sha or lane.get('run_id') != run_id or lane.get('run_attempt') != attempt:
+                      return 'CROSS_RUN_OR_ATTEMPT_EVIDENCE'
+              if any(a[k] != b[k] for k in required | {'dist_file_count'}):
+                  return 'DIST_OR_SOURCE_MISMATCH'
+              if repo != REPO or not isinstance(run_id, int) or run_id <= 0 or not isinstance(attempt, int) or attempt <= 0:
+                  return 'INVALID_GITHUB_IDENTITY'
+              if not SHA40.fullmatch(head_sha):
+                  return 'INVALID_GITHUB_IDENTITY'
+              if not isinstance(api, dict) or not isinstance(api.get('jobs'), list):
+                  return 'INVALID_GITHUB_JOB_API'
+              jobs = api['jobs']
+              # API names match the two uniquely named, separate jobs below.
+              selected = []
+              for name in ('R27 pinned build A', 'R27 pinned build B'):
+                  matches = [j for j in jobs if j.get('name') == name]
+                  if len(matches) != 1:
+                      return 'JOB_MISSING_OR_DUPLICATE'
+                  j = matches[0]
+                  if j.get('run_id') != run_id or j.get('head_sha') != head_sha:
+                      return 'JOB_WRONG_RUN_OR_SHA'
+                  if j.get('status') != 'completed' or j.get('conclusion') != 'success':
+                      return 'JOB_NOT_SUCCESS'
+                  if not isinstance(j.get('id'), int) or j['id'] <= 0 or not isinstance(j.get('runner_id'), int) or j['runner_id'] <= 0:
+                      return 'JOB_OR_RUNNER_ID_MISSING'
+                  if 'ubuntu-24.04' not in j.get('labels', []):
+                      return 'NONSTANDARD_RUNNER_OR_MISSING_LABEL'
+                  selected.append(j)
+              if selected[0]['id'] == selected[1]['id'] or selected[0]['runner_id'] == selected[1]['runner_id']:
+                  return 'RUNNER_INDEPENDENCE_NOT_ESTABLISHED'
+              return 'DUAL_BUILD_VERIFIED_PUBLIC_CI_ONLY'
+          
+          
+          def evidence_from_env(prefix):
+              return dict(dist_root_sha256=os.environ[prefix + '_DIST'],
+                          dist_file_count=int(os.environ[prefix + '_COUNT']),
+                          lock_sha256=os.environ[prefix + '_LOCK'],
+                          package_sha256=os.environ[prefix + '_PACKAGE'],
+                          champions_scripts_sha256=os.environ[prefix + '_SCRIPT'],
+                          verifier_sha=os.environ[prefix + '_SHA'],
+                          run_id=int(os.environ[prefix + '_RUN']),
+                          run_attempt=int(os.environ[prefix + '_ATTEMPT']))
+          
+          
+          def run():
+              try:
+                  repo = os.environ['GITHUB_REPOSITORY']
+                  run_id = int(os.environ['GITHUB_RUN_ID'])
+                  attempt = int(os.environ['GITHUB_RUN_ATTEMPT'])
+                  head_sha = os.environ['GITHUB_SHA']
+                  if repo != REPO:
+                      raise ValueError('only whitelisted public verifier repo permitted')
+                  url = 'https://api.github.com/repos/' + repo + '/actions/runs/' + str(run_id) + '/jobs?filter=latest&per_page=100'
+                  headers = {'Accept':'application/vnd.github+json', 'User-Agent':'true-plan-R26-public-verifier'}
+                  token = os.environ.get('GITHUB_TOKEN', '')
+                  if token:
+                      headers['Authorization'] = 'Bearer ' + token
+                  with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=20) as response:
+                      api = json.load(response)
+                  result = verify(evidence_from_env('A'), evidence_from_env('B'), api, repo, run_id, attempt, head_sha)
+              except Exception as exc:
+                  result = 'INDEPENDENT_JOB_PROVENANCE_UNAVAILABLE'
+                  print('R26 evidence verification error:', type(exc).__name__, str(exc)[:250], file=sys.stderr)
+              print('R27 T008:', result)
+              print('Native33=0/33 Exact34=0/34 FormalIncrement=0')
+              print('T025 requires independent Native/per-game parity inspection.')
+              return 0 if result == 'DUAL_BUILD_VERIFIED_PUBLIC_CI_ONLY' else 2
+          
+          
+          if __name__ == '__main__':
+              sys.exit(run())
+          R27_VERIFIER_PAYLOAD_EOF
+      - name: Verify dist/source digests and independent GitHub job IDs
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          A_DIST: ${{ needs.build_a.outputs.dist }}
+          A_COUNT: ${{ needs.build_a.outputs.count }}
+          A_LOCK: ${{ needs.build_a.outputs.lock }}
+          A_PACKAGE: ${{ needs.build_a.outputs.package }}
+          A_SCRIPT: ${{ needs.build_a.outputs.script }}
+          A_SHA: ${{ needs.build_a.outputs.sha }}
+          A_RUN: ${{ needs.build_a.outputs.run }}
+          A_ATTEMPT: ${{ needs.build_a.outputs.attempt }}
+          B_DIST: ${{ needs.build_b.outputs.dist }}
+          B_COUNT: ${{ needs.build_b.outputs.count }}
+          B_LOCK: ${{ needs.build_b.outputs.lock }}
+          B_PACKAGE: ${{ needs.build_b.outputs.package }}
+          B_SCRIPT: ${{ needs.build_b.outputs.script }}
+          B_SHA: ${{ needs.build_b.outputs.sha }}
+          B_RUN: ${{ needs.build_b.outputs.run }}
+          B_ATTEMPT: ${{ needs.build_b.outputs.attempt }}
+        run: |
+          set -euo pipefail
+          python3 tools/t008_verify_jobs_v2.py
+          echo 'Source consistency is independent of actual Champions-game parity.'
