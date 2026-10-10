@@ -1,0 +1,341 @@
+name: R27.34 private-screen stream bridge local synthetic proof
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2734-local-stream-proof-manual
+  cancel-in-progress: false
+jobs:
+  public_synthetic_only:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Set up pinned Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Restore hash-pinned public test sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/r2734"
+          cd "$RUNNER_TEMP/r2734"
+          cat > 'r2732-frame-relay.cjs' <<'R2734_R2732_FRAME_RELAY_CJS_CODE'
+          'use strict';
+          /** R27.32: privacy-minimal screen-frame ingress only. No OCR, no Champions action or visual certification. */
+          const http = require('node:http');
+          const crypto = require('node:crypto');
+          const MAX_BYTES = 3 * 1024 * 1024;
+          const MAX_AGE_MS = 2200;
+          const MAX_FUTURE_MS = 300;
+          const ID = /^[A-Za-z0-9_-]{8,80}$/;
+          const sha = b => crypto.createHash('sha256').update(b).digest('hex');
+          const hmac = (secret, signed) => crypto.createHmac('sha256', secret).update(signed).digest('hex');
+          class IngressError extends Error {
+            constructor(code, status=400){super(code);this.code=code;this.status=status;}
+          }
+          function signedMessage(meta){
+            return ['TRUE_PLAN_R2732_V1',meta.session,meta.frame_id,meta.source_id,String(meta.captured_at_ms),String(meta.sequence),meta.origin,meta.mime,meta.sha256].join('\n');
+          }
+          function requireAsciiId(x,name){if(typeof x!=='string'||!ID.test(x))throw new IngressError(`INVALID_${name}`);return x;}
+          function acceptedMeta(headers){
+            const h=x=>{const v=headers[x];if(typeof v!=='string')throw new IngressError('MISSING_HEADER_'+x);return v;};
+            const meta={session:requireAsciiId(h('x-session-id'),'SESSION'),frame_id:requireAsciiId(h('x-frame-id'),'FRAME'),source_id:requireAsciiId(h('x-source-id'),'SOURCE'),
+              captured_at_ms:Number(h('x-captured-at-ms')),sequence:Number(h('x-frame-sequence')),origin:h('x-frame-origin'),mime:h('content-type'),sha256:h('x-frame-sha256')};
+            if(!Number.isSafeInteger(meta.captured_at_ms))throw new IngressError('BAD_TIME');
+            if(!Number.isSafeInteger(meta.sequence)||meta.sequence<0)throw new IngressError('BAD_SEQUENCE',422);
+            if(!['image/jpeg','image/png'].includes(meta.mime))throw new IngressError('BAD_MIME',415);
+            if(!/^[a-f0-9]{64}$/.test(meta.sha256))throw new IngressError('BAD_SHA256');
+            return meta;
+          }
+          function mimeValid(body,mime){
+            return mime==='image/jpeg' ? body.length>8&&body[0]===255&&body[1]===216&&body[2]===255&&body.at(-2)===255&&body.at(-1)===217 :
+              body.length>24&&body.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex'));
+          }
+          function createFrameRelay({secret,session,clock=Date.now,maxBytes=MAX_BYTES,allowSynthetic=false}={}){
+            if(!Buffer.isBuffer(secret)||secret.length<32)throw new Error('SECRET_REQUIRED_32_BYTES');
+            requireAsciiId(session,'SESSION');
+            let lastSequence=-1;
+            const seen=new Set();
+            const captured=[]; // hashes/times ONLY, never frame data
+            let busy=false;
+            const onRequest=async (req,res)=>{
+              function reply(status,body){res.writeHead(status,{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(body));}
+              try {
+                if(req.url==='/healthz'&&req.method==='GET')return reply(200,{status:'READY_INGRESS_ONLY',real_visual_recognition:false,decision_available:false});
+                if(req.url!=='/v1/frame'||req.method!=='POST')return reply(404,{error:'NOT_FOUND'});
+                const headers=req.headers;
+                const provided=h=>{const v=headers[h];if(typeof v!=='string')throw new IngressError('MISSING_'+h,401);return v;};
+                const meta=acceptedMeta(headers);
+                if(meta.session!==session)throw new IngressError('UNAUTHORIZED_SESSION',401);
+                if(!headers['x-frame-signature']||!/^[a-f0-9]{64}$/.test(provided('x-frame-signature')))throw new IngressError('BAD_SIGNATURE',401);
+                const expected=hmac(secret,signedMessage(meta));
+                if(!crypto.timingSafeEqual(Buffer.from(expected,'hex'),Buffer.from(headers['x-frame-signature'],'hex')))throw new IngressError('UNAUTHORIZED_SIGNATURE',401);
+                const t=clock();
+                if(meta.captured_at_ms>t+MAX_FUTURE_MS)throw new IngressError('FUTURE_FRAME',422);
+                if(t-meta.captured_at_ms>MAX_AGE_MS)throw new IngressError('STALE_FRAME',422);
+                const frameSeq=meta.sequence;
+                if(seen.has(meta.frame_id)||frameSeq<=lastSequence)throw new IngressError('REPLAY_OR_OUT_OF_ORDER',409);
+                const source=meta.origin;
+                if(source!=='IOS_SCREEN_CAPTURE'&&!(allowSynthetic&&source==='SYNTHETIC_FIXTURE'))throw new IngressError('ORIGIN_NOT_ALLOWED',422);
+                if(busy)throw new IngressError('BUSY_DROP',429);
+                const len=Number(provided('content-length'));
+                if(!Number.isSafeInteger(len)||len<24||len>maxBytes)throw new IngressError('BAD_LENGTH',413);
+                // Enforce Content-Length and cap while streaming; never persist raw pixels.
+                busy=true;let count=0;const parts=[];
+                try{
+                  for await (const chunk of req){count+=chunk.length;if(count>maxBytes)throw new IngressError('FRAME_TOO_LARGE',413);parts.push(chunk);}
+                }finally{busy=false;}
+                const bytes=Buffer.concat(parts);
+                if(bytes.length!==len)throw new IngressError('LENGTH_MISMATCH',422);
+                if(!mimeValid(bytes,meta.mime))throw new IngressError('INVALID_IMAGE_MAGIC',422);
+                if(sha(bytes)!==meta.sha256)throw new IngressError('FRAME_HASH_MISMATCH',422);
+                if(clock()-meta.captured_at_ms>MAX_AGE_MS)throw new IngressError('FRAME_EXPIRED_IN_TRANSFER',422);
+                seen.add(meta.frame_id);if(seen.size>2048)seen.delete(seen.values().next().value);lastSequence=frameSeq;
+                // 1-slot metadata; never store image bytes. Decision is strictly unavailable until independently certified visual recognition.
+                captured[0]=Object.freeze({frame_id:meta.frame_id,source_id:meta.source_id,sha256:meta.sha256,captured_at_ms:meta.captured_at_ms,seq:frameSeq,origin:source});
+                return reply(202,{status:'CAPTURE_RECEIVED_NO_PIXEL_PERCEPTION',frame_id:meta.frame_id,frame_sha256:meta.sha256,
+                  recognition:'UNIMPLEMENTED',decision:'WITHHELD',native33:'0/33',exact34:'0/34',actual_game:'0/30',gate:'DENY'});
+              }catch(e){return reply(e instanceof IngressError?e.status:500,{error:e instanceof IngressError?e.code:'INTERNAL_ERROR',decision:'WITHHELD'});}
+            };
+            const server=http.createServer(onRequest);
+            return {server,latestMetadata:()=>captured[0]||null};
+          }
+          if(require.main===module){
+            const secretText=process.env.R2732_SESSION_SECRET_HEX||'';
+            if(!/^[a-fA-F0-9]{64,}$/.test(secretText)||secretText.length%2)throw new Error('SET_R2732_SESSION_SECRET_HEX');
+            const host=process.env.R2732_BIND||'127.0.0.1';
+            if(host!=='127.0.0.1'&&host!=='::1')throw new Error('DO_NOT_EXPOSE_UNENCRYPTED_RELAY_USE_LOCAL_TLS_REVERSE_PROXY');
+            const {server}=createFrameRelay({secret:Buffer.from(secretText,'hex'),session:process.env.R2732_SESSION_ID});
+            server.listen(Number(process.env.R2732_PORT||8787),host,()=>process.stdout.write('R2732_LOCAL_RELAY_READY_NO_PIXELS_STORED\n'));
+          }
+          module.exports={createFrameRelay,signedMessage,sha,hmac,acceptedMeta,IngressError};
+          R2734_R2732_FRAME_RELAY_CJS_CODE
+          printf '%s  %s\n' '0e84c792d60999ace2480c355f5edb44e530f3a807a7b58f79eff95fa7a9f35a' 'r2732-frame-relay.cjs' | sha256sum -c -
+          cat > 'test_r2732_frame_relay.cjs' <<'R2734_TEST_R2732_FRAME_RELAY_CJS_CODE'
+          'use strict';
+          const assert=require('node:assert/strict');const crypto=require('node:crypto');
+          const {createFrameRelay,signedMessage,sha,hmac}=require('./r2732-frame-relay.cjs');
+          const secret=crypto.createHash('sha256').update('test-secret-never-ship').digest();
+          const session='session_2732_testing'; const source='iphone_test_capture';
+          // Realistic PNG bytes from the tested R27.31 fixture, not a Champions screenshot.
+          const PNG=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==','base64');
+          const T=1770000000000;
+          async function main(){
+           const ingress=createFrameRelay({secret,session,clock:()=>T,allowSynthetic:true});
+           await new Promise(res=>ingress.server.listen(0,'127.0.0.1',res));
+           const url=`http://127.0.0.1:${ingress.server.address().port}/v1/frame`;
+           let checked=0;const checks=[];
+           function check(c,msg){assert(c,msg);checked++;checks.push(msg);}
+           let seq=0;
+           async function send(override={},payload=PNG){
+            const n=++seq;
+            const meta={session,frame_id:`frame_r2732_${n}`,source_id:source,captured_at_ms:T-250,sequence:n,origin:'SYNTHETIC_FIXTURE',mime:'image/png',sha256:sha(payload),...override.meta};
+            const hs={'content-type':meta.mime,'x-session-id':meta.session,'x-frame-id':meta.frame_id,'x-source-id':meta.source_id,
+             'x-captured-at-ms':String(meta.captured_at_ms),'x-frame-sha256':meta.sha256,'x-frame-sequence':String(meta.sequence),
+             'x-frame-origin':meta.origin, 'x-frame-signature':hmac(secret,signedMessage(meta)),...override.headers};
+            const r=await fetch(url,{method:'POST',body:payload,headers:hs});const o=await r.json();return {http_status:r.status,...o};
+           }
+           try{
+            let o=await send();check(o.http_status===202,'valid synthetic transmission accepted');check(o.decision==='WITHHELD','no manufactured legal decision');
+            check(ingress.latestMetadata().sha256===sha(PNG),'only frame hash recorded');
+            check(!('data' in ingress.latestMetadata()),'no raw pixels retained in metadata');
+            check(!('observation' in ingress.latestMetadata()),'no simulator oracle observation synthesized');
+            o=await send({meta:{captured_at_ms:T-5000}});check(o.error==='STALE_FRAME','stale reject');
+            o=await send({meta:{captured_at_ms:T+1000}});check(o.error==='FUTURE_FRAME','future reject');
+            o=await send({headers:{'x-frame-signature':'f'.repeat(64)}});check(o.http_status===401,'bad HMAC reject');
+            o=await send({meta:{session:'bad_session_12345'}});check(o.http_status===401,'bad session reject');
+            o=await send({meta:{origin:'SCREEN_RECORDER_UNKNOWN'}});check(o.error==='ORIGIN_NOT_ALLOWED','origin reject');
+            o=await send({meta:{mime:'application/json'}});check(o.http_status===415,'non-image type reject');
+            o=await send({meta:{sha256:'f'.repeat(64)}});check(o.error==='FRAME_HASH_MISMATCH','tampered hash reject');
+            o=await send({},Buffer.from('not an image but sufficiently long'));check(o.error==='INVALID_IMAGE_MAGIC','fake PNG reject');
+            o=await send({meta:{sequence:0}});check(o.error==='REPLAY_OR_OUT_OF_ORDER','old sequence reject');
+            o=await send({meta:{sequence:'bad'}});check(o.error==='BAD_SEQUENCE','invalid sequence reject');
+            o=await send({meta:{frame_id:'short'}});check(o.error==='INVALID_FRAME','bad frame id reject');
+            o=await send({meta:{frame_id:'frame_r2732_1'}});check(o.error==='REPLAY_OR_OUT_OF_ORDER','frame replay reject');
+            o=await send({},Buffer.alloc(3*1024*1024+1,0));check(o.http_status===413,'oversize frame reject');
+            o=await send({meta:{origin:'IOS_SCREEN_CAPTURE'}});check(o.http_status===202,'live-origin ingress contract accepts image without claim of recognition');
+            check(o.recognition==='UNIMPLEMENTED','live ingress never asserts recognition');
+            o=await send({meta:{sha256:'Z'.repeat(64)}});check(o.error==='BAD_SHA256','invalid SHA grammar reject');
+            o=await send({meta:{source_id:'x'}});check(o.error==='INVALID_SOURCE','source id grammar reject');
+            o=await send({meta:{sequence:-1}});check(o.error==='BAD_SEQUENCE','negative sequence reject');
+            o=await send({headers:{'x-frame-signature':'00'}});check(o.error==='BAD_SIGNATURE','short signature reject');
+            const health=await (await fetch(url.replace('/v1/frame','/healthz'))).json();check(health.real_visual_recognition===false,'health cannot certify vision');
+            check(health.decision_available===false,'health cannot imply recommendation');
+            o=await (await fetch(url.replace('/v1/frame','/v1/decision'))).json();check(o.error==='NOT_FOUND','no unauthorized decision endpoint');
+            check(ingress.latestMetadata().origin==='IOS_SCREEN_CAPTURE','live frame provenance metadata retained');
+            const prod=createFrameRelay({secret,session,clock:()=>T});const a=await new Promise(rs=>prod.server.listen(0,'127.0.0.1',rs));
+            try{const u=`http://127.0.0.1:${prod.server.address().port}/v1/frame`;const meta={session,frame_id:'prod_frame_123456',source_id:source,captured_at_ms:T-250,sequence:1,origin:'SYNTHETIC_FIXTURE',mime:'image/png',sha256:sha(PNG)};
+             const r=await fetch(u,{method:'POST',body:PNG,headers:{'content-type':meta.mime,'x-session-id':meta.session,'x-frame-id':meta.frame_id,'x-source-id':meta.source_id,'x-captured-at-ms':String(meta.captured_at_ms),'x-frame-sha256':meta.sha256,'x-frame-sequence':'1','x-frame-origin':'SYNTHETIC_FIXTURE','x-frame-signature':hmac(secret,signedMessage(meta))}});check(r.status===422,'production rejects synthetic-origin frames');
+            }finally{prod.server.close();}
+            console.log('R2732_TEST_PASS',JSON.stringify({checked,origin:'TEST_FIXTURE_NOT_CHAMPIONS',real_pixel_recognition:false,real_ios_build:false,ios_version_contract:'27_SCREEN_CAPTURE_KIT_26_LEGACY_REPLAYKIT',native33:'0/33',exact34:'0/34',actual_game:'0/30'}));
+           }finally{ingress.server.close();}
+          }
+          if(require.main===module)main().catch(x=>{console.error(x);process.exitCode=1});module.exports={main};
+          R2734_TEST_R2732_FRAME_RELAY_CJS_CODE
+          printf '%s  %s\n' '5d3079f35abbf63a75100375991d4e1ddf13f5e72ba77851bd5709629a45e93c' 'test_r2732_frame_relay.cjs' | sha256sum -c -
+          cat > 'r2734-private-stream-bridge.cjs' <<'R2734_R2734_PRIVATE_STREAM_BRIDGE_CJS_CODE'
+          'use strict';
+          /** R27.34: optional local-only video-to-R27.32 frame bridge. No real screen/OCR/battle certification. */
+          const crypto=require('node:crypto');
+          const http=require('node:http');
+          const {spawn}=require('node:child_process');
+          const {URL}=require('node:url');
+          const {hmac,signedMessage,sha}=require('./r2732-frame-relay.cjs');
+          const SOI=Buffer.from([0xff,0xd8]),EOI=Buffer.from([0xff,0xd9]);
+          const MAX_JPEG=3*1024*1024;
+          function jpegMagic(frame){return Buffer.isBuffer(frame)&&frame.length>8&&frame.subarray(0,2).equals(SOI)&&frame.subarray(-2).equals(EOI);}
+          class JpegFrameParser {
+            constructor({maxBytes=MAX_JPEG}={}){if(!Number.isSafeInteger(maxBytes)||maxBytes<16||maxBytes>MAX_JPEG)throw Error('INVALID_MAX_BYTES');this.maxBytes=maxBytes;this.buf=Buffer.alloc(0);this.count=0;}
+            feed(chunk){if(!Buffer.isBuffer(chunk))throw Error('NOT_BUFFER');if(chunk.length>this.maxBytes*2)throw Error('OVERSIZE_CHUNK');
+              this.buf=Buffer.concat([this.buf,chunk]);const out=[];
+              for(;;){const start=this.buf.indexOf(SOI);
+                if(start<0){this.buf=this.buf.length&&this.buf[this.buf.length-1]===0xff?Buffer.from([0xff]):Buffer.alloc(0);break;}
+                if(start>0)this.buf=this.buf.subarray(start);
+                const end=this.buf.indexOf(EOI,2);
+                if(end<0){if(this.buf.length>this.maxBytes)throw Error('OVERSIZE_FRAME');break;}
+                const n=end+2;if(n>this.maxBytes)throw Error('OVERSIZE_FRAME');const frame=Buffer.from(this.buf.subarray(0,n));
+                if(!jpegMagic(frame))throw Error('JPEG_MALFORMED');out.push(frame);this.count++;
+                this.buf=this.buf.subarray(n);
+              }
+              return out;
+            }
+            finish(){if(this.buf.length>1)throw Error('TRUNCATED_JPEG');}
+          }
+          function destination(urlText){const url=new URL(urlText);const isLocal=['127.0.0.1','::1','[::1]','localhost'].includes(url.hostname);if(url.username||url.password||url.hash||url.search)throw Error('UNSAFE_RELAY_URL');if(url.pathname!=='/v1/frame')throw Error('INVALID_RELAY_PATH');if(url.protocol==='http:'&&!isLocal)throw Error('PLAINTEXT_REMOTE_BLOCKED');if(!['http:','https:'].includes(url.protocol))throw Error('INVALID_SCHEME');if(!isLocal && (process.env.R2734_TRUSTED_RELAY_HOST||'')!==url.hostname)throw Error('REMOTE_RELAY_NOT_ALLOWLISTED');return url;}
+          function sourceSpec({mode,input}){
+            if(mode==='synthetic-file'){if(typeof input!=='string'||!input||input.startsWith('-'))throw Error('BAD_LOCAL_FILE');return {args:['-nostdin','-hide_banner','-loglevel','error','-i',input],origin:'SYNTHETIC_FIXTURE'};}
+            if(mode==='private-rtsp'){
+              if(process.env.R2734_SOURCE_ATTESTATION!=='USER_APPROVED_PRIVATE_REPLAYKIT')throw Error('REQUIRE_USER_ATTESTATION');
+              const u=new URL(input);if(u.protocol!=='rtsp:'||!['127.0.0.1','localhost','[::1]','::1'].includes(u.hostname)||u.username||u.password||u.hash||u.search)throw Error('RTSP_MUST_BE_LOCALHOST_WITHOUT_SECRETS');
+              return {args:['-nostdin','-hide_banner','-loglevel','error','-rtsp_transport','tcp','-i',input],origin:'IOS_SCREEN_CAPTURE'};
+            }
+            throw Error('UNKNOWN_SOURCE_MODE');
+          }
+          async function sendFrame(frame,{url,secret,session,sourceId='private_relay_1',origin,sequence,clock=Date.now,timeoutMs=1500}={}){
+            if(!jpegMagic(frame)||frame.length>MAX_JPEG)throw Error('INVALID_JPEG');const dest=destination(url);if(!Buffer.isBuffer(secret)||secret.length<32)throw Error('INVALID_SECRET');if(!/^[A-Za-z0-9_-]{8,80}$/.test(session||''))throw Error('INVALID_SESSION');
+            if(!Number.isSafeInteger(sequence)||sequence<0)throw Error('INVALID_SEQUENCE');
+            if(!['SYNTHETIC_FIXTURE','IOS_SCREEN_CAPTURE'].includes(origin))throw Error('INVALID_ORIGIN');
+            const meta={session,frame_id:'frame_'+crypto.randomUUID().replaceAll('-',''),source_id:sourceId,captured_at_ms:clock(),sequence,origin,mime:'image/jpeg',sha256:sha(frame)};
+            const headers={'content-type':'image/jpeg','content-length':String(frame.length),'x-session-id':meta.session,'x-frame-id':meta.frame_id,'x-source-id':meta.source_id,'x-captured-at-ms':String(meta.captured_at_ms),'x-frame-sequence':String(meta.sequence),'x-frame-origin':meta.origin,'x-frame-sha256':meta.sha256,'x-frame-signature':hmac(secret,signedMessage(meta))};
+            return await new Promise((resolve,reject)=>{const conn=(dest.protocol==='https:')?require('node:https'):http;const request=conn.request(dest,{method:'POST',headers,timeout:timeoutMs},res=>{let buf='';res.on('data',chunk=>{buf+=chunk;if(buf.length>2048)request.destroy(Error('RESPONSE_TOO_LONG'));});res.on('end',()=>{let data;try{data=JSON.parse(buf)}catch{return reject(Error('BAD_SERVER_JSON'))};if(res.statusCode!==202||data?.decision!=='WITHHELD'||data?.status!=='CAPTURE_RECEIVED_NO_PIXEL_PERCEPTION')return reject(Error('RELAY_REJECTED_'+res.statusCode+'_'+String(data?.error||data?.status)));resolve({status:res.statusCode,frame_id:meta.frame_id,sha256:meta.sha256,decision:data.decision});});});request.on('timeout',()=>request.destroy(Error('RELAY_TIMEOUT')));request.on('error',reject);request.end(frame);});
+          }
+          async function runBridge({mode,input,relayUrl,session,secret,limit=3,rate=2,startSequence=0,clock=Date.now}={}){
+            const spec=sourceSpec({mode,input});destination(relayUrl);if(!Number.isInteger(rate)||rate<1||rate>2)throw Error('FRAME_RATE_LIMIT_EXCEEDED');if(!Number.isInteger(limit)||limit<1||limit>500)throw Error('BAD_FRAME_LIMIT');
+            const parser=new JpegFrameParser(),output=[];
+            const ff=spawn('ffmpeg',[...spec.args,'-an','-vf',`fps=${rate},scale=640:-2`,'-frames:v',String(limit),'-q:v','5','-f','image2pipe','-vcodec','mjpeg','pipe:1'],{stdio:['ignore','pipe','pipe'],env:{PATH:process.env.PATH||'/usr/bin:/bin'}});
+            const exitPromise=new Promise((resolve,reject)=>{ff.once('error',reject);ff.once('close',resolve)});let stderr='';ff.stderr.on('data',x=>{stderr=(stderr+x.toString()).slice(-2000)});
+            try{
+              for await(const chunk of ff.stdout){for(const frame of parser.feed(chunk)){const result=await sendFrame(frame,{url:relayUrl,secret,session,origin:spec.origin,sequence:startSequence+output.length,clock});output.push(result);}}
+              parser.finish();const code=await exitPromise;
+              if(code!==0)throw Error('FFMPEG_FAILED_'+code+'_'+stderr.slice(-180));if(output.length!==limit)throw Error('FRAME_COUNT_MISMATCH');
+              return {mode,delivered:output.length,source_attested:mode==='private-rtsp'?'HUMAN_ASSERTION_ONLY':'SYNTHETIC',recognition:'UNIMPLEMENTED',decision:'WITHHELD',native33:'0/33',exact34:'0/34',actual_game:'0/30',formal:'DENY'};
+            }catch(e){ff.kill('SIGKILL');throw e;}
+          }
+          if(require.main===module){(async()=>{const secret=process.env.R2734_SECRET_HEX||'';if(!/^[a-f0-9]{64,}$/i.test(secret)||secret.length%2)throw Error('SECRET_HEX_REQUIRED');const mode=process.env.R2734_MODE||'no_mode';const report=await runBridge({mode,input:process.env.R2734_INPUT,relayUrl:process.env.R2734_RELAY_URL||'http://127.0.0.1:8787/v1/frame',session:process.env.R2734_SESSION,secret:Buffer.from(secret,'hex'),limit:Number(process.env.R2734_LIMIT||3),rate:Number(process.env.R2734_RATE||2)});console.log(JSON.stringify(report));})().catch(e=>{console.error('R2734_BRIDGE_FAIL',e.message);process.exitCode=1});}
+          module.exports={JpegFrameParser,jpegMagic,destination,sourceSpec,sendFrame,runBridge};
+          R2734_R2734_PRIVATE_STREAM_BRIDGE_CJS_CODE
+          printf '%s  %s\n' '939ef9979160fa6e92cc2076e7441033384af358f3a84b45935f85e5cccf1154' 'r2734-private-stream-bridge.cjs' | sha256sum -c -
+          cat > 'test_r2734_bridge.cjs' <<'R2734_TEST_R2734_BRIDGE_CJS_CODE'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const fs=require('node:fs');const os=require('node:os');const path=require('node:path');const {execFileSync}=require('node:child_process');
+          const crypto=require('node:crypto');
+          const {createFrameRelay}=require('./r2732-frame-relay.cjs');
+          const {JpegFrameParser,destination,sourceSpec,sendFrame,runBridge}=require('./r2734-private-stream-bridge.cjs');
+          let checks=0;const check=(ok,msg)=>{assert.ok(ok,msg);checks++;};
+          const reject=(fn,regex)=>{assert.throws(fn,regex);checks++};
+          async function rejectAsync(fn,regex){await assert.rejects(fn,regex);checks++}
+          (async()=>{
+           const parser=new JpegFrameParser(),jpeg=execFileSync('ffmpeg',['-nostdin','-hide_banner','-loglevel','error','-f','lavfi','-i','color=red:size=32x32:rate=1','-frames:v','1','-q:v','5','-f','image2pipe','-vcodec','mjpeg','pipe:1'],{timeout:10000});
+           check(parser.feed(jpeg.subarray(0,1)).length===0,'split SOI');
+           check(parser.feed(jpeg.subarray(1,7)).length===0,'partial');
+           check(parser.feed(jpeg.subarray(7))[0].equals(jpeg),'joined');parser.finish();checks++;
+           const p2=new JpegFrameParser();check(p2.feed(Buffer.concat([jpeg,jpeg])).length===2,'two JPEGs');p2.finish();checks++;
+           reject(()=>new JpegFrameParser({maxBytes:5}),/INVALID_MAX_BYTES/);
+           reject(()=>new JpegFrameParser().feed('bad'),/NOT_BUFFER/);
+           reject(()=>new JpegFrameParser({maxBytes:16}).feed(Buffer.concat([jpeg,Buffer.alloc(36)])),/OVERSIZE_CHUNK/);
+           const p3=new JpegFrameParser();p3.feed(Buffer.from([255,216,4]));reject(()=>p3.finish(),/TRUNCATED/);
+           reject(()=>destination('http://example.org/v1/frame'),/PLAINTEXT_REMOTE/);
+           reject(()=>destination('https://example.org/v1/frame'),/NOT_ALLOWLISTED/);
+           check(destination('http://127.0.0.1:8787/v1/frame').hostname==='127.0.0.1');
+           reject(()=>destination('http://127.0.0.1/other'),/INVALID_RELAY_PATH/);
+           reject(()=>destination('http://u:p@127.0.0.1/v1/frame'),/UNSAFE_RELAY_URL/);
+           reject(()=>destination('ftp://127.0.0.1/v1/frame'),/INVALID_SCHEME/);
+           reject(()=>sourceSpec({mode:'private-rtsp',input:'rtsp://127.0.0.1/live'}),/REQUIRE_USER_ATTESTATION/);
+           reject(()=>sourceSpec({mode:'synthetic-file',input:'-invalid'}),/BAD_LOCAL_FILE/);
+           check(sourceSpec({mode:'synthetic-file',input:'/tmp/fixture.mp4'}).origin==='SYNTHETIC_FIXTURE');
+           const secret=crypto.randomBytes(32),session='research_session_20261010';
+           const relay=createFrameRelay({secret,session,allowSynthetic:true});await new Promise(r=>relay.server.listen(0,'127.0.0.1',r));
+           const url=`http://127.0.0.1:${relay.server.address().port}/v1/frame`;
+           try{
+            const first=await sendFrame(jpeg,{url,secret,session,origin:'SYNTHETIC_FIXTURE',sequence:0});check(first.status===202&&first.decision==='WITHHELD');
+            check(relay.latestMetadata().origin==='SYNTHETIC_FIXTURE');
+            await rejectAsync(()=>sendFrame(jpeg,{url,secret:crypto.randomBytes(32),session,origin:'SYNTHETIC_FIXTURE',sequence:1}),/RELAY_REJECTED_401/);
+            await rejectAsync(()=>sendFrame(jpeg,{url,secret,session:'wrong_session_01',origin:'SYNTHETIC_FIXTURE',sequence:1}),/RELAY_REJECTED_401/);
+            await rejectAsync(()=>sendFrame(Buffer.from('plain'),{url,secret,session,origin:'SYNTHETIC_FIXTURE',sequence:1}),/INVALID_JPEG/);
+            await rejectAsync(()=>sendFrame(jpeg,{url,secret,session,origin:'SIMULATED_LIVE',sequence:1}),/INVALID_ORIGIN/);
+            await rejectAsync(()=>sendFrame(jpeg,{url,secret,session,origin:'SYNTHETIC_FIXTURE',sequence:0}),/RELAY_REJECTED_409/);
+            const dir=fs.mkdtempSync(path.join(os.tmpdir(),'r2734-'));const file=path.join(dir,'synthetic.mp4');
+            execFileSync('ffmpeg',['-y','-nostdin','-hide_banner','-loglevel','error','-f','lavfi','-i','testsrc2=size=160x90:rate=5','-t','2','-c:v','mpeg4',file],{timeout:20000});
+            const audit=await runBridge({mode:'synthetic-file',input:file,relayUrl:url,secret,session,limit:3,rate:2,startSequence:1});
+            check(audit.delivered===3&&audit.decision==='WITHHELD'&&audit.recognition==='UNIMPLEMENTED','ffmpeg full pipeline');
+            check(audit.native33==='0/33'&&audit.exact34==='0/34'&&audit.formal==='DENY','gate');
+            check(relay.latestMetadata().seq===3,'last seq');
+            fs.rmSync(dir,{force:true,recursive:true});
+            await rejectAsync(()=>runBridge({mode:'synthetic-file',input:'/not/exist/no.mp4',relayUrl:url,secret,session,limit:2}),/FFMPEG_FAILED/);
+            console.log('R2734_TEST_PASS '+JSON.stringify({assertions:checks,video_frames:3,ffmpeg_version:execFileSync('ffmpeg',['-version'],{encoding:'utf8'}).split('\n')[0],real_device_frames:0,actual_game:'0/30',decision:'WITHHELD'}));
+           }finally{await new Promise(r=>relay.server.close(r));}
+          })().catch(e=>{console.error(e.stack);process.exitCode=1});
+          R2734_TEST_R2734_BRIDGE_CJS_CODE
+          printf '%s  %s\n' 'cb751ba04e2a01663c90ebe6d8cb27b93e6a46aaab3dcaa86182f0ee4dabf922' 'test_r2734_bridge.cjs' | sha256sum -c -
+      - name: Execute public local video bridge and transport checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/r2734"
+          command -v ffmpeg
+          node --check r2732-frame-relay.cjs
+          node --check test_r2732_frame_relay.cjs
+          node --check r2734-private-stream-bridge.cjs
+          node --check test_r2734_bridge.cjs
+          node test_r2732_frame_relay.cjs | tee parent-test.log
+          node test_r2734_bridge.cjs | tee bridge-test.log
+      - name: Build no-private-video evidence and independently audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/r2734"
+          mkdir proof
+          cp r2732-frame-relay.cjs test_r2732_frame_relay.cjs r2734-private-stream-bridge.cjs test_r2734_bridge.cjs parent-test.log bridge-test.log proof/
+          python3 - <<'PY_AUDIT'
+          import json, pathlib, re
+          p=pathlib.Path('proof')
+          parent=(p/'parent-test.log').read_text()
+          bridge=(p/'bridge-test.log').read_text()
+          assert 'R2732_TEST_PASS' in parent
+          m=re.search(r'R2734_TEST_PASS\s+({[^\n]+})',bridge)
+          assert m, 'R2734_MISSING_RECEIPT'
+          d=json.loads(m.group(1))
+          assert d['assertions']==30 and d['video_frames']==3
+          assert d['real_device_frames']==0 and d['actual_game']=='0/30' and d['decision']=='WITHHELD'
+          r={'schema':'TRUE_PLAN_R2734_LOCAL_VIDEO_TO_R2732_HMAC_BRIDGE_V1',
+             'status':'PASS_SYNTHETIC_PUBLIC_ONLY','ffmpeg_frames':3,
+             'bridge_assertions':d['assertions'],'parent_transport':'R2732_TEST_PASS',
+             'ios_device_capture':False,'real_visual_recognition':False,'ios_signed_deployment':False,
+             'server_deployed':False,'confidential_material_in_artifact':False,
+             'certification':{'native33':'0/33','exact34':'0/34','actual_game':'0/30','gate':'DENY'}}
+          (p/'r2734-receipt.json').write_text(json.dumps(r,indent=2)+'\n')
+          print('R2734_LOCAL_PROOF_AUDIT_PASS',r['ffmpeg_frames'],r['bridge_assertions'])
+          PY_AUDIT
+          (cd proof && sha256sum * > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+      - name: Upload synthetic nonprivate local pipeline proof
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2734-public-local-video-bridge-proof
+          path: ${{ runner.temp }}/r2734/proof
+          retention-days: 7
+          if-no-files-found: error
