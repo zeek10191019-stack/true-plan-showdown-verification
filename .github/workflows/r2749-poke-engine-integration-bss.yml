@@ -1,0 +1,70 @@
+name: R27.49 Public Poke Engine Integration and BSS Gate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2749-integration-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  source_integration_only:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: v047_gen9
+            pin: cabfca06d152082ddd8d860e811a7ff3e4b86c50
+            flags: gen9,terastallization
+            bss_required: 'false'
+          - label: v048_bss
+            pin: bcf13823abc162a608e187b26bbf683f759f385e
+            flags: bss
+            bss_required: 'true'
+    steps:
+      - name: Fetch exact pinned public source
+        shell: bash
+        env:
+          PIN: ${{ matrix.pin }}
+          LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pe-source" "$RUNNER_TEMP/proof"
+          echo "engine=$LABEL" | tee "$RUNNER_TEMP/proof/summary.txt"
+          echo "requested_commit=$PIN" | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          git -C "$RUNNER_TEMP/pe-source" init -q
+          git -C "$RUNNER_TEMP/pe-source" fetch --no-tags --depth 1 https://github.com/pmariglia/poke-engine.git "$PIN"
+          git -C "$RUNNER_TEMP/pe-source" checkout -q --detach FETCH_HEAD
+          ACTUAL=$(git -C "$RUNNER_TEMP/pe-source" rev-parse HEAD)
+          echo "actual_commit=$ACTUAL" | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          test "$ACTUAL" = "$PIN"
+          rustc --version | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          cargo --version | tee -a "$RUNNER_TEMP/proof/summary.txt"
+      - name: Run locked Rust integration test suite
+        shell: bash
+        env:
+          FEATURES: ${{ matrix.flags }}
+          BSS_REQUIRED: ${{ matrix.bss_required }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/pe-source"
+          echo "features=$FEATURES" | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          cargo test --locked --tests --no-default-features --features "$FEATURES" 2>&1 | tee "$RUNNER_TEMP/proof/integration.log"
+          echo 'INTEGRATION_SUITE_PASS' | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          if [ "$BSS_REQUIRED" = 'true' ]; then
+            test -f tests/test_bss_mechanics.rs
+            cargo test --locked --test test_bss_mechanics --no-default-features --features bss 2>&1 | tee "$RUNNER_TEMP/proof/bss.log"
+            grep -Eq 'test result: ok\. [1-9][0-9]* passed; 0 failed;' "$RUNNER_TEMP/proof/bss.log"
+            echo 'BSS_INTEGRATION_PASS' | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          fi
+          echo 'SOURCE_INTEGRATION_ONLY_NOT_OFFICIAL_M_C_PARITY' | tee -a "$RUNNER_TEMP/proof/summary.txt"
+      - name: Upload public upstream source-only proof
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2749-${{ matrix.label }}-integration-proof
+          path: ${{ runner.temp }}/proof
+          if-no-files-found: warn
+          retention-days: 7
