@@ -1,0 +1,127 @@
+name: R27.53 Public M-C Pinned Source Probes
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2753-public-only-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  pinned_public_source_only:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Fetch two fixed public source trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/showdown" "$RUNNER_TEMP/engine" "$RUNNER_TEMP/proof"
+          git -C "$RUNNER_TEMP/showdown" init -q
+          git -C "$RUNNER_TEMP/showdown" fetch --depth 1 --no-tags https://github.com/smogon/pokemon-showdown.git aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git -C "$RUNNER_TEMP/showdown" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/showdown" rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git -C "$RUNNER_TEMP/engine" init -q
+          git -C "$RUNNER_TEMP/engine" fetch --depth 1 --no-tags https://github.com/pmariglia/poke-engine.git bcf13823abc162a608e187b26bbf683f759f385e
+          git -C "$RUNNER_TEMP/engine" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/engine" rev-parse HEAD)" = bcf13823abc162a608e187b26bbf683f759f385e
+      - name: Run sixteen static source checks only (never actual game certification)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RUNNER_TEMP/showdown" "$RUNNER_TEMP/engine" "$RUNNER_TEMP/proof" <<'PY'
+          from pathlib import Path
+          import hashlib,re,json,subprocess,sys
+          s=Path(sys.argv[1]);p=Path(sys.argv[2]);out=Path(sys.argv[3]);out.mkdir(exist_ok=True,parents=True)
+          required={
+           s:{'config/formats.ts':'bad5f11f7b0e30e2b12572e51d86ad8e17a90d94',
+              'sim/dex-formats.ts':'8bace21fcaa73d3f23dd38f08f3f3cc8a08340c2',
+              'sim/team-validator.ts':'89ce5bda43670169be6718cb304ac73902eada7a',
+              'data/mods/champions/learnsets.ts':'d1d80c9dde2bd7b426615587defe1941a7c4e6ab',
+              'sim/dex-formats.ts':'8bace21fcaa73d3f23dd38f08f3f3cc8a08340c2',
+              'sim/team-validator.ts':'89ce5bda43670169be6718cb304ac73902eada7a',
+              'data/mods/champions/learnsets.ts':'d1d80c9dde2bd7b426615587defe1941a7c4e6ab',
+              'data/mods/champions/scripts.ts':'7f100a0947a203454a1a97b54f6a99932e808bce',
+              'data/mods/champions/moves.ts':'1fdde5e2d1a80220020d22abf834c9103f619b3e'},
+           p:{'Cargo.toml':'e11863b1e27b989d5622b562221b1b5d9ebbc8a7',
+              'CHANGELOG.md':'1d7ffc51bffc0f0629ba5fa4f668b433261d9e99',
+              'src/genx/state.rs':'518f3a17da45f6ed2ba3cd5075f75297eaf483fb',
+              'src/genx/generate_instructions.rs':'3b173fe232f292e117b06f9048f988341c6271d3'}}
+          loaded={}
+          for root,entries in required.items():
+           loaded[root]={}
+           for name,expected in entries.items():
+            b=(root/name).read_bytes()
+            blob=hashlib.sha1(f'blob {len(b)}\0'.encode()+b).hexdigest()
+            if blob!=expected:raise SystemExit('PINNED_BLOB_MISMATCH:'+name)
+            loaded[root][name]=b.decode('utf8')
+          a=loaded[s];b=loaded[p]
+          def learnset_block(name):
+           t=a['data/mods/champions/learnsets.ts']
+           start=re.search(r'^\t'+re.escape(name)+r':\s*\{\s*$',t,re.M)
+           if not start:raise SystemExit('LEARNSET_MISSING:'+name)
+           rest=t[start.end():];end=re.search(r'^\t\},?\s*$',rest,re.M)
+           if not end:raise SystemExit('LEARNSET_UNTERMINATED:'+name)
+           return rest[:end.start()]
+          def block(name):
+           t=a['data/mods/champions/moves.ts']
+           start=re.search(r'^\t'+re.escape(name)+r':\s*\{\s*$',t,re.M)
+           if not start:raise SystemExit('MOVE_MISSING:'+name)
+           rem=t[start.end():];end=re.search(r'^\t\},?\s*$',rem,re.M)
+           if not end:raise SystemExit('MOVE_UNTERMINATED:'+name)
+           return rem[:end.start()]
+          def learnset(name):
+           t=a['data/mods/champions/learnsets.ts']
+           start=re.search(r'^\t'+re.escape(name)+r':\s*\{\s*$',t,re.M)
+           if not start:raise SystemExit('LEARNSET_MISSING:'+name)
+           rem=t[start.end():];end=re.search(r'^\t\},?\s*$',rem,re.M)
+           if not end:raise SystemExit('LEARNSET_UNTERMINATED:'+name)
+           return rem[:end.start()]
+          def prop(name,key):
+           q=re.search(r'^\t\t'+re.escape(key)+r':\s*([^,\n]+)',block(name),re.M)
+           return q.group(1).strip() if q else None
+          check={}
+          check['STAT_POINTS_0_32_TOTAL_LE_66']=all(t in a['sim/dex-formats.ts'] for t in ["format.mod.startsWith('champions')",'this.evLimit = 66;']) and all(t in a['sim/team-validator.ts'] for t in ["dex.currentMod.startsWith('champions')",'if (set.evs[stat as StatID] > 32)','if (evLimit !== null && totalEV > evLimit)'])
+          pol=learnset('politoed');arc=learnset('archaludon')
+          check['POLITOED_POUND_REJECTS']=bool(re.search(r'^\t\t\tsurf:',pol,re.M)) and not bool(re.search(r'^\t\t\tpound:',pol,re.M))
+          check['ARCHALUDON_MIRROR_COAT_REJECTS']=bool(re.search(r'^\t\t\tflashcannon:',arc,re.M)) and not bool(re.search(r'^\t\t\tmirrorcoat:',arc,re.M))
+          check['ARCHALUDON_METAL_BURST_REJECTS']=bool(re.search(r'^\t\t\tstealthrock:',arc,re.M)) and not bool(re.search(r'^\t\t\tmetalburst:',arc,re.M))
+          check['M_C_FORMAT_EXISTS']=bool(re.search(r'name:\s*"\[Gen 9 Champions\] BSS Reg M-C",\s*mod:\s*\'champions\'',a['config/formats.ts']))
+          check['STAT_POINTS_0_32_TOTAL_LE_66']=(
+           "format.mod.startsWith('champions')" in a['sim/dex-formats.ts'] and
+           'this.evLimit = 66;' in a['sim/dex-formats.ts'] and
+           "dex.currentMod.startsWith('champions')" in a['sim/team-validator.ts'] and
+           'if (set.evs[stat as StatID] > 32)' in a['sim/team-validator.ts'] and
+           'if (evLimit !== null && totalEV > evLimit)' in a['sim/team-validator.ts'])
+          poli=learnset_block('politoed');arch=learnset_block('archaludon')
+          check['POLITOED_POUND_REJECTS']=bool(re.search(r'^\t\t\tsurf:',poli,re.M)) and not bool(re.search(r'^\t\t\tpound:',poli,re.M))
+          check['ARCHALUDON_MIRROR_COAT_REJECTS']=bool(re.search(r'^\t\t\tflashcannon:',arch,re.M)) and not bool(re.search(r'^\t\t\tmirrorcoat:',arch,re.M))
+          check['ARCHALUDON_METAL_BURST_REJECTS']=bool(re.search(r'^\t\t\tstealthrock:',arch,re.M)) and not bool(re.search(r'^\t\t\tmetalburst:',arch,re.M))
+          check['CHAMPIONS_STAT_POINTS_EFFECTIVE_EV']=all(t in a['data/mods/champions/scripts.ts'] for t in ['Math.max(2 * evs - 1, 0)','statModify(']) and all(t in b['src/genx/state.rs'] for t in ['fn stat_points_to_effective_ev','8 * stat_points - 4','if stat_points == 0 {']) and all(max(2*i-1,0)==(0 if i==0 else 8*i-4)//4 for i in range(33))
+          for key,name,propname,expected in [('METEOR_ASSAULT_BP170','meteorassault','basePower','170'),('MILK_DRINK_TARGET','milkdrink','target','"adjacentAllyOrSelf"'),('SLASH_BP80','slash','basePower','80'),('SNIPE_SHOT_BP85','snipeshot','basePower','85')]:check[key]=(prop(name,propname)==expected)
+          check['DOUBLE_SHOCK_PUNCH_FLAG']=bool(re.search(r'\bpunch:\s*1\b',block('doubleshock')))
+          pp_code=bool(re.search(r'calculatePP\(move,\s*ppUps\)\s*\{\s*return\s+move\.noPPBoosts\s*\?\s*move\.pp\s*:\s*\(move\.pp\s*/\s*5\s*\+\s*1\)\s*\*\s*4\s*;',a['data/mods/champions/scripts.ts']))
+          check['WISH_EFFECTIVE_PP8']=prop('wish','pp')=='5' and pp_code
+          check['STRENGTH_SAP_EFFECTIVE_PP8']=prop('strengthsap','pp')=='5' and pp_code
+          for key,symbol,val in [('CHAMPIONS_THAW_CHANCE','THAW_CHANCE','0.25'),('CHAMPIONS_FULLY_PARALYZED_CHANCE','FULLY_PARALYZED_CHANCE','0.125'),('CHAMPIONS_SLEEP_DURATION','MAX_SLEEP_TURNS','2')]:
+           check[key]=bool(re.search(r'\#\[cfg\(feature\s*=\s*"champions"\)\]\s*pub const '+symbol+r':\s*\w+\s*=\s*'+re.escape(val)+r'\s*;',b['src/genx/generate_instructions.rs']))
+          if len(check)!=16:raise SystemExit('INVALID_COUNT')
+          result={'schema':'R2753_PUBLIC_ONLY_PINNED_SOURCE_PROOFS_V1',
+          'github_workflow':'MANUAL_PUBLIC_SOURCE_ONLY',
+          'showdown_commit':subprocess.check_output(['git','-C',str(s),'rev-parse','HEAD'],text=True).strip(),
+          'poke_engine_commit':subprocess.check_output(['git','-C',str(p),'rev-parse','HEAD'],text=True).strip(),
+          'verified_source_blobs':10,'source_checks':check,'passing_source_checks':sum(check.values()),
+          'official_native33':'0/33','official_exact34':'0/34','real_matches':'0/30','formal':'DENY',
+          'current_M_C_game_parity_verified':False,'source_only':True}
+          (out/'r2753_source_result.json').write_text(json.dumps(result,indent=2,ensure_ascii=False)+'\n')
+          print(json.dumps(result,indent=2))
+          if not all(check.values()):raise SystemExit('SOURCE_PROBE_FAILED')
+          PY
+      - name: Upload source-only evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2753-public-pinned-source-probe
+          path: ${{ runner.temp }}/proof
+          if-no-files-found: warn
+          retention-days: 7
