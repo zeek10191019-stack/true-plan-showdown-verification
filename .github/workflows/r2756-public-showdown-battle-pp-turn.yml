@@ -1,0 +1,158 @@
+name: R27.56 Pinned M-C Turn and Effective PP Probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2756-mc-public-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  public_showdown_synthetic_runtime_only:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Configure Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch exact pinned public Showdown source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source" "$RUNNER_TEMP/proof"
+          git -C "$RUNNER_TEMP/source" init -q
+          git -C "$RUNNER_TEMP/source" fetch --no-tags --depth 1 https://github.com/smogon/pokemon-showdown.git aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git -C "$RUNNER_TEMP/source" checkout -q --detach FETCH_HEAD
+          PIN=$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)
+          test "$PIN" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          echo "commit=$PIN" | tee "$RUNNER_TEMP/proof/source.txt"
+          node --version | tee -a "$RUNNER_TEMP/proof/source.txt"
+          npm --version | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Locked build for upstream M-C runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          npm ci --no-audit --no-fund 2>&1 | tee "$RUNNER_TEMP/proof/npm-ci.log"
+          npm run build 2>&1 | tee "$RUNNER_TEMP/proof/build.log"
+          test -f dist/sim/battle.js
+          echo 'UPSTREAM_BUILD_PASS_NO_OFFICIAL_GAME_CERT' | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Execute public source battle-only probe (not actual game)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/r2756-probe.js" <<'R2756_EOF'
+          'use strict';
+          /**
+           * Pinned upstream Showdown M-C simulation probe, NOT actual Pokémon Champions parity.
+           * Runs ONLY against smogon/pokemon-showdown@aa17ca0fac8bc5605df673bd8774c2d0e91efa43.
+           * Synthetic fixture sets intentionally MUST NOT be treated as in-game-legal M-C sets.
+           * No network, proprietary game capture, trainer data, or model API calls.
+           */
+          const path = require('node:path');
+          const fs = require('node:fs');
+          const assert = require('node:assert/strict');
+          const EXPECTED_PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const FORMAT = '[Gen 9 Champions] BSS Reg M-C';
+          const ALL_STATS = Object.freeze({hp:0,atk:0,def:0,spa:0,spd:0,spe:0});
+          function set(species, moves, evs=ALL_STATS, nature='Hardy') {
+            return {name:species,species,moves,ability:'',item:'',nature,level:50,
+                    evs:{...evs},ivs:{hp:31,atk:31,def:31,spa:31,spd:31,spe:31}};
+          }
+          function report(root, actualPin) {
+            assert.equal(actualPin, EXPECTED_PIN, 'Pinned revision mismatch');
+            const {Dex} = require(path.join(root,'dist/sim/dex'));
+            const {Battle} = require(path.join(root,'dist/sim/battle'));
+            const fmt = Dex.formats.get(FORMAT);
+            assert.equal(fmt.mod,'champions');
+            const dex = Dex.forFormat(fmt);
+            assert.equal(dex.gen, 9);
+            assert.equal(dex.formats.getRuleTable(fmt).evLimit,66);
+
+            // Battling via the real Sim.Battle object rather than extrapolating base Dex PP.
+            // Some battle sets below are intentionally synthetic probes; this is NOT a legality check.
+            const p1=[
+              set('Sylveon',['Wish','Protect','Moonblast','Quick Attack']),
+              set('Arboliva',['Strength Sap','Protect','Energy Ball','Tackle']),
+              set('Garchomp',['Earthquake','Protect','Dragon Claw','Tackle'],{...ALL_STATS,atk:32,spe:32}),
+              set('Archaludon',['Flash Cannon','Protect','Dragon Pulse','Tackle']),
+              set('Gyarados',['Waterfall','Protect','Tackle','Bite']),
+              set('Mimikyu',['Play Rough','Protect','Shadow Sneak','Tackle']),
+            ];
+            const p2=[
+              set('Garchomp',['Protect','Tackle','Dragon Claw','Earthquake']),
+              set('Gyarados',['Protect','Tackle','Bite','Waterfall']),
+              set('Sylveon',['Protect','Tackle','Moonblast','Wish']),
+              set('Mimikyu',['Protect','Tackle','Play Rough','Shadow Sneak']),
+              set('Archaludon',['Protect','Tackle','Flash Cannon','Dragon Pulse']),
+              set('Arboliva',['Protect','Tackle','Strength Sap','Energy Ball']),
+            ];
+            const battle=new Battle({formatid:fmt.id,seed:[0x1234,0x5678,0x9abc,0xdef0],
+              p1:{name:'Synthetic P1',team:p1},p2:{name:'Synthetic P2',team:p2}});
+            try {
+              assert.equal(battle.requestState,'teampreview','M-C should request 6->3 preview');
+              assert.equal(battle.p1.pokemon.length,6);
+              assert.equal(battle.p2.pokemon.length,6);
+              const getSlot=(mon,id)=>mon.baseMoveSlots.find(x=>x.id===id);
+              const wish=getSlot(battle.p1.pokemon[0],'wish');
+              const sap=getSlot(battle.p1.pokemon[1],'strengthsap');
+              assert(wish && sap,'Both moves must be instantiated as real Pokemon move slots');
+              assert.equal(dex.moves.get('wish').pp,5);
+              assert.equal(dex.moves.get('strengthsap').pp,5);
+              assert.equal(wish.maxpp,8,'Wish *effective battle PP*, not base PP');
+              assert.equal(sap.maxpp,8,'Strength Sap *effective battle PP*, not base PP');
+              assert.equal(wish.pp,8);
+              assert.equal(sap.pp,8);
+              const pre={turn:battle.turn, requestState:battle.requestState, rosterCount:battle.p1.pokemon.length};
+              battle.makeChoices('team 123','team 123');
+              assert.equal(battle.requestState,'move','Preview choices must lead into move phase');
+              assert(battle.turn>=1,'A first turn must be created');
+              assert.equal(battle.p1.active[0]?.species.name,'Sylveon');
+              assert.equal(battle.p1.pokemon.length,3,'Selected roster must contain exactly 3');
+              assert.equal(battle.p2.pokemon.length,3,'Opponent selected roster must contain exactly 3');
+              assert.deepEqual(battle.p1.pokemon.map(x=>x.species.name),['Sylveon','Arboliva','Garchomp']);
+              assert.deepEqual(battle.p2.pokemon.map(x=>x.species.name),['Garchomp','Gyarados','Sylveon']);
+              const startingWishPP=battle.p1.active[0].moveSlots.find(x=>x.id==='wish').pp;
+              assert.equal(startingWishPP,8);
+              const startingTurn=battle.turn;
+              battle.makeChoices('move wish','move protect');
+              assert(battle.turn>startingTurn || battle.ended,'A turn must resolve');
+              assert.equal(battle.p1.active[0].moveSlots.find(x=>x.id==='wish').pp,7,
+                'Wish should use 1 PP after action resolution');
+              const output={schema:'TRUE_PLAN_R2756_MC_BATTLE_RUNTIME_SHADOW_V1',
+                pin:EXPECTED_PIN,format:FORMAT,mode:'PINNED_UPSTREAM_SIMULATION_ONLY',
+                checks:{format_and_66p:true,roster6_preview3:true,unselected_not_usable:true,
+                  wish_effective_pp8:true,strengthsap_effective_pp8:true,
+                  first_turn_created:true,wish_pp_decrement_after_turn:true},
+                battle_state:{pre,startingTurn,endTurn:battle.turn,wishBefore:startingWishPP,
+                  wishAfter:7,teamP1Selected:[0,1,2],teamP2Selected:[0,1,2]},
+                training_allowed:false,actual_game_oracle:false,canonical_registry_authenticated:false,
+                native33:'0/33',exact34:'0/34',real_champions_matches:'0/30',formal:'DENY'};
+              return output;
+            } finally {battle.destroy();}
+          }
+          if(require.main===module){
+            const root=path.resolve(process.argv[2]||'.');
+            const pin=process.argv[3];
+            const destination=process.argv[4];
+            const result=report(root,pin);
+            if(destination)fs.writeFileSync(destination,JSON.stringify(result,null,2)+'\n');
+            process.stdout.write(JSON.stringify(result)+'\n');
+          }
+          module.exports={set,report,FORMAT,EXPECTED_PIN};
+          R2756_EOF
+          node --check "$RUNNER_TEMP/r2756-probe.js"
+          sha256sum "$RUNNER_TEMP/r2756-probe.js" > "$RUNNER_TEMP/proof/r2756_probe_js.sha256"
+          PIN=$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)
+          node "$RUNNER_TEMP/r2756-probe.js" "$RUNNER_TEMP/source" "$PIN" "$RUNNER_TEMP/proof/r2756_mc_battle_runtime.json" 2>&1 | tee "$RUNNER_TEMP/proof/runtime.log"
+          test -s "$RUNNER_TEMP/proof/r2756_mc_battle_runtime.json"
+          echo 'SHOWDOWN_TURN_AND_PP_PROBE_PASS_NOT_CHAMPIONS_PARITY' | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Upload public proof on success or failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2756-upstream-showdown-battle-pp-only
+          path: ${{ runner.temp }}/proof
+          if-no-files-found: warn
+          retention-days: 7
