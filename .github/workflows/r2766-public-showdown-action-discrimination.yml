@@ -1,0 +1,443 @@
+name: R27.66 Pinned M-C Request-Grounded Move and Switch Discrimination
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2766-public-discrimination-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  upstream_source_synthetic_only:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Node 22.18.0 fixed
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch locked public Showdown source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source" "$RUNNER_TEMP/proof"
+          git -C "$RUNNER_TEMP/source" init -q
+          git -C "$RUNNER_TEMP/source" fetch --depth 1 --no-tags https://github.com/smogon/pokemon-showdown.git aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git -C "$RUNNER_TEMP/source" checkout -q --detach FETCH_HEAD
+          actual=$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)
+          test "$actual" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          printf 'source_commit=%s\n' "$actual" | tee "$RUNNER_TEMP/proof/source.txt"
+          node --version | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Lockfile build, no third-party API keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          npm ci --no-audit --no-fund 2>&1 | tee "$RUNNER_TEMP/proof/npm-ci.log"
+          npm run build 2>&1 | tee "$RUNNER_TEMP/proof/build.log"
+          test -f dist/sim/battle.js
+          echo UPSTREAM_BUILD_PASS_NO_GAME_PARITY | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Execute 24 source-request-grounded branch paths twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/r2766_public_probe.js" <<'R2766_PUBLIC_JS'
+          'use strict';
+          // PUBLIC pinned upstream Showdown-only fixture. Synthetic full team knowledge is
+          // NOT an observation of an actual Champions opponent. Not for live guidance.
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const assert=require('node:assert/strict');
+          const PIN='aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const FORMAT='[Gen 9 Champions] BSS Reg M-C';
+          const DV='R2766_PINNED_SYNTHETIC_REQUEST_BRANCH_V1';
+          const MINE=['Sylveon','Gyarados','Garchomp','Mimikyu','Archaludon','Arboliva'];
+          const OPP=['Garchomp','Gyarados','Sylveon','Mimikyu','Archaludon','Arboliva'];
+          const MOVES={
+            Sylveon:['Tackle','Hyper Voice','Protect','Quick Attack'],
+            Gyarados:['Tackle','Protect','Waterfall','Bite'],
+            Garchomp:['Earthquake','Protect','Tackle','Dragon Claw'],
+            Mimikyu:['Tackle','Protect','Shadow Sneak','Play Rough'],
+            Archaludon:['Tackle','Protect','Flash Cannon','Dragon Pulse'],
+            Arboliva:['Tackle','Protect','Energy Ball','Strength Sap'],
+          };
+          const OUR={'move:tackle':'move tackle','move:hypervoice':'move hypervoice','switch:2':'switch 2'};
+          const OPP1={'intent-earthquake':'move earthquake','intent-protect':'move protect'};
+          const OUR2={'move:protect':'move protect','move:tackle':'move tackle'};
+          const OPP2={'intent-protect':'move protect','intent-tackle':'move tackle'};
+          const keys=o=>Object.keys(o).sort();
+          const SP={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+          const IV={hp:31,atk:31,def:31,spa:31,spd:31,spe:31};
+          function roster(names){return names.map(species=>({species,name:species,level:50,ability:'',item:'',nature:'Hardy',moves:MOVES[species],evs:{...SP},ivs:{...IV}}));}
+          function create(Battle,fmt){
+            const b=new Battle({formatid:fmt.id,strictChoices:true,
+              seed:[0x1234,0x5678,0x9abc,0xdef0],
+              p1:{name:'SyntheticPlayer',team:roster(MINE)},
+              p2:{name:'SyntheticOpponent',team:roster(OPP)}});
+            assert.equal(b.requestState,'teampreview');
+            assert.equal(b.p1.pokemon.length,6);
+            assert.equal(b.p2.pokemon.length,6);
+            b.makeChoices('team 123','team 123');
+            assert.equal(b.requestState,'move');
+            assert.equal(b.p1.pokemon.length,3);
+            assert.equal(b.p2.pokemon.length,3);
+            assert.equal(b.p1.active[0].species.name,'Sylveon');
+            assert.equal(b.p2.active[0].species.name,'Garchomp');
+            return b;
+          }
+          function menu(side){
+            const q=side.activeRequest;
+            assert(q && Array.isArray(q.active) && q.active.length===1,'source MoveRequest missing');
+            assert(q.side && Array.isArray(q.side.pokemon),'source switch side request missing');
+            const move=q.active[0].moves.filter(x=>x && !x.disabled && x.pp>0)
+              .map(x=>'move:'+x.id).sort();
+            const sw=q.side.pokemon.flatMap((x,i)=>(!x.active && !x.fainted && i>=1)?['switch:'+(i+1)]:[]).sort();
+            return {moves:move,switches:sw,actions:[...move,...sw].sort()};
+          }
+          function snap(b){
+            const a=b.p1.active[0],c=b.p2.active[0];
+            assert(a&&c,'no active');
+            const team=side=>side.pokemon.map(m=>({species:m.species.name.toLowerCase(),hp:m.hp,maxhp:m.maxhp,fainted:m.fainted}));
+            return {turn:b.turn,request_state:b.requestState,
+              our_active:a.species.name.toLowerCase(),opponent_active:c.species.name.toLowerCase(),
+              our_team:team(b.p1),opponent_team:team(b.p2),
+              our_pp:Object.fromEntries(a.moveSlots.map(m=>[m.id,m.pp])),
+              our_pokemon_left:b.p1.pokemonLeft,opponent_pokemon_left:b.p2.pokemonLeft};
+          }
+          function utility(s){
+            // Synthetic total selected-team remaining HP fraction margin. Equal weights,
+            // no species/roster optimization, no live prediction or value network.
+            const sum=team=>team.reduce((v,m)=>v+m.hp/m.maxhp,0)/team.length;
+            return Math.round((sum(s.our_team)-sum(s.opponent_team))*1e9)/1e9;
+          }
+          function one(Battle,fmt,rootAct,rootIntent,nextAct,nextIntent){
+            const b=create(Battle,fmt);
+            try{
+              const q=menu(b.p1);
+              assert.deepEqual(q.moves,['move:hypervoice','move:protect','move:quickattack','move:tackle']);
+              assert.deepEqual(q.switches,['switch:2','switch:3']);
+              assert(q.actions.includes(rootAct),'root action not offered in source request');
+              const before=snap(b);
+              let cursor=b.log.length;
+              b.makeChoices(OUR[rootAct],OPP1[rootIntent]);
+              assert.equal(b.requestState,'move','root did not yield turn2 move request');
+              const first=snap(b);
+              assert.equal(first.turn,2);
+              const logs1=b.log.slice(cursor).filter(s=>s.startsWith('|move|')||s.startsWith('|switch|'));
+              const q2=menu(b.p1);
+              assert(q2.actions.includes(nextAct),'next action unavailable in source request');
+              cursor=b.log.length;
+              b.makeChoices(OUR2[nextAct],OPP2[nextIntent]);
+              assert.equal(b.requestState,'move','turn2 did not reach turn3 request');
+              const second=snap(b);
+              assert.equal(second.turn,3);
+              const logs2=b.log.slice(cursor).filter(s=>s.startsWith('|move|')||s.startsWith('|switch|'));
+              assert(logs1.some(x=>x.startsWith(rootAct.startsWith('switch:')?'|switch|p1a:':'|move|p1a:')),
+                'source turn1 player action missing');
+              assert(logs1.some(x=>x.startsWith('|move|p2a:')),'source turn1 opponent action missing');
+              assert(logs2.some(x=>x.startsWith('|move|p1a:')),'source turn2 player action missing');
+              assert(logs2.some(x=>x.startsWith('|move|p2a:')),'source turn2 opponent action missing');
+              return {root_action:rootAct,root_intent:rootIntent,next_action:nextAct,
+                next_intent:nextIntent,root_state:before,first_state:first,second_state:second,
+                first_log:logs1,second_log:logs2,
+                second_menu:q2.actions,first_utility:utility(first),second_utility:utility(second)};
+            }finally{b.destroy();}
+          }
+          function rejectIllegal(Battle,fmt){
+            const b=create(Battle,fmt);
+            try{
+              // Strict engine side-choice validation, NOT species learnset validation.
+              assert.throws(()=>b.p1.choose('move moonblast'),/doesn't have a move/i);
+              assert.throws(()=>b.p1.choose('switch 4'),/can't switch|invalid|not in|can't switch/i);
+              assert.equal(b.turn,1);
+              assert.equal(b.p1.choice.actions.length,0);
+              return {unoffered_move_rejected:true,unselected_slot_rejected:true};
+            }finally{b.destroy();}
+          }
+          function all(Battle,fmt){
+            const paths=[];
+            for(const a of keys(OUR))for(const i of keys(OPP1))
+              for(const b of keys(OUR2))for(const j of keys(OPP2)){
+                const p=one(Battle,fmt,a,i,b,j);
+                assert(Number.isFinite(p.second_utility));
+                paths.push(p);
+              }
+            assert.equal(paths.length,24);
+            for(const a of keys(OUR))for(const i of keys(OPP1)){
+              const x=paths.filter(p=>p.root_action===a&&p.root_intent===i);
+              assert.equal(x.length,4);
+              x.forEach(p=>assert.deepEqual(p.first_state,x[0].first_state));
+            }
+            const m=createThenDispose(Battle,fmt);
+            return {paths,source_root_menu:m};
+          }
+          function createThenDispose(Battle,fmt,fn){const b=create(Battle,fmt);try{return menu(b.p1);}finally{b.destroy();}}
+          function execute(root,actual){
+            assert.equal(actual,PIN);
+            const {Dex}=require(path.join(root,'dist/sim/dex'));
+            const {Battle}=require(path.join(root,'dist/sim/battle'));
+            const fmt=Dex.formats.get(FORMAT);
+            assert.equal(fmt.mod,'champions');
+            assert.equal(Dex.forFormat(fmt).formats.getRuleTable(fmt).evLimit,66);
+            const first=all(Battle,fmt);
+            const second=all(Battle,fmt);
+            assert.deepEqual(first,second,'fixed-seed replay must be byte-identical');
+            const rejects=rejectIllegal(Battle,fmt);
+            const byAction={};
+            for(const action of keys(OUR)){
+              const rows=first.paths.filter(p=>p.root_action===action);
+              // At each first-turn opponent intent, player can optimize a second action
+              // against the next opponent intent. These assumptions are synthetic.
+              const intentScores={};
+              for(const intent of keys(OPP1)){
+                const items=rows.filter(x=>x.root_intent===intent);
+                const values=keys(OUR2).map(next=>{
+                  const cases=items.filter(p=>p.next_action===next);
+                  return {maximin:Math.min(...cases.map(p=>p.second_utility)),
+                    expected:cases.reduce((x,p)=>x+p.second_utility,0)/cases.length};
+                });
+                intentScores[intent]={maximin:Math.max(...values.map(v=>v.maximin)),
+                  expected:Math.max(...values.map(v=>v.expected))};
+              }
+              byAction[action]={
+                maximin:Math.min(...Object.values(intentScores).map(v=>v.maximin)),
+                expected:keys(OPP1).reduce((v,intent)=>v+intentScores[intent].expected/keys(OPP1).length,0)};
+              for(const k of ['maximin','expected'])byAction[action][k]=Math.round(byAction[action][k]*1e9)/1e9;
+            }
+            const vals=Object.values(byAction);
+            const spread={maximin:Math.round((Math.max(...vals.map(v=>v.maximin))-Math.min(...vals.map(v=>v.maximin)))*1e9)/1e9,
+              expected:Math.round((Math.max(...vals.map(v=>v.expected))-Math.min(...vals.map(v=>v.expected)))*1e9)/1e9};
+            // No assertion requiring non-tie: an honest fixed-engine tie is a real outcome.
+            return {schema:'TRUE_PLAN_R2766_UPSTREAM_LEGAL_REQUEST_ACTION_SPREAD_V1',
+              source_commit:PIN,format:FORMAT,data_version:DV,
+              provenance:'PINNED_UPSTREAM_SIMULATION_ONLY',
+              synthetic_full_information_fixture:true,
+              format_species_learnset_legality_certified:false,
+              actual_game_oracle:false,training_allowed:false,screen_ingestion_certified:false,
+              intent_weights_provenance:'SYNTHETIC_UNIFORM_NOT_OBSERVED',
+              utility_definition:'SELECTED_TEAM_HP_FRACTION_MARGIN_NOT_WIN_RATE',
+              source_root_menu:first.source_root_menu, evaluated_root_actions:keys(OUR),
+              opponent_root_intents:keys(OPP1),evaluated_next_actions:keys(OUR2),
+              opponent_next_intents:keys(OPP2),illegal_request_tests:rejects,
+              path_count:first.paths.length,paths:first.paths,rankings:byAction,
+              action_value_spread:spread,
+              discriminative_fixture:spread.expected>1e-8||spread.maximin>1e-8,
+              full_legal_action_coverage:false,
+              source_result_replayed_identically:true,
+              official_gate:{native33:'0/33',exact34:'0/34',real_matches:'0/30',formal:'DENY'},
+              real_game_recommendation:'WITHHELD'};
+          }
+          function main(){
+            const [root,actual,out]=process.argv.slice(2);
+            assert(root&&actual&&out,'usage: node probe.js <showdown_source> <git_SHA> <output.json>');
+            const data=execute(root,actual);
+            fs.writeFileSync(out,JSON.stringify(data,null,2)+'\n');
+            console.log(JSON.stringify({schema:data.schema,path_count:data.path_count,
+              source_menu:data.source_root_menu,rankings:data.rankings,
+              spread:data.action_value_spread,discriminative_fixture:data.discriminative_fixture,
+              source_commit:data.source_commit,formal:data.official_gate.formal}));
+          }
+          if(require.main===module)main();
+          module.exports={execute,menu,utility};
+          R2766_PUBLIC_JS
+          node --check "$RUNNER_TEMP/r2766_public_probe.js"
+          sha256sum "$RUNNER_TEMP/r2766_public_probe.js" > "$RUNNER_TEMP/proof/public_probe.sha256"
+          git -C "$RUNNER_TEMP/source" rev-parse HEAD > "$RUNNER_TEMP/proof/pinned_sha.txt"
+          actual=$(cat "$RUNNER_TEMP/proof/pinned_sha.txt")
+          node "$RUNNER_TEMP/r2766_public_probe.js" "$RUNNER_TEMP/source" "$actual" "$RUNNER_TEMP/proof/r2766_paths.json" 2>&1 | tee "$RUNNER_TEMP/proof/probe.log"
+          node "$RUNNER_TEMP/r2766_public_probe.js" "$RUNNER_TEMP/source" "$actual" "$RUNNER_TEMP/proof/r2766_paths_repeat.json" 2>&1 | tee "$RUNNER_TEMP/proof/probe_repeat.log"
+          cmp "$RUNNER_TEMP/proof/r2766_paths.json" "$RUNNER_TEMP/proof/r2766_paths_repeat.json"
+      - name: Validate proof and compute action-value spread without promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/r2766_public_audit.py" <<'R2766_PUBLIC_PY'
+          """R27.66 source-request-grounded Showdown-only action ranking audit.
+          
+          Strict fail-closed acceptance for synthetic upstream proof; no official game parity,
+          no ranked-match policy, no incumbent or teacher injection. Source must be a real
+          engine-generated JSON Artifact before 'UPSTREAM_EXECUTION_VERIFIED' is asserted.
+          """
+          from __future__ import annotations
+          import hashlib
+          import json
+          import math
+          from pathlib import Path
+          
+          PIN='aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          SCHEMA='TRUE_PLAN_R2766_UPSTREAM_LEGAL_REQUEST_ACTION_SPREAD_V1'
+          FORMAT='[Gen 9 Champions] BSS Reg M-C'
+          DV='R2766_PINNED_SYNTHETIC_REQUEST_BRANCH_V1'
+          OURS=['move:hypervoice','move:tackle','switch:2']
+          OPP1=['intent-earthquake','intent-protect']
+          OURS2=['move:protect','move:tackle']
+          OPP2=['intent-protect','intent-tackle']
+          MENU_MOVES=['move:hypervoice','move:protect','move:quickattack','move:tackle']
+          MENU_SWITCH=['switch:2','switch:3']
+          GATES={'native33':'0/33','exact34':'0/34','real_matches':'0/30','formal':'DENY'}
+          KEYS={'schema','source_commit','format','data_version','provenance','synthetic_full_information_fixture',
+                'format_species_learnset_legality_certified','actual_game_oracle','training_allowed',
+                'screen_ingestion_certified','intent_weights_provenance','utility_definition','source_root_menu',
+                'evaluated_root_actions','opponent_root_intents','evaluated_next_actions','opponent_next_intents',
+                'illegal_request_tests','path_count','paths','rankings','action_value_spread',
+                'discriminative_fixture','full_legal_action_coverage','source_result_replayed_identically',
+                'official_gate','real_game_recommendation'}
+          PATH={'root_action','root_intent','next_action','next_intent','root_state','first_state','second_state',
+                'first_log','second_log','second_menu','first_utility','second_utility'}
+          STATE={'turn','request_state','our_active','opponent_active','our_team','opponent_team',
+                 'our_pp','our_pokemon_left','opponent_pokemon_left'}
+          MON={'species','hp','maxhp','fainted'}
+          class AuditError(ValueError): pass
+          
+          def req(pred,msg):
+              if not pred: raise AuditError(msg)
+          
+          def obj(v,keys,tag): req(type(v) is dict and set(v)==set(keys),'INVALID_'+tag)
+          def num(v,where,lo=-1.1,hi=1.1):
+              req(type(v) in (float,int) and math.isfinite(v) and lo<=v<=hi,'NUMERIC_'+where)
+              return float(v)
+          def score(s):
+              def a(team):return sum(m['hp']/m['maxhp'] for m in team)/len(team)
+              return round(a(s['our_team'])-a(s['opponent_team']),9)
+          
+          def validate_state(s,t):
+              obj(s,STATE,'STATE')
+              req(type(s['turn']) is int and s['turn']==t,'STATE_TURN')
+              req(s['request_state']=='move','STATE_PHASE')
+              req(s['opponent_active']=='garchomp','OPP_ACTIVE')
+              req(s['our_active'] in ('sylveon','gyarados'),'OUR_ACTIVE')
+              for prefix in ('our','opponent'):
+                  team=s[prefix+'_team']
+                  req(type(team) is list and len(team)==3,'TEAM_SIZE')
+                  for mon in team:
+                      obj(mon,MON,'MON')
+                      req(type(mon['hp']) is int and type(mon['maxhp']) is int,'MON_HP_TYPE')
+                      req(0<=mon['hp']<=mon['maxhp'] and mon['maxhp']>0,'MON_HP_RANGE')
+                      req(mon['fainted'] is False and mon['hp']>0,'NO_FAINT_FIXTURE')
+                      req(type(mon['species']) is str and len(mon['species'])<50,'MON_SPECIES')
+                  req(s[prefix+'_pokemon_left']==3,'PARTY_COUNT')
+                  req(team[0 if s[prefix+'_active']==('garchomp' if prefix=='opponent' else 'sylveon') else 1]['species']
+                      == s[prefix+'_active'],'ACTIVE_ROSTER_MISMATCH')
+              pp=s['our_pp'];req(type(pp) is dict and len(pp)==4,'MOVE_SLOT_COUNT')
+              for v in pp.values():req(type(v) is int and 0<=v<=64,'PP_VALUE')
+              return s
+          
+          def validate(data):
+              obj(data,KEYS,'TOP')
+              req(data['schema']==SCHEMA and data['source_commit']==PIN and data['format']==FORMAT
+                  and data['data_version']==DV and data['provenance']=='PINNED_UPSTREAM_SIMULATION_ONLY',
+                  'PIN_OR_VERSION')
+              req(data['synthetic_full_information_fixture'] is True,'SYNTHETIC_MARKER')
+              for k in ['format_species_learnset_legality_certified','actual_game_oracle','training_allowed',
+                        'screen_ingestion_certified','full_legal_action_coverage']:
+                  req(data[k] is False,'FALSE_GATE_'+k)
+              req(data['intent_weights_provenance']=='SYNTHETIC_UNIFORM_NOT_OBSERVED', 'WEIGHTS_NOT_OBSERVED')
+              req(data['utility_definition']=='SELECTED_TEAM_HP_FRACTION_MARGIN_NOT_WIN_RATE','UTILITY_SCOPE')
+              req(data['official_gate']==GATES and data['real_game_recommendation']=='WITHHELD','FORMAL_GATE')
+              m=data['source_root_menu'];obj(m,{'moves','switches','actions'},'MENU')
+              req(m['moves']==MENU_MOVES and m['switches']==MENU_SWITCH and
+                  m['actions']==sorted(MENU_MOVES+MENU_SWITCH),'SOURCE_ACTION_MENU')
+              req(data['evaluated_root_actions']==OURS and data['opponent_root_intents']==OPP1
+                  and data['evaluated_next_actions']==OURS2 and data['opponent_next_intents']==OPP2,'BRANCH_MENU')
+              req(data['illegal_request_tests']=={'unoffered_move_rejected':True,
+                                                   'unselected_slot_rejected':True},'ENGINE_CHOICE_REJECTION')
+              req(type(data['path_count']) is int and data['path_count']==24
+                  and type(data['paths']) is list and len(data['paths'])==24,'PATH_COUNT')
+              req(data['source_result_replayed_identically'] is True,'REPLAY_NOT_DETERMINISTIC')
+              combos={}; intermediate={}; root=None
+              for p in data['paths']:
+                  obj(p,PATH,'PATH')
+                  k=(p['root_action'],p['root_intent'],p['next_action'],p['next_intent'])
+                  req(k not in combos and k[0] in OURS and k[1] in OPP1 and
+                      k[2] in OURS2 and k[3] in OPP2,'ACTION_COMBINATION')
+                  for nm,t in [('root_state',1),('first_state',2),('second_state',3)]:
+                      validate_state(p[nm],t)
+                  req(p['root_state']['our_active']=='sylveon','ROOT_ACTIVE')
+                  if root is None:root=p['root_state']
+                  req(p['root_state']==root,'ROOT_NOT_IDENTICAL')
+                  expected='gyarados' if k[0]=='switch:2' else 'sylveon'
+                  req(p['first_state']['our_active']==expected and p['second_state']['our_active']==expected,'SWITCH_ACTION')
+                  prev=intermediate.setdefault(k[:2],p['first_state'])
+                  req(p['first_state']==prev,'FIRST_TURN_BRANCH_NOT_CONSISTENT')
+                  req(type(p['second_menu']) is list and k[2] in p['second_menu'],'SECOND_ACTION_NOT_OFFERED')
+                  req(p['second_menu']==sorted(set(p['second_menu'])),'SECOND_MENU_SORTING')
+                  req(type(p['first_log']) is list and type(p['second_log']) is list,'LOG_TYPES')
+                  req(any(x.startswith('|move|p1a:') or x.startswith('|switch|p1a:') for x in p['first_log'])
+                      and any(x.startswith('|move|p2a:') for x in p['first_log'])
+                      and any(x.startswith('|move|p1a:') for x in p['second_log'])
+                      and any(x.startswith('|move|p2a:') for x in p['second_log']),'LOG_NOT_BOTH_SIDES')
+                  for v in p['first_log']+p['second_log']:
+                      req(type(v) is str and len(v)<400 and v.startswith(('|move|','|switch|')),'LOG_FORMAT')
+                  if k[0]=='switch:2':req(any(x.startswith('|switch|p1a:') for x in p['first_log']),'SWITCH_LOG')
+                  num(p['first_utility'],'FIRST');num(p['second_utility'],'SECOND')
+                  req(abs(p['first_utility']-score(p['first_state']))<=1e-9 and
+                      abs(p['second_utility']-score(p['second_state']))<=1e-9,'UTILITY_NOT_DERIVED_FROM_HP')
+                  combos[k]=p
+              expected={(a,i,b,j) for a in OURS for i in OPP1 for b in OURS2 for j in OPP2}
+              req(set(combos)==expected,'MISSING_BRANCHES')
+              ratings={}
+              for a in OURS:
+                  by_intent={}
+                  for i in OPP1:
+                      per_second=[]
+                      for b in OURS2:
+                          cases=[combos[a,i,b,j]['second_utility'] for j in OPP2]
+                          per_second.append({'maximin':min(cases),'expected':sum(cases)/len(cases)})
+                      by_intent[i]={k:max(x[k] for x in per_second) for k in ('maximin','expected')}
+                  ratings[a]={
+                      'maximin':round(min(v['maximin'] for v in by_intent.values()),9),
+                      'expected':round(sum(by_intent[i]['expected'] for i in OPP1)/len(OPP1),9)}
+              obj(data['rankings'],OURS,'RANKINGS')
+              for a in OURS:
+                  obj(data['rankings'][a],{'maximin','expected'},'RANKING_VALUES')
+                  for mode in ['maximin','expected']:
+                      num(data['rankings'][a][mode],'RANKING')
+                      req(abs(ratings[a][mode]-data['rankings'][a][mode])<=1e-9,'RANKING_NOT_REPRODUCIBLE')
+              spread={mode:round(max(v[mode] for v in ratings.values())-min(v[mode] for v in ratings.values()),9)
+                      for mode in ('maximin','expected')}
+              req(data['action_value_spread']==spread,'SPREAD_UNVERIFIED')
+              discriminate=any(v>1e-8 for v in spread.values())
+              req(type(data['discriminative_fixture']) is bool and data['discriminative_fixture']==discriminate,
+                  'DISCRIMINATOR_MISMATCH')
+              return {'schema':'TRUE_PLAN_R2766_SHADOW_RANKING_AUDIT_V1','source_commit':PIN,
+                      'paths':len(combos),'root_source_menu_size':len(m['actions']),
+                      'evaluated_root_subset_size':len(OURS),'decision_scores':ratings,
+                      'spreads':spread,'actions_distinguishable':discriminate,
+                      'source_fixture_coverage':'PARTIAL_ACTIONS_ONLY',
+                      'game_parity_certified':False,'training_allowed':False,
+                      'real_game_recommendation':'WITHHELD','official_gate':GATES}
+          
+          def inspect_pair(a:bytes,b:bytes):
+              req(type(a) is bytes and type(b) is bytes and a==b,'REPLAY_BYTES_DIFFER')
+              req(len(a)<500000 and len(a)>1000,'PROOF_FILE_SIZE')
+              def parse(s):return json.loads(s.decode('utf-8'),parse_constant=lambda x:(_ for _ in ()).throw(AuditError('NONFINITE_'+x)))
+              return validate(parse(a))
+          
+          def main():
+              import argparse
+              p=argparse.ArgumentParser()
+              p.add_argument('--source',type=Path,required=True)
+              p.add_argument('--repeat',type=Path,required=True)
+              p.add_argument('--output',type=Path,required=True)
+              args=p.parse_args()
+              r=inspect_pair(args.source.read_bytes(),args.repeat.read_bytes())
+              args.output.parent.mkdir(parents=True,exist_ok=True)
+              args.output.write_text(json.dumps(r,ensure_ascii=False,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+              print(json.dumps(r,sort_keys=True))
+          if __name__=='__main__':main()
+          R2766_PUBLIC_PY
+          sha256sum "$RUNNER_TEMP/r2766_public_audit.py" > "$RUNNER_TEMP/proof/public_audit.sha256"
+          python3 "$RUNNER_TEMP/r2766_public_audit.py" \
+            --source "$RUNNER_TEMP/proof/r2766_paths.json" \
+            --repeat "$RUNNER_TEMP/proof/r2766_paths_repeat.json" \
+            --output "$RUNNER_TEMP/proof/r2766_acceptance.json" \
+            2>&1 | tee "$RUNNER_TEMP/proof/audit.log"
+          echo R2766_UPSTREAM_SOURCE_BRANCH_AND_REQUEST_AUDIT_PASS_NOT_GAME_PARITY | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Preserve public-only proof even on failed tests
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2766-upstream-source-menu-branch-discrimination-only
+          path: ${{ runner.temp }}/proof/
+          if-no-files-found: warn
+          retention-days: 7
