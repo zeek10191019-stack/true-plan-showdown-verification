@@ -1,0 +1,174 @@
+name: R27.57 Public M-C Turn Order Priority Switch Probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2757-mc-runtime-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  public_synthetic_runtime_only:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Configure fixed Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Obtain pinned public upstream source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source" "$RUNNER_TEMP/proof"
+          git -C "$RUNNER_TEMP/source" init -q
+          git -C "$RUNNER_TEMP/source" fetch --no-tags --depth 1 https://github.com/smogon/pokemon-showdown.git aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git -C "$RUNNER_TEMP/source" checkout -q --detach FETCH_HEAD
+          actual=$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)
+          test "$actual" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          printf 'commit=%s\n' "$actual" > "$RUNNER_TEMP/proof/source.txt"
+          node --version | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Pinned lockfile build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          npm ci --no-audit --no-fund 2>&1 | tee "$RUNNER_TEMP/proof/npm-ci.log"
+          npm run build 2>&1 | tee "$RUNNER_TEMP/proof/build.log"
+          test -f dist/sim/battle.js
+          echo 'UPSTREAM_BUILD_PASS_NOT_REAL_GAME_CERTIFICATION' | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Run deterministic battle action order and switch scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/r2757.js" <<'R2757_JS'
+          'use strict';
+          /**
+           * R27.57 source-only, pinned Showdown simulation checks.
+           * NOT a Pokémon Champions emulator parity test; fixture sets are not
+           * claimed to be legal in current in-game M-C, and no AI is trained here.
+           */
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const assert = require('node:assert/strict');
+          const PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const FORMAT = '[Gen 9 Champions] BSS Reg M-C';
+          const IV = {hp:31, atk:31, def:31, spa:31, spd:31, spe:31};
+          const EV = {hp:0, atk:0, def:0, spa:0, spd:0, spe:0};
+          function mon(species, moves, evs={}) {
+            return {name:species, species, ability:'', item:'', nature:'Hardy',
+              level:50, moves:[...moves], evs:{...EV,...evs}, ivs:{...IV}};
+          }
+          const MOVES = {
+            Garchomp:['Tackle','Protect','Dragon Claw','Earthquake'],
+            Sylveon:['Quick Attack','Tackle','Protect','Moonblast'],
+            Mimikyu:['Shadow Sneak','Tackle','Protect','Play Rough'],
+            Gyarados:['Tackle','Protect','Waterfall','Bite'],
+            Archaludon:['Tackle','Protect','Flash Cannon','Dragon Pulse'],
+            Arboliva:['Tackle','Protect','Energy Ball','Strength Sap'],
+          };
+          function team(first, second) {
+            const names=[first,second,...Object.keys(MOVES).filter(n=>n!==first&&n!==second)];
+            assert.equal(names.length,6);
+            return names.map(n=>mon(n,MOVES[n],n==='Garchomp'?{atk:32,spe:32}:{}));
+          }
+          function runOne(Battle,fmt,scenario,first1,first2,move1,move2) {
+            const battle=new Battle({formatid:fmt.id, seed:[0x1234,0x5678,0x9abc,0xdef0],
+              p1:{name:'Synthetic P1',team:team(...first1)},
+              p2:{name:'Synthetic P2',team:team(...first2)}});
+            try {
+              assert.equal(battle.requestState,'teampreview');
+              assert.equal(battle.p1.pokemon.length,6);
+              assert.equal(battle.p2.pokemon.length,6);
+              battle.makeChoices('team 123','team 123');
+              assert.equal(battle.requestState,'move');
+              assert.equal(battle.p1.pokemon.length,3);
+              assert.equal(battle.p2.pokemon.length,3);
+              const s1=battle.p1.active[0].getStat('spe');
+              const s2=battle.p2.active[0].getStat('spe');
+              const prev=battle.log.length;
+              const t=battle.turn;
+              battle.makeChoices(move1,move2);
+              assert(battle.ended||battle.turn>t,'Turn must resolve');
+              const newLog=battle.log.slice(prev);
+              const moveLog=newLog.filter(s=>s.startsWith('|move|'));
+              const switchLog=newLog.filter(s=>s.startsWith('|switch|'));
+              assert.equal(battle.p1.pokemon.length,3);
+              assert.equal(battle.p2.pokemon.length,3);
+              return {scenario,lead_p1:first1[0],lead_p2:first2[0],speed_p1:s1,
+                speed_p2:s2,start_turn:t,end_turn:battle.turn,move_log:moveLog,
+                switch_log:switchLog,raw_turn_log:newLog,
+                end_active_p1:battle.p1.active[0]?.species.name,
+                end_hp_p1:battle.p1.active[0]?.hp,
+                end_maxhp_p1:battle.p1.active[0]?.maxhp};
+            } finally {battle.destroy();}
+          }
+          function verify(root,actualPin){
+            assert.equal(actualPin,PIN,'Source revision changed');
+            const {Dex}=require(path.join(root,'dist/sim/dex'));
+            const {Battle}=require(path.join(root,'dist/sim/battle'));
+            const fmt=Dex.formats.get(FORMAT);
+            assert.equal(fmt.mod,'champions');
+            assert.equal(Dex.forFormat(fmt).formats.getRuleTable(fmt).evLimit,66);
+          
+            const speed=runOne(Battle,fmt,'ordinary_speed_order',
+              ['Garchomp','Sylveon'],['Sylveon','Gyarados'],'move tackle','move tackle');
+            assert(speed.speed_p1>speed.speed_p2,'Synthetic speed order must be non-tie');
+            assert.equal(speed.move_log.length,2,'Both standard-priority moves must execute');
+            assert(speed.move_log[0].includes('p1a: Garchomp'), 'Faster Garchomp must act first');
+            assert(speed.move_log[1].includes('p2a: Sylveon'), 'Slower Sylveon must act second');
+          
+            const priority=runOne(Battle,fmt,'priority_over_speed',
+              ['Sylveon','Garchomp'],['Garchomp','Gyarados'],'move quickattack','move tackle');
+            assert(priority.speed_p1<priority.speed_p2,'Priority fixture must actually be slower');
+            assert.equal(priority.move_log.length,2,'Both priority/nonpriority moves must execute');
+            assert(priority.move_log[0].includes('p1a: Sylveon'), 'Quick Attack must precede faster Tackle');
+            assert(priority.move_log[1].includes('p2a: Garchomp'), 'Garchomp Tackle must be second');
+          
+            const switched=runOne(Battle,fmt,'switch_before_opponent_attack',
+              ['Garchomp','Sylveon'],['Garchomp','Gyarados'],'switch 2','move tackle');
+            assert.equal(switched.end_active_p1,'Sylveon','The switch-in must be the target');
+            assert(switched.switch_log.length>=1,'Switch log required');
+            assert(switched.switch_log.some(s=>s.includes('p1a: Sylveon')),'P1 switched into Sylveon');
+            assert(switched.move_log.some(s=>s.includes('p2a: Garchomp')),'P2 move executed');
+            const switchPos=switched.raw_turn_log.findIndex(s=>s.startsWith('|switch|')&&s.includes('p1a: Sylveon'));
+            const attackPos=switched.raw_turn_log.findIndex(s=>s.startsWith('|move|')&&s.includes('p2a: Garchomp'));
+            assert(switchPos>=0&&attackPos>=0&&switchPos<attackPos,'Switch should occur before attack');
+            assert(switched.end_hp_p1<switched.end_maxhp_p1,'Attack must hit the switch-in');
+          
+            return {
+              schema:'TRUE_PLAN_R2757_UPSTREAM_TURN_PRIORITY_SWITCH_V1',
+              source_commit:PIN,format:FORMAT,
+              test_type:'UPSTREAM_SHOWDOWN_RUNTIME_ONLY',
+              checks:{ordinary_speed_order:true,priority_over_speed:true,
+                switch_before_opponent_attack:true,switch_in_takes_damage:true,
+                selected_three_only:true},
+              scenarios:[speed,priority,switched].map(({raw_turn_log,...x})=>x),
+              training_allowed:false,actual_champions_game_oracle:false,
+              native33:'0/33',exact34:'0/34',real_matches:'0/30',formal:'DENY'
+            };
+          }
+          if(require.main===module){
+            const root=path.resolve(process.argv[2]||'.');
+            const pin=process.argv[3];
+            const output=process.argv[4];
+            const result=verify(root,pin);
+            if(output)fs.writeFileSync(output,JSON.stringify(result,null,2)+'\n');
+            process.stdout.write(JSON.stringify({schema:result.schema,checks:result.checks,scenarios:result.scenarios.map(s=>({scenario:s.scenario,speed_p1:s.speed_p1,speed_p2:s.speed_p2,move_log:s.move_log,switch_log:s.switch_log,end_hp_p1:s.end_hp_p1,end_maxhp_p1:s.end_maxhp_p1})),native33:result.native33,exact34:result.exact34})+'\n');
+          }
+          module.exports={verify,team,mon,MOVES,PIN,FORMAT};
+          R2757_JS
+          node --check "$RUNNER_TEMP/r2757.js"
+          sha256sum "$RUNNER_TEMP/r2757.js" > "$RUNNER_TEMP/proof/script.sha256"
+          pin=$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)
+          node "$RUNNER_TEMP/r2757.js" "$RUNNER_TEMP/source" "$pin" "$RUNNER_TEMP/proof/r2757_result.json" 2>&1 | tee "$RUNNER_TEMP/proof/runtime.log"
+          test -s "$RUNNER_TEMP/proof/r2757_result.json"
+          echo 'PINNED_SHOWDOWN_ACTION_ORDER_PASS_NOT_CHAMPIONS_PARITY' | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Upload only public upstream test proof
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2757-upstream-mc-turn-priority-switch-only
+          path: ${{ runner.temp }}/proof
+          if-no-files-found: warn
+          retention-days: 7
