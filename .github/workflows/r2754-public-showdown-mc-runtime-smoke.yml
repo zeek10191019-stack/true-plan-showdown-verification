@@ -1,0 +1,82 @@
+name: R27.54 Public Pinned M-C Runtime Smoke Only
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2754-pinned-public-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  public_mc_runtime_only:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Pin Node.js version (standard public runner)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+      - name: Download exact pinned public Showdown source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source" "$RUNNER_TEMP/proof"
+          git -C "$RUNNER_TEMP/source" init -q
+          git -C "$RUNNER_TEMP/source" fetch --no-tags --depth 1 https://github.com/smogon/pokemon-showdown.git aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git -C "$RUNNER_TEMP/source" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          printf 'source_sha=%s\n' "$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)" | tee "$RUNNER_TEMP/proof/source.txt"
+          node --version | tee -a "$RUNNER_TEMP/proof/source.txt"
+          npm --version | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Build upstream public runtime with lockfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          npm ci --no-audit --no-fund 2>&1 | tee "$RUNNER_TEMP/proof/npm-ci.log"
+          npm run build 2>&1 | tee "$RUNNER_TEMP/proof/build.log"
+          test -f dist/sim/dex.js
+          test -f dist/sim/team-validator.js
+          echo 'UPSTREAM_BUILD_PASS_NOT_GAME_CERTIFICATION' | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Execute source-only M-C runtime checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/run-mc-smoke.js" <<'JS'
+          'use strict';
+          const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+          const root=process.argv[2],out=process.argv[3];
+          const {Dex}=require(path.join(root,'dist/sim/dex'));
+          const {TeamValidator}=require(path.join(root,'dist/sim/team-validator'));
+          const name='[Gen 9 Champions] BSS Reg M-C',format=Dex.formats.get(name),dex=Dex.forFormat(format);
+          assert.equal(format.mod,'champions');assert.equal(dex.gen,9);
+          const rules=dex.formats.getRuleTable(format);assert.equal(rules.evLimit,66);
+          assert.equal(dex.moves.get('slash').basePower,80);
+          assert.equal(dex.moves.get('meteorassault').basePower,170);
+          assert.equal(dex.moves.get('snipeshot').basePower,85);
+          assert.equal(dex.moves.get('wish').pp,5);
+          assert.equal(dex.moves.get('strengthsap').pp,5);
+          const validator=TeamValidator.get(format);
+          function mk(evs){return {name:'Garchomp',species:'Garchomp',item:'Focus Sash',ability:'Rough Skin',moves:['Earthquake','Dragon Claw','Swords Dance','Protect'],nature:'Jolly',level:50,evs,ivs:{hp:31,atk:31,def:31,spa:31,spd:31,spe:31}};}
+          const zero={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+          function errs(evs){return validator.validateSet(mk(evs),{})||[];}
+          const a=errs({...zero,atk:32,spe:32});assert(!a.some(x=>/Stat Points/.test(x)),JSON.stringify(a));
+          const b=errs({...zero,atk:33,spe:32});assert(b.some(x=>/more than 32 Stat Points/.test(x)),JSON.stringify(b));
+          const c=errs({...zero,hp:3,atk:32,spe:32});assert(c.some(x=>/67 total Stat Points/.test(x)),JSON.stringify(c));
+          const result={schema:'TRUE_PLAN_R2754_PINNED_MC_RUNTIME_SMOKE_V1',source_sha:'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',source_only:false,runtime_not_real_game:true,
+            mc_format_loaded:true,mc_66p_legality_checked:true,base_move_changes_checked:true,case_validation:true,
+            game_oracle_verified:false,native33:'0/33',exact34:'0/34',real_matches:'0/30',formal:'DENY'};
+          fs.writeFileSync(out,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
+          JS
+          node "$RUNNER_TEMP/run-mc-smoke.js" "$RUNNER_TEMP/source" "$RUNNER_TEMP/proof/r2754_mc_runtime_result.json" \
+            2>&1 | tee "$RUNNER_TEMP/proof/runtime.log"
+          test -f "$RUNNER_TEMP/proof/r2754_mc_runtime_result.json"
+          echo 'MC_RUNTIME_SMOKE_PASS_NOT_CHAMPIONS_GAME_PARITY' | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Upload public upstream proof (even on failure)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2754-public-mc-runtime-proof
+          path: ${{ runner.temp }}/proof
+          if-no-files-found: warn
+          retention-days: 7
