@@ -1,0 +1,188 @@
+name: True Plan Automatic Run Index Recorder
+on:
+  workflow_run:
+    workflows: ["R27*"]
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  record_public_run:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification' &&
+      github.event.repository.private == false &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'workflow_dispatch' &&
+       startsWith(github.event.workflow_run.name, 'R27')))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: true-plan-run-index-writer
+      cancel-in-progress: false
+    steps:
+      - name: Record completed R27 run IDs to public JSON and read back
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/record.py" <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import time
+          import urllib.error
+          import urllib.request
+          
+          REPO = 'zeek10191019-stack/true-plan-showdown-verification'
+          DEST = '.github/true-plan/run-index/latest.json'
+          SCHEMA = 'TRUE_PLAN_GITHUB_AUTO_RUN_INDEX_V1'
+          
+          
+          def api(method, resource, payload=None):
+              url = 'https://api.github.com/repos/' + REPO + resource
+              data = None if payload is None else json.dumps(payload).encode('utf-8')
+              req = urllib.request.Request(url, data=data, method=method, headers={
+                  'Accept': 'application/vnd.github+json',
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'User-Agent': 'true-plan-automatic-run-index',
+                  'Content-Type': 'application/json',
+              })
+              with urllib.request.urlopen(req, timeout=25) as resp:
+                  return json.loads(resp.read().decode('utf-8'))
+          
+          
+          def normalize(run):
+              name = run.get('name', '')
+              path = run.get('path', '')
+              if not isinstance(name, str) or not name.startswith('R27'):
+                  return None
+              # GitHub REST may append '@refs/heads/main' to workflow-run paths.
+              if not isinstance(path, str):
+                  return None
+              path = path.split('@', 1)[0]
+              if re.fullmatch(r'\.github/workflows/[a-zA-Z0-9_.-]+\.ya?ml', path) is None:
+                  return None
+              if run.get('event') != 'workflow_dispatch' or run.get('status') != 'completed':
+                  return None
+              if run.get('head_repository') and run['head_repository'].get('full_name') != REPO:
+                  return None
+              rid = run.get('id')
+              attempt = run.get('run_attempt', 1)
+              if type(rid) is not int or rid < 1 or type(attempt) is not int or attempt < 1:
+                  return None
+              url = run.get('html_url', '')
+              if url != 'https://github.com/' + REPO + '/actions/runs/' + str(rid):
+                  return None
+              return {
+                  'run_id': rid, 'run_attempt': attempt, 'workflow_name': name,
+                  'workflow_file': path.rsplit('/', 1)[1],
+                  'run_url': url, 'conclusion': run.get('conclusion'),
+                  'created_at': run.get('created_at'), 'updated_at': run.get('updated_at'),
+                  'source_commit': run.get('head_sha'),
+              }
+          
+          
+          def merge(existing, incoming):
+              if existing and existing.get('schema') != SCHEMA:
+                  raise ValueError('Refuse to overwrite unknown index schema')
+              keyed = {}
+              for item in (existing or {}).get('recent_runs', []) + incoming:
+                  if not isinstance(item, dict) or not item.get('run_id'):
+                      continue
+                  key = str(item['run_id'])
+                  old = keyed.get(key)
+                  if old is None or item.get('run_attempt', 0) >= old.get('run_attempt', 0):
+                      keyed[key] = item
+              ordered = sorted(keyed.values(), key=lambda r: (r.get('updated_at') or '', r['run_id']), reverse=True)[:50]
+              per_workflow = {}
+              for x in ordered:
+                  per_workflow.setdefault(x['workflow_file'], x)
+              return {
+                  'schema': SCHEMA, 'repository': REPO,
+                  'latest': ordered[0] if ordered else None,
+                  'by_workflow': per_workflow,
+                  'recent_runs': ordered,
+                  'official_gate': {'native33': '0/33', 'exact34': '0/34', 'formal': 'DENY'},
+                  'meaning': 'Run locator only, not mechanics or game certification',
+              }
+          
+          
+          def get_current():
+              try:
+                  result = api('GET', '/contents/' + DEST)
+              except urllib.error.HTTPError as exc:
+                  if exc.code == 404:
+                      return None, None
+                  raise
+              raw = base64.b64decode(result['content']).decode('utf-8')
+              return result['sha'], json.loads(raw)
+          
+          
+          def write_with_readback(incoming):
+              for attempt in range(5):
+                  sha, existing = get_current()
+                  merged = merge(existing, incoming)
+                  if not merged['recent_runs']:
+                      raise ValueError('No accepted completed public workflow_dispatch R27 runs')
+                  content = base64.b64encode((json.dumps(merged, indent=2, ensure_ascii=False, sort_keys=True) + '\n').encode()).decode()
+                  payload = {
+                      'message': 'ci: update public R27 GitHub workflow run index [skip ci]',
+                      'content': content, 'branch': 'main',
+                  }
+                  if sha:
+                      payload['sha'] = sha
+                  try:
+                      api('PUT', '/contents/' + DEST, payload)
+                  except urllib.error.HTTPError as exc:
+                      if exc.code in (409, 422) and attempt < 4:
+                          time.sleep(0.5 * (attempt + 1))
+                          continue
+                      raise
+                  _, saved = get_current()
+                  observed = {x['run_id']: x for x in saved.get('recent_runs', [])}
+                  if not any(x['run_id'] in observed and observed[x['run_id']]['run_attempt'] >= x['run_attempt'] for x in incoming):
+                      raise AssertionError('GitHub index readback missing triggering run')
+                  print(json.dumps({
+                      'status': 'INDEX_READBACK_PASS', 'index_path': DEST,
+                      'latest_run_id': saved['latest']['run_id'],
+                      'stored_runs': len(saved['recent_runs']),
+                  }))
+                  return
+              raise RuntimeError('Index writes exhausted retries')
+          
+          
+          def main():
+              if os.environ.get('GITHUB_REPOSITORY') != REPO:
+                  raise RuntimeError('Repository mismatch')
+              with open(os.environ['GITHUB_EVENT_PATH'], 'r', encoding='utf-8') as f:
+                  event = json.load(f)
+              if event.get('repository', {}).get('private') is not False:
+                  raise RuntimeError('Requires public repository')
+              kind = os.environ['GITHUB_EVENT_NAME']
+              if kind == 'workflow_run':
+                  raw = event['workflow_run']
+                  accepted = normalize(raw)
+                  if accepted is None:
+                      raise RuntimeError('Blocked non-allowlisted workflow run')
+                  incoming = [accepted]
+              elif kind == 'workflow_dispatch':
+                  page = api('GET', '/actions/runs?event=workflow_dispatch&per_page=100')
+                  incoming = [r for run in page.get('workflow_runs', []) if (r := normalize(run))]
+                  if not incoming:
+                      raise RuntimeError('No matching completed runs for bootstrap')
+              else:
+                  raise RuntimeError('Unsupported event')
+              write_with_readback(incoming)
+          
+          
+          if __name__ == '__main__':
+              main()
+          PY
+          python3 "$RUNNER_TEMP/record.py"
