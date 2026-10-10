@@ -1,0 +1,198 @@
+name: R27.64 Pinned Showdown Deterministic Two Turn Branches
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2764-public-rollout-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  upstream_synthetic_only:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Set fixed Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch exact pinned public Showdown source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/source" "$RUNNER_TEMP/proof"
+          git -C "$RUNNER_TEMP/source" init -q
+          git -C "$RUNNER_TEMP/source" fetch --no-tags --depth 1 https://github.com/smogon/pokemon-showdown.git aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          git -C "$RUNNER_TEMP/source" checkout -q --detach FETCH_HEAD
+          actual=$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)
+          test "$actual" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          printf 'source_commit=%s\n' "$actual" | tee "$RUNNER_TEMP/proof/source.txt"
+          node --version | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Locked public source build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          npm ci --no-audit --no-fund 2>&1 | tee "$RUNNER_TEMP/proof/npm-ci.log"
+          npm run build 2>&1 | tee "$RUNNER_TEMP/proof/build.log"
+          test -f dist/sim/battle.js
+          echo UPSTREAM_BUILD_PASS_NOT_REAL_GAME_CERTIFICATION | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Run all 16 deterministic two-turn public synthetic branches
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/r2764_public_probe.js" <<'R2764_PUBLIC_SCRIPT'
+          'use strict';
+          // PUBLIC, pinned Showdown-only synthetic 2-turn rollout: no real Champions data,
+          // no nonpublic AI source, no gameplay recommendation, no learned weights.
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const assert = require('node:assert/strict');
+          const PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const FORMAT = '[Gen 9 Champions] BSS Reg M-C';
+          const DATA_VERSION = 'R2764_PINNED_SHOWDOWN_SYNTHETIC_V1';
+          const MINE = ['Sylveon','Mimikyu','Garchomp','Gyarados','Archaludon','Arboliva'];
+          const OPP = ['Garchomp','Gyarados','Sylveon','Mimikyu','Archaludon','Arboliva'];
+          const MOVES = {
+            Sylveon: ['Tackle','Quick Attack','Protect','Moonblast'],
+            Mimikyu: ['Shadow Sneak','Tackle','Protect','Play Rough'],
+            Garchomp: ['Tackle','Protect','Dragon Claw','Earthquake'],
+            Gyarados: ['Tackle','Protect','Waterfall','Bite'],
+            Archaludon: ['Tackle','Protect','Flash Cannon','Dragon Pulse'],
+            Arboliva: ['Tackle','Protect','Energy Ball','Strength Sap'],
+          };
+          const E = {hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+          const I = {hp:31,atk:31,def:31,spa:31,spd:31,spe:31};
+          const OUR_ACTIONS={'move:quickattack':'move quickattack','move:tackle':'move tackle'};
+          const INTENTS={'intent-protect':'move protect','intent-tackle':'move tackle'};
+          const own = Object.keys(OUR_ACTIONS).sort();
+          const opp = Object.keys(INTENTS).sort();
+          function makeMon(species){return {species,name:species,moves:MOVES[species],ability:'',item:'',
+            nature:'Hardy',level:50,evs:{...E},ivs:{...I}};}
+          function roster(list){return list.map(makeMon);}
+          function state(battle){
+            const a=battle.p1.active[0],b=battle.p2.active[0];
+            assert(a&&b,'missing active mons');
+            return {turn:battle.turn,our_active:a.species.name.toLowerCase(),
+              opponent_active:b.species.name.toLowerCase(),our_hp:a.hp,our_max_hp:a.maxhp,
+              opponent_hp:b.hp,opponent_max_hp:b.maxhp,
+              our_move_pp:Object.fromEntries(a.moveSlots.map(x=>[x.id,x.pp])),
+              our_pokemon_left:battle.p1.pokemonLeft,opponent_pokemon_left:battle.p2.pokemonLeft};
+          }
+          function score(s){
+            // PUBLIC synthetic health margin. Not a win probability or certified value.
+            return Math.round(((s.our_hp/s.our_max_hp)-(s.opponent_hp/s.opponent_max_hp))*1e9)/1e9;
+          }
+          function run(Battle,fmt,rootAction,rootIntent,nextAction,nextIntent){
+            const b=new Battle({formatid:fmt.id,seed:[0x1234,0x5678,0x9abc,0xdef0],
+              p1:{name:'SyntheticP1',team:roster(MINE)},
+              p2:{name:'SyntheticP2',team:roster(OPP)}});
+            try{
+              assert.equal(b.requestState,'teampreview');
+              assert.equal(b.p1.pokemon.length,6);
+              b.makeChoices('team 123','team 123');
+              assert.equal(b.requestState,'move');
+              assert.equal(b.p1.pokemon.length,3);
+              assert.equal(b.p2.pokemon.length,3);
+              assert.equal(b.p1.active[0].species.name,'Sylveon');
+              assert.equal(b.p2.active[0].species.name,'Garchomp');
+              const start=state(b);
+              assert.equal(start.turn,1);
+              let logpos=b.log.length;
+              b.makeChoices(OUR_ACTIONS[rootAction],INTENTS[rootIntent]);
+              assert.equal(b.requestState,'move','requires nonterminal turn 2');
+              let after1=state(b);
+              assert.equal(after1.turn,2);
+              const firstLog=b.log.slice(logpos).filter(x=>x.startsWith('|move|'));
+              assert(firstLog.some(s=>s.includes('p1a: Sylveon')),'p1 first action not logged');
+              assert(firstLog.some(s=>s.includes('p2a: Garchomp')),'p2 first action not logged');
+              logpos=b.log.length;
+              b.makeChoices(OUR_ACTIONS[nextAction],INTENTS[nextIntent]);
+              assert.equal(b.requestState,'move','requires nonterminal turn 3');
+              let after2=state(b);
+              assert.equal(after2.turn,3);
+              const secondLog=b.log.slice(logpos).filter(x=>x.startsWith('|move|'));
+              assert(secondLog.some(s=>s.includes('p1a: Sylveon')),'p1 second action not logged');
+              assert(secondLog.some(s=>s.includes('p2a: Garchomp')),'p2 second action not logged');
+              return {root_action:rootAction,root_intent:rootIntent,
+                next_action:nextAction,next_intent:nextIntent,
+                first_state:after1,second_state:after2,
+                first_move_log:firstLog,second_move_log:secondLog,
+                root_state:start};
+            }finally{b.destroy();}
+          }
+          function verify(root,actual){
+            assert.equal(actual,PIN,'pinned source commit changed');
+            const {Dex}=require(path.join(root,'dist/sim/dex'));
+            const {Battle}=require(path.join(root,'dist/sim/battle'));
+            const fmt=Dex.formats.get(FORMAT);
+            assert.equal(fmt.mod,'champions');
+            assert.equal(Dex.forFormat(fmt).formats.getRuleTable(fmt).evLimit,66);
+            const paths=[];
+            for(const a of own)for(const i of opp)for(const b of own)for(const j of opp){
+              const p=run(Battle,fmt,a,i,b,j);
+              assert(Number.isFinite(score(p.first_state)));
+              assert(Number.isFinite(score(p.second_state)));
+              paths.push(p);
+            }
+            assert.equal(paths.length,16);
+            const rootState=paths[0].root_state;
+            for(const p of paths)assert.deepEqual(p.root_state,rootState);
+            // Counterfactual replay should have identical turn-1 state across second actions.
+            for(const a of own)for(const i of opp){
+              const hits=paths.filter(p=>p.root_action===a&&p.root_intent===i);
+              assert.equal(hits.length,4);
+              for(const h of hits)assert.deepEqual(h.first_state,hits[0].first_state);
+            }
+            const result={schema:'TRUE_PLAN_R2764_PINNED_SHOWDOWN_COUNTERFACTUAL_V1',
+              source_commit:PIN,format:FORMAT,data_version:DATA_VERSION,
+              mode:'PINNED_UPSTREAM_SIMULATION_ONLY',
+              synthetic_full_information_fixture:true,
+              actual_game_oracle:false,screen_ingestion_certified:false,
+              canonical_registry_authenticated:false,training_allowed:false,
+              our_six:MINE.map(x=>x.toLowerCase()),
+              opponent_six:OPP.map(x=>x.toLowerCase()),
+              our_selected:MINE.slice(0,3).map(x=>x.toLowerCase()),
+              root_state:rootState,our_actions:own,opponent_synthetic_intents:opp,
+              synthetic_intent_weights: {'intent-protect':0.5,'intent-tackle':0.5},
+              paths,utility_kind:'VISIBLE_ACTIVE_HP_FRACTION_MARGIN_NOT_WINRATE',
+              invariant_gate:{native33:'0/33',exact34:'0/34',real_matches:'0/30',formal:'DENY'}};
+            return result;
+          }
+          if(require.main===module){
+            const root=path.resolve(process.argv[2]||'.');
+            const result=verify(root,process.argv[3]);
+            const out=process.argv[4];
+            if(!out)throw new Error('Output file required');
+            fs.writeFileSync(out,JSON.stringify(result,null,2)+'\n');
+            process.stdout.write(JSON.stringify({schema:result.schema,path_count:result.paths.length,
+              unique_first_branch_pairs:4,root_turn:result.root_state.turn,
+              source_commit:result.source_commit,real_champions_game_oracle:false,formal:'DENY'})+'\n');
+          }
+          module.exports={verify,run,score,PIN,FORMAT,DATA_VERSION};
+          R2764_PUBLIC_SCRIPT
+          node --check "$RUNNER_TEMP/r2764_public_probe.js"
+          sha256sum "$RUNNER_TEMP/r2764_public_probe.js" > "$RUNNER_TEMP/proof/probe_script.sha256"
+          pin=$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)
+          node "$RUNNER_TEMP/r2764_public_probe.js" "$RUNNER_TEMP/source" "$pin" "$RUNNER_TEMP/proof/r2764_counterfactual.json" 2>&1 | tee "$RUNNER_TEMP/proof/rollout.log"
+          node "$RUNNER_TEMP/r2764_public_probe.js" "$RUNNER_TEMP/source" "$pin" "$RUNNER_TEMP/proof/r2764_counterfactual_repeat.json" 2>&1 | tee "$RUNNER_TEMP/proof/rollout-repeat.log"
+          cmp "$RUNNER_TEMP/proof/r2764_counterfactual.json" "$RUNNER_TEMP/proof/r2764_counterfactual_repeat.json"
+          python3 - "$RUNNER_TEMP/proof/r2764_counterfactual.json" <<'PY_CHECK'
+          import json,sys
+          x=json.load(open(sys.argv[1]))
+          assert x['schema']=='TRUE_PLAN_R2764_PINNED_SHOWDOWN_COUNTERFACTUAL_V1'
+          assert len(x['paths'])==16
+          assert x['root_state']['turn']==1
+          assert x['actual_game_oracle'] is False and x['training_allowed'] is False
+          assert x['invariant_gate']=={'native33':'0/33','exact34':'0/34','real_matches':'0/30','formal':'DENY'}
+          print('UPSTREAM_TWO_TURN_16_BRANCHES_DETERMINISTIC_PASS_NOT_GAME_PARITY')
+          PY_CHECK
+          echo 'R2764_UPSTREAM_BRANCH_PASS_NOT_REAL_CHAMPIONS_PARITY' | tee -a "$RUNNER_TEMP/proof/source.txt"
+      - name: Upload public synthetic proof even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2764-pinned-upstream-two-turn-branches-only
+          path: ${{ runner.temp }}/proof
+          if-no-files-found: warn
+          retention-days: 7
