@@ -1,0 +1,66 @@
+name: R27.47 Public Poke Engine Independent Build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r2747-public-engine-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  public_source_build_only:
+    # Standard public Ubuntu runner only. A private fork MUST skip the job.
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: poke_engine_v047
+            commit: cabfca06d152082ddd8d860e811a7ff3e4b86c50
+            features: gen9,terastallization
+          - engine: poke_engine_v048_champions
+            commit: bcf13823abc162a608e187b26bbf683f759f385e
+            features: bss
+    steps:
+      - name: Pin-only public upstream download and revision verification
+        shell: bash
+        env:
+          PIN: ${{ matrix.commit }}
+          ENGINE_NAME: ${{ matrix.engine }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/proof" "$RUNNER_TEMP/source"
+          echo "matrix_engine=$ENGINE_NAME" | tee "$RUNNER_TEMP/proof/summary.txt"
+          echo "commit_requested=$PIN" | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          git -C "$RUNNER_TEMP/source" init -q
+          git -C "$RUNNER_TEMP/source" fetch --no-tags --depth 1 \
+            https://github.com/pmariglia/poke-engine.git "$PIN"
+          git -C "$RUNNER_TEMP/source" checkout -q --detach FETCH_HEAD
+          ACTUAL=$(git -C "$RUNNER_TEMP/source" rev-parse HEAD)
+          echo "commit_fetched=$ACTUAL" | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          test "$ACTUAL" = "$PIN"
+          cargo --version | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          rustc --version | tee -a "$RUNNER_TEMP/proof/summary.txt"
+      - name: Locked Rust source build and isolated library tests
+        shell: bash
+        env:
+          ENGINE_FEATURES: ${{ matrix.features }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/source"
+          echo "cargo_features=$ENGINE_FEATURES" | tee -a "$RUNNER_TEMP/proof/summary.txt"
+          cargo build --locked --release --no-default-features \
+            --features "$ENGINE_FEATURES" 2>&1 | tee "$RUNNER_TEMP/proof/build.log"
+          cargo test --locked --lib --no-default-features \
+            --features "$ENGINE_FEATURES" 2>&1 | tee "$RUNNER_TEMP/proof/tests.log"
+          echo 'SOURCE_BUILD_AND_LIBRARY_TESTS_PASS_NOT_CHAMPIONS_PHYSICS_CERTIFICATION' \
+            | tee -a "$RUNNER_TEMP/proof/summary.txt"
+      - name: Upload public source proof only
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2747-${{ matrix.engine }}-source-build-only
+          path: ${{ runner.temp }}/proof
+          if-no-files-found: warn
+          retention-days: 7
