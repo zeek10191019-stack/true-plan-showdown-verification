@@ -1,0 +1,210 @@
+
+name: R27.158 Showdown multi-turn and observation audit (public only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  r27158-synthetic-mc-engine:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout pinned public Pokemon Showdown only
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pokemon-showdown
+      - name: Set fixed Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fixed-source and build verification
+        shell: bash
+        working-directory: pokemon-showdown
+        run: |
+          set -euo pipefail
+          test "$(node -v)" = 'v22.18.0'
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(git hash-object sim/teams.ts)" = '1ed3b631b1b6b0d5905a34882d8c7f8961f18add'
+          test "$(git hash-object data/mods/champions/scripts.ts)" = '7f100a0947a203454a1a97b54f6a99932e808bce'
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/index.js
+          echo R27158_PINNED_BUILD_PASS
+      - name: Real simulator transitions and privacy boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r27158_engine_audit.js <<'R27158_JS_EOF'
+          'use strict';
+          // R27.158: Only public synthetic Showdown M-C simulator evidence.
+          // Never count this as real Pokemon Champions physics or field certification.
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const root = fs.realpathSync(process.argv[2] || 'pokemon-showdown');
+          const {Battle, Dex, Teams} = require(path.join(root, 'dist/sim/index.js'));
+          const format = Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');
+          assert.ok(format.exists && format.mod === 'champions', 'MC_FORMAT_MISSING');
+          const PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const set = (species, ability, moves, item = '') => ({
+            name:species, species, ability, item, level:50, nature:'Jolly',
+            evs:{hp:0,atk:252,def:0,spa:0,spd:0,spe:252}, moves,
+          });
+          const team = () => [
+            set('Garchomp','Rough Skin',['Earthquake','Protect','Dragon Claw','Rock Slide']),
+            set('Sylveon','Pixilate',['Hyper Voice','Protect','Quick Attack','Wish']),
+            set('Gyarados','Intimidate',['Waterfall','Protect','Dragon Dance','Crunch']),
+          ];
+          const make = (seed, p1 = team(), p2 = team(), select1='123', select2='213') => {
+            const b = new Battle({formatid:format.id, seed, strictChoices:true, send:()=>{}});
+            b.setPlayer('p1',{name:'p1',team:Teams.pack(p1)});
+            b.setPlayer('p2',{name:'p2',team:Teams.pack(p2)});
+            assert.equal(b.requestState,'teampreview','PREVIEW_REQUEST');
+            assert.equal(b.choose('p1',`team ${select1}`),true);
+            assert.equal(b.choose('p2',`team ${select2}`),true);
+            assert.equal(b.requestState,'move','FIRST_MOVE_REQUEST');
+            return b;
+          };
+          const legal = (side) => {
+            const req = side.activeRequest;
+            if (!req || req.wait) return [];
+            const reserve = side.pokemon.flatMap((p,i)=>
+              !p.fainted && !p.isActive ? [`switch ${i+1}`] : []);
+            if (req.forceSwitch) return reserve;
+            if (req.active) return [
+              ...req.active[0].moves.flatMap((m,i)=>m.disabled ? [] : [`move ${i+1}`]),
+              ...reserve.filter(()=>!req.active[0].trapped),
+            ];
+            return [];
+          };
+          const choose = (b, p1, p2) => {
+            assert.ok(legal(b.sides[0]).includes(p1),`P1_ILLEGAL_ACTION_${p1}`);
+            assert.ok(legal(b.sides[1]).includes(p2),`P2_ILLEGAL_ACTION_${p2}`);
+            assert.equal(b.choose('p1',p1),true);
+            assert.equal(b.choose('p2',p2),true);
+          };
+          const digest = b => crypto.createHash('sha256').update(
+            b.log.map(x=>x.startsWith('|t:|')?'|t:|<time>':x).join('\n')
+          ).digest('hex');
+          function multi(seed) {
+            const b = make(seed,team(),team(),'312','213');
+            assert.equal(b.sides[0].active[0].species.name,'Gyarados');
+            assert.equal(b.sides[1].active[0].species.name,'Sylveon');
+            const hp0=b.sides[1].active[0].hp;
+            choose(b,'move 1','move 4');
+            const hp1=b.sides[1].active[0].hp;
+            assert.ok(hp1>0 && hp1<hp0,'MULTITURN_DAMAGE_NOT_APPLIED');
+            assert.ok(legal(b.sides[0]).includes('switch 2'),'NO_LEGAL_SWITCH');
+            choose(b,'switch 2','move 2');
+            assert.equal(b.sides[0].active[0].species.name,'Garchomp');
+            assert.ok(b.log.filter(x=>x.startsWith('|turn|')).length>=3,'MULTITURN_NOT_ADVANCED');
+            assert.ok(b.log.some(x=>x.startsWith('|switch|p1a: Garchomp|')),'SWITCH_EVENT_ABSENT');
+            return {case:'multi_turn',turn:b.turn,opponent_hp_before:hp0,opponent_hp_after_first_attack:hp1,legal_actions_sample:legal(b.sides[0]),digest:digest(b)};
+          }
+          function status(seed) {
+            const attacker=[set('Pikachu','Static',['Nuzzle','Quick Attack','Thunderbolt','Protect']),team()[1],team()[2]];
+            const b=make(seed,attacker,team(),'123','213');
+            assert.equal(b.sides[0].active[0].species.name,'Pikachu');
+            choose(b,'move 1','move 4');
+            assert.equal(b.sides[1].active[0].status,'par','PARALYSIS_NOT_APPLIED');
+            assert.ok(b.log.some(x=>x.startsWith('|-status|p2a: Sylveon|par')),'STATUS_EVENT_ABSENT');
+            return {case:'status',enemy_status:'par',turn:b.turn,digest:digest(b)};
+          }
+          function knockout(seed) {
+            const b=make(seed);
+            assert.equal(b.sides[0].active[0].species.name,'Garchomp');
+            assert.equal(b.sides[1].active[0].species.name,'Sylveon');
+            // Synthetic near-KO fixture; not natural battle damage proof.
+            const victim=b.sides[1].active[0];
+            victim.hp=1;
+            choose(b,'move 1','move 4');
+            assert.ok(victim.fainted,'TARGET_NOT_FAINTED');
+            assert.ok(b.log.some(x=>x.startsWith('|faint|p2a: Sylveon')),'FAINT_EVENT_ABSENT');
+            assert.equal(b.requestState,'switch','FORCED_SWITCH_REQUEST_ABSENT');
+            assert.ok(legal(b.sides[1]).includes('switch 2'),'FORCED_SWITCH_NOT_LEGAL');
+            assert.equal(b.choose('p2','switch 2'),true);
+            assert.equal(b.sides[1].active[0].species.name,'Garchomp','FORCED_SWITCH_NOT_EXECUTED');
+            return {case:'faint_forced_switch',fixture:'opponent_active_hp_set_to_1',fainted:'Sylveon',next:'Garchomp',digest:digest(b)};
+          }
+          // Allowlisted observation; never expose omniscient Battle state.
+          function observe(b,sideIndex=0) {
+            const own=b.sides[sideIndex];
+            const foe=`p${sideIndex===0?2:1}`;
+            const poke=b.log.filter(x=>x.startsWith(`|poke|${foe}|`))
+              .map(x=>x.split('|')[3].split(',')[0]);
+            const revealedMoves=b.log.filter(x=>x.startsWith(`|move|${foe}a:`))
+              .map(x=>x.split('|')[3]);
+            const foeActive=b.log.filter(x=>x.startsWith(`|switch|${foe}a:`))
+              .map(x=>x.split('|')[3].split(': ')[1]);
+            return {own:own.pokemon.map(p=>({species:p.species.name,item:p.item,ability:p.ability,
+              moves:p.moveSlots.map(m=>m.id),hp:p.hp,status:p.status})),
+              own_legal_actions:legal(own),foe_preview_species:poke,
+              foe_active_revealed:foeActive.slice(-1)[0]||null,foe_moves_revealed:revealedMoves};
+          }
+          function privacy(seed) {
+            const a=team();
+            const b=team();
+            b[1].ability='Cute Charm';
+            b[1].item='Leftovers';
+            b[1].moves=['Hyper Voice','Protect','Quick Attack','Calm Mind'];
+            const original=make(seed,team(),a);
+            const altered=make(seed,team(),b);
+            assert.notDeepEqual(a[1],b[1],'HIDDEN_FIXTURE_NOT_DISTINCT');
+            const obsA=observe(original),obsB=observe(altered);
+            assert.deepEqual(obsA,obsB,'HIDDEN_OPPONENT_SET_LEAKED_IN_OBSERVATION');
+            const encoded=JSON.stringify(obsA);
+            for(const secret of ['Cute Charm','Leftovers','Calm Mind']) {
+              assert.ok(!encoded.includes(secret),`SECRET_LEAK_${secret}`);
+            }
+            assert.ok(obsA.foe_preview_species.includes('Sylveon'),'PUBLIC_TEAM_PREVIEW_MISSING');
+            assert.ok(obsA.own_legal_actions.includes('move 1'),'OWN_LEGAL_ACTION_MISSING');
+            return {case:'observation_noninterference',public_species:obsA.foe_preview_species,
+              enemy_hidden_item_ability_moves:'omitted',observation_sha256:crypto.createHash('sha256').update(encoded).digest('hex')};
+          }
+          const seeds=[[1234,5678,9012,3456],[444,555,666,777]];
+          const tests=[multi,status,knockout,privacy];
+          const results=[];
+          for(const seed of seeds) for(const test of tests) {
+            const r1=test(seed),r2=test(seed);
+            assert.deepEqual(r1,r2,'NONDETERMINISTIC_REPLAY');
+            results.push({seed,...r1});
+          }
+          assert.equal(results.length,8);
+          const out={schema:'R27158_SYNTHETIC_MULTI_STATUS_SWITCH_OBS_V1',pin:PIN,
+            engine:'public pokemon-showdown Champions M-C mod',node:process.version,
+            traces:results,trace_count:8,replay_determinism:'PASS',
+            scope:'community_synthetic_only',native33:'0/33',exact34:'0/34',field:'0/30',formal:'DENY',
+            official_champions_parity:false};
+          process.stdout.write(JSON.stringify(out)+'\n');
+          R27158_JS_EOF
+          node --check r27158_engine_audit.js
+          node r27158_engine_audit.js pokemon-showdown > r27158_result.json
+          python3 - <<'R27158_PY_EOF'
+          import json
+          p=json.load(open('r27158_result.json',encoding='utf8'))
+          assert p['schema']=='R27158_SYNTHETIC_MULTI_STATUS_SWITCH_OBS_V1'
+          assert p['pin']=='aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          assert p['trace_count']==8 and len(p['traces'])==8
+          assert p['replay_determinism']=='PASS'
+          expected={'multi_turn','status','faint_forced_switch','observation_noninterference'}
+          assert {r['case'] for r in p['traces']}==expected
+          assert all(r.get('digest') or r.get('observation_sha256') for r in p['traces'])
+          assert p['native33']=='0/33' and p['exact34']=='0/34'
+          assert p['field']=='0/30' and p['formal']=='DENY'
+          assert p['official_champions_parity'] is False
+          print('R27158_PUBLIC_SIM_EIGHT_TRACES_PASS')
+          print('NOT_CERTIFIED_AS_POKEMON_CHAMPIONS_GAME')
+          R27158_PY_EOF
+          sha256sum r27158_result.json
+          cat r27158_result.json
+          echo 'R27.158: 8 public simulator traces; multi-turn, status, synthetic forced switch, public observation smoke. NOT official Champions parity.' >> "$GITHUB_STEP_SUMMARY"
