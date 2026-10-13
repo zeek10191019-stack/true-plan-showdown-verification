@@ -1,0 +1,328 @@
+
+name: R27.159 Request Boundary and Legal Action Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  request-boundary:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout pinned public simulator
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pokemon-showdown
+
+      - name: Set Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+
+      - name: Verify source and build
+        working-directory: pokemon-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -v)" = 'v22.18.0'
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(git hash-object data/mods/champions/scripts.ts)" = '7f100a0947a203454a1a97b54f6a99932e808bce'
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/index.js
+          echo R27159_BUILD_PASS
+
+      - name: Test request boundary and legal actions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r27159.js <<'JS'
+          'use strict';
+
+          const assert = require('node:assert/strict');
+          const path = require('node:path');
+          const {Battle,Dex,Teams} = require(
+            path.resolve('pokemon-showdown/dist/sim/index.js')
+          );
+
+          const format = Dex.formats.get(
+            '[Gen 9 Champions] BSS Reg M-C'
+          );
+          assert.ok(format.exists && format.mod === 'champions');
+
+          const makeSet = (species,ability,moves) => ({
+            name:species,species,ability,item:'',
+            level:50,nature:'Jolly',
+            evs:{hp:0,atk:252,def:0,spa:0,spd:0,spe:252},
+            moves
+          });
+
+          const team = () => [
+            makeSet('Garchomp','Rough Skin',
+              ['Protect','Earthquake','Dragon Claw','Rock Slide']),
+            makeSet('Sylveon','Pixilate',
+              ['Protect','Hyper Voice','Quick Attack','Wish']),
+            makeSet('Gyarados','Intimidate',
+              ['Protect','Waterfall','Crunch','Dragon Dance']),
+            makeSet('Pikachu','Static',
+              ['Protect','Thunderbolt','Nuzzle','Quick Attack']),
+            makeSet('Snorlax','Thick Fat',
+              ['Protect','Body Slam','Crunch','Rest']),
+            makeSet('Lucario','Inner Focus',
+              ['Protect','Close Combat','Bullet Punch','Swords Dance'])
+          ];
+
+          function create(seed,enemy=team()) {
+            const requests=[];
+            const battle=new Battle({
+              formatid:format.id,
+              seed,
+              strictChoices:false,
+              send:(type,data)=>{
+                if(type!=='sideupdate' || typeof data!=='string')
+                  return;
+                const match=/^(p[12])\n\|request\|(.+)$/s.exec(data);
+                if(match) {
+                  requests.push({
+                    side:match[1],
+                    request:JSON.parse(match[2])
+                  });
+                }
+              }
+            });
+            battle.setPlayer('p1',{
+              name:'p1',team:Teams.pack(team())
+            });
+            battle.setPlayer('p2',{
+              name:'p2',team:Teams.pack(enemy)
+            });
+            battle.sendUpdates();
+            return {battle,requests};
+          }
+
+          function requestFor(env,side='p1') {
+            // Use the simulator's actual side-specific message.
+            env.battle.getSide(side).emitRequest();
+            const entry=env.requests
+              .filter(x=>x.side===side).at(-1);
+            assert.ok(entry);
+            assert.equal(entry.request.side.id,side);
+            return entry.request;
+          }
+
+          function legal(req) {
+            if(req.wait || req.teamPreview) return [];
+            const switches=req.side.pokemon.flatMap((p,i)=>{
+              const fainted=/\bfnt\b/.test(p.condition) ||
+                /^0(?:\/|\s|$)/.test(p.condition);
+              return !p.active && !fainted
+                ? [`switch ${i+1}`] : [];
+            });
+            if(req.forceSwitch)
+              return req.forceSwitch.some(Boolean) ? switches : [];
+            if(!req.active || req.active.length!==1) return [];
+            const active=req.active[0];
+            const moves=active.moves.flatMap((m,i)=>{
+              if(m.disabled || (m.pp!==undefined && m.pp<=0))
+                return [];
+              return [`move ${i+1}`];
+            });
+            return [...moves,...(active.trapped ? [] : switches)];
+          }
+
+          function select(env) {
+            const a=requestFor(env,'p1');
+            const b=requestFor(env,'p2');
+            assert.equal(a.side.pokemon.length,6);
+            assert.equal(b.side.pokemon.length,6);
+            assert.equal(a.teamPreview,true);
+            assert.equal(a.maxChosenTeamSize,3);
+
+            // Reject duplicates and out-of-range choices locally.
+            const valid=arr=>arr.length===3 &&
+              new Set(arr).size===3 &&
+              arr.every(n=>Number.isInteger(n) && n>=1 && n<=6);
+            assert.equal(valid([6,3,1]),true);
+            assert.equal(valid([6,6,1]),false);
+            assert.equal(valid([7,3,1]),false);
+
+            assert.equal(env.battle.choose('p1','team 631'),true);
+            assert.equal(env.battle.choose('p2','team 245'),true);
+
+            const names=env.battle.sides[0].pokemon
+              .map(p=>p.species.name);
+            assert.deepEqual(names,
+              ['Lucario','Gyarados','Garchomp']);
+            assert.equal(env.battle.sides[1].pokemon.length,3);
+            assert.equal(env.battle.requestState,'move');
+            return names;
+          }
+
+          function selection(seed) {
+            const env=create(seed);
+            const names=select(env);
+            const actions=legal(requestFor(env));
+            assert.ok(actions.includes('move 2'));
+            assert.ok(actions.includes('switch 2'));
+            assert.ok(!actions.includes('switch 4'));
+            return {case:'six_choose_three',names};
+          }
+
+          function invalidAction(seed) {
+            const env=create(seed);
+            select(env);
+            const actions=legal(requestFor(env));
+            assert.ok(!actions.includes('move 9'));
+            assert.ok(!actions.includes('switch 1'));
+            assert.equal(env.battle.choose('p1','move 9'),false);
+            assert.equal(env.battle.choose('p1','switch 1'),false);
+            assert.equal(env.battle.choose('p1','move 2'),true);
+            assert.equal(env.battle.choose('p2','move 1'),true);
+            return {case:'invalid_action_rejected'};
+          }
+
+          function ppAndTrapping(seed) {
+            const env=create(seed);
+            select(env);
+
+            // Synthetic PP exhaustion fixture.
+            env.battle.sides[0].active[0].moveSlots[0].pp=0;
+            env.battle.makeRequest('move');
+
+            const req=requestFor(env);
+            assert.equal(req.active[0].moves[0].pp,0);
+            assert.equal(req.active[0].moves[0].disabled,true);
+
+            const actions=legal(req);
+            assert.ok(!actions.includes('move 1'));
+            assert.ok(actions.includes('move 2'));
+            assert.equal(env.battle.choose('p1','move 1'),false);
+
+            // Synthetic trapped flag: local legal-action filter only.
+            const trapped=structuredClone(req);
+            trapped.active[0].trapped=true;
+            assert.ok(!legal(trapped)
+              .some(x=>x.startsWith('switch ')));
+
+            return {case:'pp_disabled_and_trap_filter'};
+          }
+
+          function forcedSwitch(seed) {
+            const env=create(seed);
+            select(env);
+
+            // Synthetic near-KO fixture, not natural damage proof.
+            env.battle.sides[1].active[0].hp=1;
+            assert.equal(env.battle.choose('p1','move 2'),true);
+            assert.equal(env.battle.choose('p2','move 2'),true);
+            assert.equal(env.battle.requestState,'switch');
+
+            const req=requestFor(env,'p2');
+            assert.ok(req.forceSwitch?.some(Boolean));
+            const actions=legal(req);
+            assert.ok(actions.includes('switch 2'));
+            assert.ok(actions.includes('switch 3'));
+            assert.ok(!actions.some(x=>x.startsWith('move ')));
+            assert.equal(env.battle.choose('p2','switch 2'),true);
+            assert.equal(
+              env.battle.sides[1].active[0].species.name,
+              'Pikachu'
+            );
+            return {case:'forced_switch_from_request'};
+          }
+
+          function visible(env) {
+            const own=requestFor(env,'p1');
+            const foe=env.battle.log
+              .filter(x=>x.startsWith('|poke|p2|'))
+              .map(x=>x.split('|')[3].split(',')[0]);
+            return {
+              own:own.side.pokemon,
+              previewSize:own.maxChosenTeamSize,
+              foeSpecies:foe
+            };
+          }
+
+          function privacy(seed) {
+            const normal=team();
+            const altered=team();
+            altered[1].ability='Cute Charm';
+            altered[1].item='Leftovers';
+            altered[1].moves=[
+              'Protect','Hyper Voice','Quick Attack','Calm Mind'
+            ];
+
+            const a=visible(create(seed,normal));
+            const b=visible(create(seed,altered));
+            assert.deepEqual(a,b);
+
+            const text=JSON.stringify(b).toLowerCase();
+            for(const secret of [
+              'cutecharm','leftovers','calmmind'
+            ]) {
+              assert.ok(!text.includes(secret));
+            }
+            assert.equal(b.foeSpecies.length,6);
+
+            return {
+              case:'private_information_isolation',
+              publicSpeciesCount:b.foeSpecies.length
+            };
+          }
+
+          const seeds=[
+            [1234,5678,9012,3456],
+            [444,555,666,777]
+          ];
+          const cases=[
+            selection,
+            invalidAction,
+            ppAndTrapping,
+            forcedSwitch,
+            privacy
+          ];
+
+          const traces=[];
+          for(const seed of seeds) {
+            for(const test of cases) {
+              const a=test(seed);
+              const b=test(seed);
+              assert.deepEqual(a,b,'DETERMINISM_FAILURE');
+              traces.push({seed,...a});
+            }
+          }
+
+          assert.equal(traces.length,10);
+          const result={
+            schema:'R27159_REQUEST_BOUNDARY_V1',
+            sourcePin:'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',
+            engine:'public Showdown Champions M-C',
+            traces,
+            count:traces.length,
+            native33:'0/33',
+            exact34:'0/34',
+            field:'0/30',
+            formal:'DENY',
+            officialChampionsCertified:false
+          };
+
+          console.log(JSON.stringify(result));
+          console.log('R27159_TEN_SYNTHETIC_TRACES_PASS');
+          console.log('OFFICIAL_CHAMPIONS_CERTIFICATION_NOT_GRANTED');
+          JS
+
+          node --check r27159.js
+          node r27159.js > r27159_result.json
+          grep -q 'R27159_TEN_SYNTHETIC_TRACES_PASS' r27159_result.json
+          sha256sum r27159_result.json
+          cat r27159_result.json
+          echo 'R27.159 synthetic request-boundary test only. Native33=0/33, Exact34=0/34, FORMAL=DENY.' >> "$GITHUB_STEP_SUMMARY"
