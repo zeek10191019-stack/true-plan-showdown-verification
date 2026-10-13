@@ -1,0 +1,334 @@
+
+name: R27.161 Public paired Baseline and Season Contract
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  r27161-paired-season-audit:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout pinned public Showdown only
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pokemon-showdown
+      - name: Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify immutable public source and build
+        working-directory: pokemon-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -v)" = 'v22.18.0'
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(git hash-object data/mods/champions/scripts.ts)" = '7f100a0947a203454a1a97b54f6a99932e808bce'
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/index.js
+          echo R27161_PINNED_BUILD_PASS
+      - name: Paired fairness and season evolution contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r27161_ai.js <<'R27161_AI_EOF'
+          'use strict';
+          // Public synthetic benchmarking only. Not the private True Plan Battle AI.
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const path = require('node:path');
+          const {Battle, Dex, Teams} = require(path.resolve('pokemon-showdown/dist/sim/index.js'));
+          const PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const FORMAT = Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');
+          assert.ok(FORMAT.exists && FORMAT.mod === 'champions');
+          const set = (species, ability, moves, special = false) => ({
+            name:species, species, ability, item:'', level:50,
+            nature:special?'Modest':'Jolly',
+            evs:special?{hp:2,atk:0,def:0,spa:32,spd:0,spe:32}:
+              {hp:2,atk:32,def:0,spa:0,spd:0,spe:32}, moves
+          });
+          function roster() { return [
+            set('Garchomp','Rough Skin',['Earthquake','Dragon Claw','Rock Slide','Protect']),
+            set('Sylveon','Pixilate',['Hyper Voice','Moonblast','Quick Attack','Protect'],true),
+            set('Gyarados','Intimidate',['Waterfall','Crunch','Ice Fang','Protect']),
+            set('Pikachu','Static',['Thunderbolt','Quick Attack','Nuzzle','Protect'],true),
+            set('Snorlax','Thick Fat',['Body Slam','Crunch','Earthquake','Protect']),
+            set('Lucario','Inner Focus',['Close Combat','Bullet Punch','Crunch','Protect'])
+          ]; }
+          const species = detail => String(detail||'').split(',')[0];
+          function publicBoard(log) {
+            const board={preview:{p1:[],p2:[]},active:{p1:null,p2:null},turn:0};
+            // Whitelist only public protocol events; no raw battle object reaches policy.
+            for(const line of log) {
+              const f=line.split('|');
+              if(f[1]==='poke' && ['p1','p2'].includes(f[2]))
+                board.preview[f[2]].push(species(f[3]));
+              if(['switch','drag','replace'].includes(f[1]) && /^p[12]a: /.test(f[2]||''))
+                board.active[f[2].slice(0,2)]=species(f[3]);
+              if(f[1]==='faint' && /^p[12]a: /.test(f[2]||''))
+                board.active[f[2].slice(0,2)]=null;
+              if(f[1]==='turn') board.turn=Number(f[2]);
+            }
+            return board;
+          }
+          function create(seed, opponentTeam=roster()) {
+            const wire={p1:null,p2:null};
+            const b=new Battle({formatid:FORMAT.id,seed,strictChoices:true,send:(kind,data)=>{
+              if(kind!=='sideupdate'||typeof data!=='string') return;
+              const match=/^(p[12])\n\|request\|(.+)$/s.exec(data);
+              if(match) wire[match[1]]=JSON.parse(match[2]);
+            }});
+            b.setPlayer('p1',{name:'Side-P1',team:Teams.pack(roster())});
+            b.setPlayer('p2',{name:'Side-P2',team:Teams.pack(opponentTeam)});
+            return {b,wire};
+          }
+          function observation(env,side) {
+            assert.ok(env.wire[side],`MISSING_${side}_REQUEST`);
+            return {side,request:JSON.parse(JSON.stringify(env.wire[side])),public:publicBoard(env.b.log)};
+          }
+          const fainted = condition => /(^0(?:\/|\s|$)|\bfnt\b)/.test(String(condition||''));
+          function legal(req) {
+            if(req.wait) return [];
+            if(req.teamPreview) return ['team-preview'];
+            const switches=req.side.pokemon.flatMap((p,i)=>
+              !p.active && !fainted(p.condition)?[`switch ${i+1}`]:[]);
+            if(req.forceSwitch) return req.forceSwitch.some(Boolean)?switches:[];
+            if(!req.active || req.active.length!==1) return [];
+            const a=req.active[0];
+            const moves=a.moves.flatMap((m,i)=>m.disabled || (m.pp!==undefined && m.pp<=0)?[]:[`move ${i+1}`]);
+            return [...moves,...(a.trapped||a.maybeTrapped?[]:switches)];
+          }
+          const legacyRatings={Garchomp:100,Lucario:95,Gyarados:90,Sylveon:85,Pikachu:70,Snorlax:65};
+          function effectiveness(type,target) {
+            if(!target || !Dex.species.get(target).exists) return 1;
+            const types=Dex.species.get(target).types;
+            if(!Dex.getImmunity(type,types)) return 0;
+            return Math.pow(2,Dex.getEffectiveness(type,types));
+          }
+          function previewChoice(view,enhanced) {
+            const req=view.request;
+            assert.equal(req.side.pokemon.length,6);
+            const size=req.maxChosenTeamSize||3;
+            assert.equal(size,3);
+            const enemy=view.public.preview[view.side==='p1'?'p2':'p1'];
+            const entries=req.side.pokemon.map((p,i)=>{
+              const mon=species(p.details);
+              let score=legacyRatings[mon]||0;
+              if(enhanced) {
+                const candidates=p.moves.map(mid=>Dex.moves.get(mid)).filter(m=>m.exists && m.basePower>0);
+                const advantages=enemy.map(mon2=>Math.max(0,...candidates.map(m=>
+                  m.basePower*effectiveness(m.type,mon2)*(Dex.species.get(mon).types.includes(m.type)?1.5:1))));
+                score=advantages.reduce((a,b)=>a+b,0)/Math.max(1,enemy.length);
+                score+=Math.max(0,...advantages)*0.15;
+              }
+              return {index:i+1,score};
+            });
+            const picks=entries.sort((a,b)=>b.score-a.score||a.index-b.index)
+              .slice(0,size).map(x=>x.index);
+            assert.equal(new Set(picks).size,size);
+            return 'team '+picks.join('');
+          }
+          function moveScore(view,index,enhanced) {
+            const m= Dex.moves.get(view.request.active[0].moves[index].id);
+            if(!m.exists||!m.basePower) return -100;
+            const foeSide=view.side==='p1'?'p2':'p1';
+            const enemy=view.public.active[foeSide];
+            const active=view.request.side.pokemon.find(p=>p.active);
+            const ours=Dex.species.get(active?species(active.details):'');
+            let raw=m.basePower*effectiveness(m.type,enemy);
+            if(ours.exists && ours.types.includes(m.type)) raw*=1.5;
+            raw*=typeof m.accuracy==='number'?m.accuracy/100:1;
+            raw+=m.priority>0?12:0;
+            if(enhanced) {
+              const hp=active?String(active.condition||'').split('/').map(Number):[];
+              const ratio=hp.length===2&&hp[1]>0?hp[0]/hp[1]:1;
+              if(ratio<0.35 && m.priority>0) raw+=35;
+              if(m.category==='Physical' && ours.exists) raw*=1.03;
+            }
+            return raw;
+          }
+          function decide(view,enhanced) {
+            const req=view.request;
+            if(req.wait) return null;
+            if(req.teamPreview) return previewChoice(view,enhanced);
+            const choices=legal(req);
+            assert.ok(choices.length,'NO_LEGAL_ACTION');
+            if(req.forceSwitch) return choices[0];
+            const moves=choices.filter(a=>a.startsWith('move '));
+            if(!moves.length) return choices[0];
+            const sorted=moves.map(action=>({action,score:moveScore(view,Number(action.split(' ')[1])-1,enhanced)}))
+              .sort((a,b)=>b.score-a.score||a.action.localeCompare(b.action));
+            if(sorted[0].score<=0) {
+              const options=choices.filter(a=>a.startsWith('switch '));
+              if(options.length) return options[0];
+            }
+            return sorted[0].action;
+          }
+          function match(seed,enhancedSide) {
+            const env=create(seed),actions={p1:{team:0,move:0,switch:0},p2:{team:0,move:0,switch:0}};
+            let total=0;
+            while(!env.b.ended && total<240) {
+              env.wire.p1=null;env.wire.p2=null;
+              env.b.sendUpdates();
+              let progressed=false;
+              for(const side of ['p1','p2']) {
+                const view=observation(env,side);
+                const choice=decide(view,side===enhancedSide);
+                if(choice===null) continue;
+                if(!view.request.teamPreview) assert.ok(legal(view.request).includes(choice),'OUTSIDE_REQUEST');
+                assert.equal(env.b.choose(side,choice),true,`REJECTED_${side}_${choice}`);
+                const type=choice.startsWith('team ')?'team':choice.startsWith('move ')?'move':'switch';
+                actions[side][type]++;
+                progressed=true; total++;
+              }
+              assert.ok(progressed,'STUCK_WITHOUT_REQUEST');
+            }
+            assert.ok(env.b.ended,'UNFINISHED_LIMIT');
+            assert.equal(actions.p1.team,1);assert.equal(actions.p2.team,1);
+            assert.ok(actions.p1.move+actions.p2.move>=2);
+            const winner=env.b.winner==='Side-P1'?'p1':env.b.winner==='Side-P2'?'p2':'tie';
+            const hash=crypto.createHash('sha256').update(env.b.log.map(line=>line.startsWith('|t:|')?'|t:|normal':line).join('\n')).digest('hex');
+            return {enhancedSide,winner,enhancedWon:winner===enhancedSide,turns:env.b.turn,decisions:total,actions,logSha256:hash};
+          }
+          function privacy(seed) {
+            const altered=roster();
+            altered[0].ability='Sand Veil';altered[0].item='Leftovers';
+            altered[0].moves=['Earthquake','Dragon Claw','Fire Fang','Protect'];
+            const a=create(seed),b=create(seed,altered);
+            a.b.sendUpdates();b.b.sendUpdates();
+            const oa=observation(a,'p1'),ob=observation(b,'p1');
+            assert.deepEqual(oa,ob,'HIDDEN_INFO_AFFECTED_VIEW');
+            assert.equal(decide(oa,true),decide(ob,true),'HIDDEN_INFO_AFFECTED_POLICY');
+            for(const item of ['sandveil','leftovers','firefang'])
+              assert.ok(!JSON.stringify(ob).toLowerCase().includes(item),'HIDDEN_DATA_LEAK');
+            return true;
+          }
+          const seeds=[[1234,5678,9012,3456],[444,555,666,777]];
+          const samples=[];
+          for(const seed of seeds) {
+            assert.ok(privacy(seed));
+            for(const side of ['p1','p2']) {
+              const a=match(seed,side),b=match(seed,side);
+              assert.deepEqual(a,b,'REPLAY_NONDETERMINISM');
+              samples.push({seed,...a});
+            }
+          }
+          assert.equal(samples.length,4);
+          const wins=samples.filter(s=>s.enhancedWon).length;
+          const ties=samples.filter(s=>s.winner==='tie').length;
+          const output={schema:'R27161_PUBLIC_PAIRED_BASELINE_V1',pin:PIN,
+            design:'2 seeds x both sides x deterministic replays',pairedMatches:4,
+            enhancedWins:wins,ties,enhancedWinRate:wins/samples.length,
+            proofOfSuperiority:false,samples,scope:'SHOWDOWN_SYNTHETIC_ONLY',
+            seasonContract:'INDEPENDENT_FIXTURE_TEST',native33:'0/33',exact34:'0/34',field:'0/30',formal:'DENY'};
+          process.stdout.write(JSON.stringify(output)+'\n');
+          console.error('R27161_PAIRED_COMPARISON_PASS');
+          R27161_AI_EOF
+          cat > r27161_season.js <<'R27161_SEASON_EOF'
+          'use strict';
+          // Contract tests with synthetic FUTURE changes. Does NOT mutate live canonical DB.
+          const assert=require('node:assert/strict');
+          const crypto=require('node:crypto');
+          const clone=x=>JSON.parse(JSON.stringify(x));
+          const stable=x=>JSON.stringify(x,Object.keys(x).sort());
+          const fp=x=>crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');
+          const base={
+            schema:'TRUE_PLAN_SEASON_CONTRACT_V1',
+            mode:'SINGLES_ONLY',
+            season:'M-7', regulation:'M-C',
+            seasonStartUtc:'2026-10-07T02:00:00Z',
+            seasonEndUtc:'2026-11-04T01:59:00Z',
+            regulationEndUtc:'2026-12-02T01:59:00Z',
+            provenance:{kind:'OFFICIAL_PUBLIC_NOTICE',
+              url:'https://news.pokemon-home.com/ja/page/845.html'},
+            roster:{completeness:'PARTIAL_FIXTURE',species:['Garchomp','Sylveon'],forms:[]},
+            rule:{pickedTeamSize:3,uniqueHeldItems:true,megaLimit:1,turnTimerSeconds:45},
+            stadiums:[{id:'fixture-neutral',mechanicalEffect:'VISUAL_ONLY_VERIFIED'}],
+            dbVersion:'FROZEN_CANONICAL_UNCHANGED',
+            stage0:'NOT_CERTIFIED_BY_THIS_FIXTURE'
+          };
+          function diff(a,b) {
+            const changes=[];
+            if(a.season!==b.season || a.seasonStartUtc!==b.seasonStartUtc || a.seasonEndUtc!==b.seasonEndUtc)
+              changes.push('SEASON_METADATA');
+            if(a.regulation!==b.regulation) changes.push('REGULATION_ID');
+            if(JSON.stringify(a.roster)!==JSON.stringify(b.roster)) changes.push('ELIGIBLE_ROSTER');
+            if(JSON.stringify(a.rule)!==JSON.stringify(b.rule)) changes.push('BATTLE_RULES');
+            if(JSON.stringify(a.stadiums)!==JSON.stringify(b.stadiums)) changes.push('STADIUM_CATALOG');
+            const stadiumMechanical=b.stadiums.some(s=>s.mechanicalEffect!=='VISUAL_ONLY_VERIFIED');
+            const severe=changes.some(c=>['REGULATION_ID','ELIGIBLE_ROSTER','BATTLE_RULES'].includes(c)) ||
+              (changes.includes('STADIUM_CATALOG')&&stadiumMechanical);
+            return {
+              changes,requiresStage0:severe,canonicalMutationAllowed:false,
+              purePrimaryInputAllowed:false,
+              action:severe?'QUARANTINE_AND_RECERTIFY':'SOURCE_VERIFY_THEN_METADATA_UPDATE',
+              unknownStadiums:b.stadiums.filter(s=>s.mechanicalEffect==='UNKNOWN').map(s=>s.id)
+            };
+          }
+          const cases=[];
+          const capture=(name,variant,expected,requiresStage0)=>{
+            const before=fp(base);
+            const result=diff(base,variant);
+            assert.ok(result.changes.includes(expected),`MISSING_DIFF_${name}`);
+            assert.equal(result.requiresStage0,requiresStage0,`BAD_GATE_${name}`);
+            assert.equal(result.canonicalMutationAllowed,false);
+            assert.equal(result.purePrimaryInputAllowed,false);
+            assert.equal(fp(base),before,'MUTATED_FROZEN_FIXTURE');
+            cases.push({name,...result});
+          };
+          const season=clone(base);season.season='M-8';
+          season.seasonStartUtc='2026-11-04T02:00:00Z';
+          capture('season_metadata_only',season,'SEASON_METADATA',false);
+          const poke=clone(base);poke.roster.species.push('FixtureAddedMon');
+          capture('pokemon_addition',poke,'ELIGIBLE_ROSTER',true);
+          const rules=clone(base);rules.regulation='FUTURE-FIXTURE';rules.rule.megaLimit=0;
+          capture('rules_and_mega_change',rules,'REGULATION_ID',true);
+          const cosmetic=clone(base);cosmetic.stadiums.push({id:'future-visual',mechanicalEffect:'VISUAL_ONLY_VERIFIED'});
+          capture('verified_visual_stadium',cosmetic,'STADIUM_CATALOG',false);
+          const unknown=clone(base);unknown.stadiums.push({id:'future-unknown',mechanicalEffect:'UNKNOWN'});
+          capture('unknown_effect_stadium',unknown,'STADIUM_CATALOG',true);
+          assert.deepEqual(cases[4].unknownStadiums,['future-unknown']);
+          const result={schema:'R27161_SEASON_ADAPTER_CONTRACT_TEST_V1',cases,
+            count:cases.length,fixtureOnly:true,officialRosterComplete:false,
+            dbFrozenVersionNotOverwritten:true,currentSeason:'M-7',currentRegulation:'M-C',
+            nextAction:'R27.162_REAL_SOURCE_INGEST_WITH_MANUAL_STAGE0_GATE',
+            formal:'DENY'};
+          process.stdout.write(JSON.stringify(result)+'\n');
+          console.error('R27161_SEASON_CONTRACT_FIVE_FIXTURES_PASS');
+          R27161_SEASON_EOF
+          node --check r27161_ai.js
+          node --check r27161_season.js
+          node r27161_ai.js > r27161_paired.json
+          node r27161_season.js > r27161_season.json
+          python3 - <<'R27161_AUDIT_EOF'
+          import json
+          a=json.load(open('r27161_paired.json',encoding='utf8'))
+          b=json.load(open('r27161_season.json',encoding='utf8'))
+          assert a['schema']=='R27161_PUBLIC_PAIRED_BASELINE_V1'
+          assert a['pairedMatches']==4 and len(a['samples'])==4
+          assert all(s['logSha256'] and s['decisions']>2 for s in a['samples'])
+          assert a['proofOfSuperiority'] is False and a['formal']=='DENY'
+          assert a['native33']=='0/33' and a['exact34']=='0/34'
+          assert b['schema']=='R27161_SEASON_ADAPTER_CONTRACT_TEST_V1'
+          assert b['count']==5 and len(b['cases'])==5
+          assert all(not x['canonicalMutationAllowed'] for x in b['cases'])
+          assert b['dbFrozenVersionNotOverwritten'] is True
+          assert b['fixtureOnly'] is True and b['formal']=='DENY'
+          print('R27161_FOUR_PAIRED_MATCHES_AND_FIVE_SEASON_FIXTURES_PASS')
+          print('NO_OFFICIAL_CHAMPIONS_PARITY_OR_FORMAL_CERTIFICATION')
+          R27161_AUDIT_EOF
+          sha256sum r27161_paired.json r27161_season.json
+          cat r27161_paired.json
+          cat r27161_season.json
+          echo 'R27.161: Four paired synthetic Showdown matches, two-seed deterministic replays, five season contract fixtures. No official Champions parity. Native33=0/33 Exact34=0/34 Field=0/30 FORMAL=DENY.' >> "$GITHUB_STEP_SUMMARY"
