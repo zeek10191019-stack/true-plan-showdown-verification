@@ -1,0 +1,154 @@
+
+name: R27.157 Showdown synthetic engine deeper audit (public only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  r27157-community-engine-audit:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout pinned public Showdown source (no project repository checkout)
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pokemon-showdown
+      - name: Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify immutable source and build
+        working-directory: pokemon-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -v)" = 'v22.18.0'
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(git hash-object data/mods/champions/scripts.ts)" = '7f100a0947a203454a1a97b54f6a99932e808bce'
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/index.js
+          echo PINNED_BUILD_PASS
+      - name: Execute 3 scenarios x 2 seeds with deterministic replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r27157_engine_deep.js <<'R27157_JS_EOF'
+          'use strict';
+          // R27.157: Synthetic public Showdown only. Does not certify actual Champions.
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const root = fs.realpathSync(process.argv[2] || 'pokemon-showdown');
+          const {Battle, Dex, Teams} = require(path.join(root, 'dist/sim/index.js'));
+          const format = Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');
+          assert.ok(format.exists && format.mod === 'champions', 'NO_PINNED_MC_FORMAT');
+          const PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const team = () => [
+            {name:'Garchomp', species:'Garchomp', item:'', ability:'Rough Skin', nature:'Jolly', level:50,
+              moves:['Earthquake','Protect','Dragon Claw','Rock Slide'], evs:{hp:0,atk:252,def:0,spa:0,spd:0,spe:252}},
+            {name:'Sylveon', species:'Sylveon', item:'', ability:'Pixilate', nature:'Modest', level:50,
+              moves:['Hyper Voice','Protect','Quick Attack','Wish'], evs:{hp:252,atk:0,def:0,spa:252,spd:0,spe:4}},
+            {name:'Gyarados', species:'Gyarados', item:'', ability:'Intimidate', nature:'Jolly', level:50,
+              moves:['Waterfall','Protect','Dragon Dance','Crunch'], evs:{hp:4,atk:252,def:0,spa:0,spd:0,spe:252}}
+          ];
+          function create(seed, p1selection, p2selection) {
+            const b = new Battle({formatid:format.id,seed,send:()=>{},strictChoices:true});
+            b.setPlayer('p1',{name:'p1',team:Teams.pack(team())});
+            b.setPlayer('p2',{name:'p2',team:Teams.pack(team())});
+            assert.equal(b.requestState,'teampreview');
+            assert.equal(b.choose('p1',`team ${p1selection}`),true);
+            assert.equal(b.choose('p2',`team ${p2selection}`),true);
+            assert.equal(b.requestState,'move');
+            return b;
+          }
+          function choose(b,p1,p2) {
+            assert.equal(b.choose('p1',p1),true);
+            assert.equal(b.choose('p2',p2),true);
+            assert.ok(!b.log.some(s=>s.startsWith('|error|')),'ENGINE_CHOICE_ERROR');
+          }
+          function fingerprint(b) {
+            const normalized = b.log.map(x=>x.startsWith('|t:|')?'|t:|<normalized>':x).join('\n');
+            return crypto.createHash('sha256').update(normalized).digest('hex');
+          }
+          function attack(seed) {
+            const b = create(seed,'312','213');
+            assert.equal(b.sides[0].active[0].species.name,'Gyarados');
+            assert.equal(b.sides[1].active[0].species.name,'Sylveon');
+            const before = b.sides[1].active[0].hp;
+            choose(b,'move 1','move 1');
+            const attackLog = b.log.filter(s=>s.startsWith('|move|'));
+            assert.ok(attackLog.length>=1 && attackLog[0].startsWith('|move|p1a: Gyarados|Waterfall|'),'WATERFALL_NOT_FIRST');
+            const after = b.sides[1].active[0].hp;
+            assert.ok(after<before,'NO_REAL_DAMAGE');
+            assert.ok(b.log.some(s=>s.startsWith('|-damage|p2a: Sylveon|')),'NO_DAMAGE_EVENT');
+            return {scenario:'attack_hp',target_hp_before:before,target_hp_after:after,damage:before-after,normalized_log_sha256:fingerprint(b)};
+          }
+          function switchAction(seed) {
+            const b = create(seed,'312','213');
+            const oldActive = b.sides[0].active[0].species.name;
+            const targetSlot = b.sides[0].pokemon.findIndex(p=>p.species.name==='Garchomp')+1;
+            assert.ok(targetSlot>1,'SWITCH_TARGET_NOT_BENCHED');
+            choose(b,`switch ${targetSlot}`,'move 2');
+            assert.equal(oldActive,'Gyarados');
+            assert.equal(b.sides[0].active[0].species.name,'Garchomp','SWITCH_DID_NOT_COMPLETE');
+            assert.ok(b.log.some(s=>s.startsWith('|switch|p1a: Garchomp|')),'NO_SWITCH_LOG');
+            assert.ok(b.log.some(s=>s.startsWith('|move|p2a: Sylveon|Protect|')),'NO_OPPONENT_ACTION');
+            return {scenario:'switch_action',source:oldActive,destination:'Garchomp',normalized_log_sha256:fingerprint(b)};
+          }
+          function priority(seed) {
+            const b = create(seed,'123','213');
+            assert.equal(b.sides[0].active[0].species.name,'Garchomp');
+            assert.equal(b.sides[1].active[0].species.name,'Sylveon');
+            choose(b,'move 1','move 3');
+            const acts = b.log.filter(s=>s.startsWith('|move|'));
+            assert.ok(acts.length>=1 && acts[0].startsWith('|move|p2a: Sylveon|Quick Attack|'),'QUICK_ATTACK_NOT_FIRST');
+            return {scenario:'priority_action',first_action:'Sylveon Quick Attack',normalized_log_sha256:fingerprint(b)};
+          }
+          const seeds=[[1234,5678,9012,3456],[444,555,666,777]];
+          const runners=[attack,switchAction,priority];
+          const traces = [];
+          for (const seed of seeds) for (const run of runners) {
+            const a=run(seed),b=run(seed);
+            assert.deepEqual(a,b,'SAME_SEED_NONDETERMINISTIC_TRACE');
+            traces.push({seed, ...a});
+          }
+          const result={
+            schema:'R27157_SHOWDOWN_SYNTHETIC_ENGINE_DEEP_V1',source_pin:PIN,
+            tested_engine:'public Showdown M-C community simulator',node:process.version,
+            traces,scenario_count:traces.length,replay_determinism:'PASS',
+            actual_champions_game_parity:false,native33:'0/33',exact34:'0/34',field:'0/30',formal:'DENY'
+          };
+          assert.equal(traces.length,6);
+          process.stdout.write(JSON.stringify(result)+'\n');
+          R27157_JS_EOF
+          node --check r27157_engine_deep.js
+          node r27157_engine_deep.js pokemon-showdown > r27157_result.json
+          python3 - <<'PY_CHECK'
+          import json
+          r=json.load(open('r27157_result.json',encoding='utf8'))
+          assert r['schema']=='R27157_SHOWDOWN_SYNTHETIC_ENGINE_DEEP_V1'
+          assert r['source_pin']=='aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          assert r['scenario_count']==6 and len(r['traces'])==6
+          assert r['replay_determinism']=='PASS'
+          assert set(x['scenario'] for x in r['traces'])=={'attack_hp','switch_action','priority_action'}
+          assert all(x['normalized_log_sha256'] for x in r['traces'])
+          assert r['native33']=='0/33' and r['exact34']=='0/34'
+          assert r['field']=='0/30' and r['formal']=='DENY'
+          assert r['actual_champions_game_parity'] is False
+          print('R27157_COMMUNITY_ENGINE_DEEP_SIX_TRACES_PASS')
+          print('NO_OFFICIAL_CHAMPIONS_CERTIFICATION')
+          PY_CHECK
+          sha256sum r27157_result.json
+          cat r27157_result.json
+          echo 'R27.157 public Showdown scenarios: 6 traces, 3 cases x 2 seeds. Official Champions parity NOT certified.' >> "$GITHUB_STEP_SUMMARY"
