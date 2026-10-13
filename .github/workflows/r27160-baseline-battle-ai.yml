@@ -1,0 +1,491 @@
+
+name: R27.160 Public Baseline Battle AI Integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline-ai:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout pinned public Showdown
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          persist-credentials: false
+          fetch-depth: 1
+          path: pokemon-showdown
+
+      - name: Setup Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+
+      - name: Verify pinned source and build
+        working-directory: pokemon-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -v)" = 'v22.18.0'
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(git hash-object data/mods/champions/scripts.ts)" = '7f100a0947a203454a1a97b54f6a99932e808bce'
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/index.js
+          echo R27160_PINNED_BUILD_PASS
+
+      - name: Run synthetic Baseline AI vs Baseline AI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > baseline_ai.js <<'JS'
+          'use strict';
+
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const path = require('node:path');
+
+          const {Battle,Dex,Teams} = require(
+            path.resolve('pokemon-showdown/dist/sim/index.js')
+          );
+
+          const PIN='aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const format=Dex.formats.get(
+            '[Gen 9 Champions] BSS Reg M-C'
+          );
+
+          assert.ok(format.exists);
+          assert.equal(format.mod,'champions');
+
+          // Public synthetic test teams.
+          // These are not the private True Plan exact sets.
+          const set=(species,ability,moves,special=false)=>({
+            name:species,
+            species,
+            ability,
+            item:'',
+            level:50,
+            nature:special?'Modest':'Jolly',
+            evs:special ?
+              {hp:2,atk:0,def:0,spa:32,spd:0,spe:32} :
+              {hp:2,atk:32,def:0,spa:0,spd:0,spe:32},
+            moves
+          });
+
+          function roster() {
+            return [
+              set('Garchomp','Rough Skin',
+                ['Earthquake','Dragon Claw','Rock Slide','Protect']),
+              set('Sylveon','Pixilate',
+                ['Hyper Voice','Moonblast','Quick Attack','Protect'],true),
+              set('Gyarados','Intimidate',
+                ['Waterfall','Crunch','Ice Fang','Protect']),
+              set('Pikachu','Static',
+                ['Thunderbolt','Quick Attack','Nuzzle','Protect'],true),
+              set('Snorlax','Thick Fat',
+                ['Body Slam','Crunch','Earthquake','Protect']),
+              set('Lucario','Inner Focus',
+                ['Close Combat','Bullet Punch','Crunch','Protect'])
+            ];
+          }
+
+          const speciesFromDetails=details=>
+            String(details||'').split(',')[0];
+
+          // Whitelist projection. No raw omniscient engine object
+          // is ever supplied to the agent.
+          function publicProjection(log) {
+            const result={
+              preview:{p1:[],p2:[]},
+              active:{p1:null,p2:null}
+            };
+
+            for(const line of log) {
+              const parts=line.split('|');
+
+              if(parts[1]==='poke' &&
+                (parts[2]==='p1'||parts[2]==='p2')) {
+                result.preview[parts[2]].push(
+                  speciesFromDetails(parts[3])
+                );
+              }
+
+              if(parts[1]==='switch' &&
+                /^p[12]a: /.test(parts[2]||'')) {
+                const side=parts[2].slice(0,2);
+                result.active[side]=speciesFromDetails(parts[3]);
+              }
+
+              if(parts[1]==='faint' &&
+                /^p[12]a: /.test(parts[2]||'')) {
+                result.active[parts[2].slice(0,2)]=null;
+              }
+            }
+
+            return result;
+          }
+
+          function create(seed,enemy=roster()) {
+            const wire={p1:null,p2:null};
+
+            const battle=new Battle({
+              formatid:format.id,
+              seed,
+              strictChoices:true,
+              send:(kind,value)=>{
+                if(kind!=='sideupdate' ||
+                  typeof value!=='string') return;
+
+                const m=/^(p[12])\n\|request\|(.+)$/s.exec(value);
+                if(!m) return;
+
+                wire[m[1]]=JSON.parse(m[2]);
+              }
+            });
+
+            battle.setPlayer('p1',{
+              name:'Baseline-P1',
+              team:Teams.pack(roster())
+            });
+
+            battle.setPlayer('p2',{
+              name:'Baseline-P2',
+              team:Teams.pack(enemy)
+            });
+
+            return {battle,wire};
+          }
+
+          function fainted(condition) {
+            return /(^0(?:\/|\s|$)|\bfnt\b)/.test(
+              String(condition||'')
+            );
+          }
+
+          // All candidates are derived from the player's request.
+          function legal(req) {
+            if(!req || req.wait) return [];
+
+            if(req.teamPreview) {
+              return ['team-preview'];
+            }
+
+            const reserve=req.side.pokemon.flatMap((p,i)=>
+              !p.active && !fainted(p.condition)
+                ? [`switch ${i+1}`] : []
+            );
+
+            if(req.forceSwitch) {
+              return req.forceSwitch.some(Boolean)?reserve:[];
+            }
+
+            if(!req.active || req.active.length!==1) {
+              return [];
+            }
+
+            const active=req.active[0];
+
+            const moves=active.moves.flatMap((m,i)=>{
+              if(m.disabled ||
+                (m.pp!==undefined && m.pp<=0)) return [];
+              return [`move ${i+1}`];
+            });
+
+            return [
+              ...moves,
+              ...(active.trapped||active.maybeTrapped?[]:reserve)
+            ];
+          }
+
+          // Basic 3-of-6 selection: deterministic, public-data only.
+          function chooseTeam(req) {
+            const size=req.maxChosenTeamSize||3;
+
+            assert.equal(req.side.pokemon.length,6);
+            assert.equal(size,3);
+
+            const rating={
+              Garchomp:100,Lucario:95,Gyarados:90,
+              Sylveon:85,Pikachu:70,Snorlax:65
+            };
+
+            const indices=req.side.pokemon
+              .map((p,i)=>({
+                index:i+1,
+                score:rating[speciesFromDetails(p.details)]||0
+              }))
+              .sort((a,b)=>b.score-a.score||a.index-b.index)
+              .slice(0,size)
+              .map(x=>x.index);
+
+            assert.equal(new Set(indices).size,size);
+            return 'team '+indices.join('');
+          }
+
+          function moveScore(request,slot,enemySpecies) {
+            const moveInfo=request.active[0].moves[slot];
+            const move=Dex.moves.get(moveInfo.id);
+
+            if(!move.exists || !move.basePower) return -100;
+
+            const ownEntry=request.side.pokemon.find(p=>p.active);
+            const ownSpecies=ownEntry ?
+              speciesFromDetails(ownEntry.details) : '';
+
+            const own=Dex.species.get(ownSpecies);
+            const enemy=Dex.species.get(enemySpecies||'');
+
+            let multiplier=1;
+
+            if(enemy.exists) {
+              if(!Dex.getImmunity(move.type,enemy.types)) {
+                return 0;
+              }
+              multiplier=Math.pow(
+                2,Dex.getEffectiveness(move.type,enemy.types)
+              );
+            }
+
+            const stab=own.exists &&
+              own.types.includes(move.type)?1.5:1;
+
+            const accuracy=typeof move.accuracy==='number'?
+              move.accuracy/100:1;
+
+            const priority=move.priority>0?12:0;
+
+            return move.basePower*
+              multiplier*stab*accuracy+priority;
+          }
+
+          // This policy only receives player-specific request
+          // and whitelisted public information.
+          function decide(side,request,visible) {
+            if(request.wait) return null;
+            if(request.teamPreview) return chooseTeam(request);
+
+            const actions=legal(request);
+            assert.ok(actions.length,'NO_LEGAL_ACTION');
+
+            if(request.forceSwitch) {
+              return actions[0];
+            }
+
+            const enemySide=side==='p1'?'p2':'p1';
+            const enemy=visible.active[enemySide];
+
+            const moves=actions.filter(x=>x.startsWith('move '));
+
+            if(!moves.length) {
+              return actions[0];
+            }
+
+            const ranked=moves.map(action=>{
+              const slot=Number(action.split(' ')[1])-1;
+              return {
+                action,
+                score:moveScore(request,slot,enemy)
+              };
+            }).sort((a,b)=>
+              b.score-a.score ||
+              a.action.localeCompare(b.action)
+            );
+
+            const alternatives=actions.filter(
+              x=>x.startsWith('switch ')
+            );
+
+            if(ranked[0].score<=0 && alternatives.length) {
+              return alternatives[0];
+            }
+
+            return ranked[0].action;
+          }
+
+          function observation(env,side) {
+            const req=env.wire[side];
+            assert.ok(req,'MISSING_WIRE_REQUEST');
+
+            return {
+              side,
+              request:JSON.parse(JSON.stringify(req)),
+              public:publicProjection(env.battle.log)
+            };
+          }
+
+          function run(seed) {
+            const env=create(seed);
+            const counts={team:0,move:0,switch:0};
+            let decisions=0;
+
+            while(!env.battle.ended && decisions<160) {
+              env.wire.p1=null;
+              env.wire.p2=null;
+
+              env.battle.sendUpdates();
+
+              let progressed=false;
+
+              for(const side of ['p1','p2']) {
+                const view=observation(env,side);
+                const choice=decide(
+                  view.side,view.request,view.public
+                );
+
+                if(choice===null) continue;
+
+                if(!view.request.teamPreview) {
+                  assert.ok(
+                    legal(view.request).includes(choice),
+                    'POLICY_ACTION_OUTSIDE_REQUEST'
+                  );
+                }
+
+                assert.equal(
+                  env.battle.choose(side,choice),
+                  true,
+                  `ENGINE_REJECTED_${side}_${choice}`
+                );
+
+                if(choice.startsWith('team ')) counts.team++;
+                if(choice.startsWith('move ')) counts.move++;
+                if(choice.startsWith('switch ')) counts.switch++;
+
+                decisions++;
+                progressed=true;
+              }
+
+              assert.ok(progressed,'NO_DECISION_PROGRESS');
+            }
+
+            assert.ok(env.battle.ended,'BATTLE_DID_NOT_FINISH');
+            assert.equal(counts.team,2);
+            assert.ok(counts.move>=2);
+
+            const cleanLog=env.battle.log.map(line=>
+              line.startsWith('|t:|')?'|t:|time':line
+            ).join('\n');
+
+            return {
+              ended:env.battle.ended,
+              turns:env.battle.turn,
+              winner:env.battle.winner,
+              decisions,
+              counts,
+              normalizedLogSha256:crypto.createHash('sha256')
+                .update(cleanLog).digest('hex')
+            };
+          }
+
+          // Opponent hidden variants must not change the
+          // initial p1 player observation.
+          function privacy(seed) {
+            const altered=roster();
+
+            altered[0].ability='Sand Veil';
+            altered[0].item='Leftovers';
+            altered[0].moves=[
+              'Earthquake','Dragon Claw','Fire Fang','Protect'
+            ];
+
+            const original=create(seed);
+            const mutation=create(seed,altered);
+
+            original.battle.sendUpdates();
+            mutation.battle.sendUpdates();
+
+            const a=observation(original,'p1');
+            const b=observation(mutation,'p1');
+
+            assert.deepEqual(a,b,'HIDDEN_SET_LEAK');
+
+            const serialized=JSON.stringify(b).toLowerCase();
+            for(const secret of [
+              'sandveil','leftovers','firefang'
+            ]) {
+              assert.ok(!serialized.includes(secret));
+            }
+
+            const c1=decide(a.side,a.request,a.public);
+            const c2=decide(b.side,b.request,b.public);
+            assert.equal(c1,c2);
+
+            return true;
+          }
+
+          const seeds=[
+            [1234,5678,9012,3456],
+            [444,555,666,777]
+          ];
+
+          const games=[];
+
+          for(const seed of seeds) {
+            assert.equal(privacy(seed),true);
+
+            const first=run(seed);
+            const replay=run(seed);
+
+            assert.deepEqual(
+              first,replay,'SAME_SEED_REPLAY_MISMATCH'
+            );
+
+            games.push({seed,...first});
+          }
+
+          assert.equal(games.length,2);
+
+          const result={
+            schema:'R27160_PUBLIC_BASELINE_BATTLE_AI_V1',
+            sourcePin:PIN,
+            node:process.version,
+            matches:games,
+            matchCount:2,
+            replaysVerified:2,
+            privacyInitialBoundary:'PASS',
+            engine:'public Showdown Champions M-C',
+            syntheticOnly:true,
+            officialChampionsParity:false,
+            native33:'0/33',
+            exact34:'0/34',
+            field:'0/30',
+            formal:'DENY'
+          };
+
+          console.log(JSON.stringify(result));
+          console.log('R27160_BASELINE_SELFPLAY_PASS');
+          console.log('NOT_OFFICIAL_CHAMPIONS_CERTIFICATION');
+          JS
+
+          node --check baseline_ai.js
+          node baseline_ai.js > r27160_result.json
+
+          python3 - <<'PY'
+          import json
+          p=json.load(open('r27160_result.json'))
+          assert p['schema']=='R27160_PUBLIC_BASELINE_BATTLE_AI_V1'
+          assert p['matchCount']==2
+          assert p['replaysVerified']==2
+          assert all(g['ended'] for g in p['matches'])
+          assert p['privacyInitialBoundary']=='PASS'
+          assert p['native33']=='0/33'
+          assert p['exact34']=='0/34'
+          assert p['field']=='0/30'
+          assert p['formal']=='DENY'
+          assert p['officialChampionsParity'] is False
+          print('R27160_TWO_BASELINE_MATCHES_VERIFIED')
+          PY
+
+          sha256sum r27160_result.json
+          cat r27160_result.json
+
+          echo 'R27.160 public synthetic Baseline AI test. No official Champions parity; Native33=0/33, Exact34=0/34, FORMAL=DENY.' >> "$GITHUB_STEP_SUMMARY"
