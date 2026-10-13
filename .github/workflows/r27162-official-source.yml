@@ -1,0 +1,311 @@
+
+name: R27.162 Official Season Source Intake (Manual, Read-Only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  official-source-intake:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Setup Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+
+      - name: Offline contract and fail-closed tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -v)" = 'v22.18.0'
+          cat > r27162_official_ingest.js <<'R27162_OFFICIAL_JS_EOF'
+          'use strict';
+          // R27.162: public official-site evidence capture; NOT a canonical DB update.
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const ROOT = process.env.R27162_OUTPUT || path.resolve('r27162_evidence');
+          const sha = x => crypto.createHash('sha256').update(x).digest('hex');
+          const URLS = Object.freeze({
+            season:'https://news.pokemon-home.com/en/page/845.html',
+            regulation:'https://news.pokemon-home.com/en/page/816.html',
+            patch:'https://news.pokemon-home.com/en/page/817.html',
+            update:'https://news.pokemon-home.com/ja/page/844.html',
+          });
+          const CURRENT = Object.freeze({
+            season:'M-7', regulation:'M-C',
+            seasonWindowUTC:['2026-10-07T02:00:00Z','2026-11-04T01:59:00Z'],
+            regulationWindowUTC:['2026-09-09T02:00:00Z','2026-12-02T01:59:00Z'],
+            newlyAllowedMega:['Mega Absol Z','Mega Salamence','Mega Garchomp Z',
+              'Mega Lucario Z','Mega Golisopod','Mega Baxcalibur'],
+            itemDuplicateAllowed:false, megaStoneRequired:true, megaLimitPerBattle:1,
+            timersSeconds:{total:1200,player:420,turn:45,preview:90},
+            patchChangedMoves:{Politoed:['Pound'],Archaludon:['Mirror Coat','Metal Burst']},
+            patchAddedMoves:['Slash'],
+            patchPP:{Wish:[12,8],'Strength Sap':[12,8]},
+          });
+          function decode(str) {
+            const named={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",nbsp:' ',ndash:'-',mdash:'-',hellip:'...',rarr:'→',larr:'←',rsquo:"'",ldquo:'"',rdquo:'"'};
+            return str.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi,(_,entity)=>{
+              if(entity[0]==='#') {
+                const num=entity[1].toLowerCase()==='x' ? parseInt(entity.slice(2),16):parseInt(entity.slice(1),10);
+                return Number.isInteger(num) && num>0 && num<=0x10ffff?String.fromCodePoint(num):' ';
+              }
+              return named[entity.toLowerCase()]||' ';
+            });
+          }
+          function textOf(html) {
+            return decode(html.replace(/<!--[\s\S]*?-->/g,' ')
+              .replace(/<(script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,' ')
+              .replace(/<[^>]*>/g,' ')).replace(/\s+/g,' ').trim();
+          }
+          function need(t,re,label){if(!re.test(t)) throw new Error('SOURCE_SEMANTIC_UNVERIFIED:'+label);}
+          function parsePages(pages) {
+            for(const name of Object.keys(URLS)) {
+              if(typeof pages[name]!=='string' || pages[name].length<160)
+                throw new Error('OFFICIAL_SOURCE_MISSING_OR_TOO_SHORT:'+name);
+            }
+            const a=textOf(pages.season),b=textOf(pages.regulation);
+            const c=textOf(pages.patch),d=textOf(pages.update);
+            need(a,/Ranked\s+Battles\s+Season\s+M[-‐‑–]?7/i,'season_name');
+            need(a,/Regulation\s+Set\s+M[-‐‑–]?C/i,'season_regulation');
+            need(a,/October\s+7,?\s+2026/i,'season_start');
+            need(a,/November\s+4,?\s+2026/i,'season_end');
+            need(a,/October\s+14/i,'tier_unlock');
+            need(a,/02:00\s*UTC/i,'season_start_time');
+            need(a,/01:59\s*UTC/i,'season_end_time');
+            need(b,/Regulation\s+Set\s+M[-‐‑–]?C/i,'regulation_name');
+            need(b,/September\s+9,?\s+2026/i,'regulation_start');
+            need(b,/December\s+2,?\s+2026/i,'regulation_end');
+            need(b,/Duplicate\s+held\s+items\s+are\s+not\s+allowed/i,'item_clause');
+            need(b,/02:00\s*UTC/i,'regulation_start_time');
+            need(b,/01:59\s*UTC/i,'regulation_end_time');
+            need(b,/Mega\s+Stone/i,'mega_stone_required');
+            need(b,/one\s+time\s+per\s+battle/i,'mega_limit_one');
+            for(const m of CURRENT.newlyAllowedMega) {
+              need(b,new RegExp(m.replace(/ /g,'\\s+'),'i'),'mega_'+m.replace(/ /g,'_'));
+            }
+            for(const [label,re] of Object.entries({
+              total:/Total\s+Time\s*:?\s*20\s+minutes/i,
+              player:/Player\s+Time\s*:?\s*7\s+minutes/i,
+              turn:/Turn\s+Time\s*:?\s*45\s+seconds/i,
+              preview:/Preview\s+Time\s*:?\s*90\s+seconds/i,
+            })) need(b,re,'timer_'+label);
+            need(c,/Politoed\s*:?\s*Pound/i,'politoed_pound_removed');
+            need(c,/Archaludon\s*:?\s*Mirror\s+Coat\s*,?\s*Metal\s+Burst/i,'archaludon_two_moves_removed');
+            need(c,/Slash/i,'slash_added');
+            for(const name of ['Wish','Strength Sap']) {
+              const pattern=new RegExp(name.replace(/ /g,'\\s+')+'\\s*:?\\s*12\\s*(?:→|->|to|–|-)\\s*8','i');
+              need(c,pattern,'pp_'+name.replace(/ /g,'_'));
+            }
+            need(d,/2026\s*年\s*10\s*月\s*7\s*日|10\s*月\s*7\s*日/i,'oct_7_update');
+            need(d,/不具合/i,'update_bugfix');
+            return {
+              sourceDerived:{
+                season:'M-7', regulation:'M-C',
+                seasonWindowUTC:[...CURRENT.seasonWindowUTC],
+                regulationWindowUTC:[...CURRENT.regulationWindowUTC],
+                tierUnlockDate:'2026-10-14',
+                newlyAllowedMega:[...CURRENT.newlyAllowedMega],
+                itemDuplicateAllowed:false, megaStoneRequired:true, megaLimitPerBattle:1,
+                timersSeconds:{...CURRENT.timersSeconds},
+                confirmedPatch:{
+                  moveRemovedFrom:{...CURRENT.patchChangedMoves},
+                  moveAdded:[...CURRENT.patchAddedMoves],
+                  ppAdjustments:{...CURRENT.patchPP},
+                },
+                maintenance20261007:'bugfix_reported_details_unspecified',
+              },
+              verificationScope:{
+                officialEligibilityRoster:'NOT_EXTRACTED_IMAGE_OR_IN_GAME_LIST',
+                abilitiesAll:'NOT_EXTRACTED', movesAll:'NOT_EXTRACTED',
+                stadiumCatalog:'NOT_VERIFIED', stadiumMechanics:'UNKNOWN',
+                officialGameParity:'NOT_TESTED',
+              },
+            };
+          }
+          function compareKnown(facts,prior) {
+            const delta=[];
+            if(facts.sourceDerived.season!==prior.season) delta.push('SEASON_CHANGED');
+            if(facts.sourceDerived.regulation!==prior.regulation) delta.push('REGULATION_CHANGED');
+            if(JSON.stringify(facts.sourceDerived.newlyAllowedMega)!==JSON.stringify(prior.newlyAllowedMega)) delta.push('MEGA_ELIGIBILITY_CHANGED');
+            if(JSON.stringify(facts.sourceDerived.confirmedPatch.ppAdjustments)!==JSON.stringify(prior.patchPP)) delta.push('PP_CHANGED');
+            if(JSON.stringify(facts.sourceDerived.timersSeconds)!==JSON.stringify(prior.timersSeconds)) delta.push('TIMERS_CHANGED');
+            return {
+              comparedTo:'PINNED_PUBLIC_FACT_EXPECTATIONS_NOT_A_COMPLETE_FROZEN_DB',
+              semanticDiff:delta,sourceEvidenceRequired:true,
+              safetyDecision:'QUARANTINE_UNTIL_STAGE0_RECONCILIATION',
+              stage0Required:true,
+              causes:['OFFICIAL_PATCH_MOVE_AND_PP_AUDIT_NOT_YET_PROVEN_IN_FROZEN_DB',
+                      'ELIGIBLE_SPECIES_LIST_NOT_COMPLETE','STADIUM_MECHANICS_NOT_VERIFIED'],
+              canonicalDbWrites:0,formalPromotionAllowed:false,
+              stage1PureInputAllowed:false,
+            };
+          }
+          function makeFixture(){
+            return {
+              season:`<html><body><h1>Ranked Battles Season M-7 Underway!</h1>
+              October 7, 2026 at 02:00 UTC to November 4, 2026 at 01:59 UTC.
+              The Champion Tier will be opened on October 14.
+              Season M-7 will follow Regulation Set M-C. Eligible Pokémon shown in game.</body></html>`,
+              regulation:`<html><body><h1>Regulation Set M-C</h1>
+              September 9, 2026 at 02:00 UTC to December 2, 2026 at 01:59 UTC.
+              Mega Absol Z, Mega Salamence, Mega Garchomp Z, Mega Lucario Z,
+              Mega Golisopod, Mega Baxcalibur.
+              Certain Pokémon can Mega Evolve if holding a Mega Stone.
+              You can use Mega Evolution only one time per battle.
+              Duplicate held items are not allowed.
+              Total Time: 20 minutes Player Time: 7 minutes
+              Turn Time: 45 seconds Preview Time: 90 seconds</body></html>`,
+              patch:`<html><body>Maintenance Completion Notice:
+              The following Pokémon can no longer use the moves listed here.
+              Politoed: Pound. Archaludon: Mirror Coat, Metal Burst.
+              The following move can now be used: Slash.
+              PP adjustments: Wish: 12 → 8. Strength Sap: 12 → 8.</body></html>`,
+              update:`<html><body><h1>2026年10月7日『Pokémon Champions』更新データ配信のお知らせ</h1>
+            いつも『Pokémon Champions』をお楽しみいただきありがとうございます。
+            10月7日にメンテナンスを終了しました。一部の不具合の修正を行いました。
+            今後とも『Pokémon Champions』をよろしくお願いいたします。</body></html>`,
+            };
+          }
+          function selftest(){
+            const fixture=makeFixture();
+            const f=parsePages(fixture);
+            const d=compareKnown(f,CURRENT);
+            assert.deepEqual(d.semanticDiff,[]);
+            assert.equal(d.canonicalDbWrites,0);
+            assert.equal(d.stage0Required,true);
+            assert.equal(f.verificationScope.officialEligibilityRoster,'NOT_EXTRACTED_IMAGE_OR_IN_GAME_LIST');
+            assert.equal(f.sourceDerived.confirmedPatch.ppAdjustments.Wish[1],8);
+            for(const [name,change] of [
+              ['season',x=>x.season=x.season.replaceAll('M-7','M-8')],
+              ['regulation',x=>x.regulation=x.regulation.replaceAll('M-C','M-D')],
+              ['mega',x=>x.regulation=x.regulation.replace('Mega Golisopod','')],
+              ['patch',x=>x.patch=x.patch.replace('Wish: 12 → 8','Wish: 12 → 7')],
+              ['source_missing',x=>x.patch=''],
+              ['update',x=>x.update=x.update.replaceAll('不具合','追加')],
+            ]) {
+              const x={...fixture};change(x);
+              assert.throws(()=>parsePages(x),/SOURCE_SEMANTIC_UNVERIFIED|OFFICIAL_SOURCE_MISSING/,'FIXTURE_MUST_FAIL_CLOSED_'+name);
+            }
+            const html='<p>Strength Sap: 12 &rarr; 8</p>';
+            assert.equal(textOf(html).includes('Strength Sap'),true);
+            console.error('R27162_OFFLINE_SEVEN_CONTRACT_CHECKS_PASS');
+            return true;
+          }
+          async function downloadOfficial(url) {
+            let u=new URL(url);
+            let result;
+            for(let n=0;n<3;n++) {
+              if(u.protocol!=='https:' || !['news.pokemon-home.com','champions-news.pokemon-home.com'].includes(u.hostname) || !/^\/(en|ja)\/page\/\d+\.html$/.test(u.pathname))
+                throw new Error('UNTRUSTED_URL:'+u.href);
+              result=await fetch(u.href,{redirect:'manual',signal:AbortSignal.timeout(16000),headers:{'User-Agent':'TRUE-PLAN-R27162-PublicRulesEvidence/1.0','Accept':'text/html'}});
+              if([301,302,303,307,308].includes(result.status)) {
+                const loc=result.headers.get('location');
+                if(!loc)throw new Error('REDIRECT_WITHOUT_LOCATION');
+                u=new URL(loc,u);continue;
+              }
+              if(!result.ok) throw new Error('HTTP_STATUS_'+result.status+':'+u.href);
+              const contentType=result.headers.get('content-type')||'';
+              if(!/text\/html/i.test(contentType)) throw new Error('UNEXPECTED_CONTENT_TYPE:'+contentType);
+              const reader=result.body.getReader();const pieces=[];let size=0;
+              while(true){let {done,value}=await reader.read();if(done)break;size+=value.length;
+                if(size>2_000_000) {reader.cancel();throw new Error('HTML_TOO_LARGE');} pieces.push(Buffer.from(value));}
+              const raw=Buffer.concat(pieces);
+              return {html:raw.toString('utf8'),provenance:{url:url,finalUrl:u.href,httpStatus:result.status,
+                contentType,etag:result.headers.get('etag'),lastModified:result.headers.get('last-modified'),
+                fetchedUtc:new Date().toISOString(),sha256:sha(raw),byteSize:raw.length}};
+            }
+            throw new Error('TOO_MANY_REDIRECTS');
+          }
+          async function main(){
+            selftest();
+            fs.mkdirSync(ROOT,{recursive:true});
+            const manifest={schema:'R27162_OFFICIAL_SOURCE_SNAPSHOT_V1',scope:'SINGLES_ONLY',
+              provenanceLevel:'RAW_PUBLIC_OFFICIAL_HTML',
+              sourceDocs:{},sourceFailures:[],status:'NOT_STARTED',
+              dbMutation:false,showdownMatchesAdded:0,officialGameParity:false,
+              native33:'0/33',exact34:'0/34',field:'0/30',formal:'DENY'};
+            const pages={};
+            for(const [key,url] of Object.entries(URLS)){
+              try {const e=await downloadOfficial(url);pages[key]=e.html;
+                manifest.sourceDocs[key]=e.provenance;
+                fs.writeFileSync(path.join(ROOT,`official_${key}.html`),e.html);
+              } catch(err) {manifest.sourceFailures.push({key,url,error:String(err.message)});}
+            }
+            try {
+              if(manifest.sourceFailures.length)throw new Error('SOURCE_FETCH_INCOMPLETE');
+              const verified=parsePages(pages);
+              manifest.observation=verified;
+              manifest.candidateDiff=compareKnown(verified,CURRENT);
+              manifest.status='REAL_OFFICIAL_SOURCES_FETCHED_AND_SEMANTICALLY_CHECKED_REVIEW_REQUIRED';
+            }catch(err){manifest.status='BLOCKED_FAIL_CLOSED';manifest.blocker=String(err.message);}
+            fs.writeFileSync(path.join(ROOT,'source_manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+            process.stdout.write(JSON.stringify({status:manifest.status,sourceCount:Object.keys(manifest.sourceDocs).length,
+              sourceFailures:manifest.sourceFailures,manifestFile:path.join(ROOT,'source_manifest.json'),
+              requiresStage0:true,certification:'NOT_GRANTED'})+'\n');
+            if(manifest.status==='BLOCKED_FAIL_CLOSED')process.exitCode=1;
+            else console.error('R27162_LIVE_FOUR_OFFICIAL_SOURCES_CAPTURED_REVIEW_REQUIRED');
+          }
+          if(require.main===module){
+            if(process.argv.includes('--selftest')){selftest();}
+            else if(process.argv.includes('--live'))main().catch(e=>{console.error('UNHANDLED_FAIL_CLOSED',e);process.exitCode=1;});
+            else {throw new Error('ARG_REQUIRED_--selftest_OR_--live');}
+          }
+          R27162_OFFICIAL_JS_EOF
+          node --check r27162_official_ingest.js
+          node r27162_official_ingest.js --selftest
+          echo R27162_OFFLINE_CONTRACT_PASS
+
+      - name: Fetch and hash four official public notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r27162_evidence
+          R27162_OUTPUT=r27162_evidence node r27162_official_ingest.js --live > r27162_evidence/live_summary.json
+          python3 - <<'R27162_AUDIT_EOF'
+          import json, pathlib, re, hashlib
+          root=pathlib.Path('r27162_evidence')
+          obj=json.loads((root/'source_manifest.json').read_text())
+          assert obj['schema']=='R27162_OFFICIAL_SOURCE_SNAPSHOT_V1'
+          assert obj['status']=='REAL_OFFICIAL_SOURCES_FETCHED_AND_SEMANTICALLY_CHECKED_REVIEW_REQUIRED'
+          assert not obj['sourceFailures']
+          assert len(obj['sourceDocs'])==4
+          for key,meta in obj['sourceDocs'].items():
+              content=(root/f'official_{key}.html').read_bytes()
+              assert len(content)>160
+              assert hashlib.sha256(content).hexdigest()==meta['sha256']
+              assert meta['httpStatus']==200
+              assert meta['finalUrl'].startswith('https://news.pokemon-home.com/') or meta['finalUrl'].startswith('https://champions-news.pokemon-home.com/')
+          observation=obj['observation']
+          assert observation['sourceDerived']['season']=='M-7'
+          assert observation['sourceDerived']['regulation']=='M-C'
+          assert observation['sourceDerived']['confirmedPatch']['ppAdjustments']['Wish']==[12,8]
+          assert observation['sourceDerived']['confirmedPatch']['ppAdjustments']['Strength Sap']==[12,8]
+          assert observation['verificationScope']['officialEligibilityRoster']=='NOT_EXTRACTED_IMAGE_OR_IN_GAME_LIST'
+          audit=obj['candidateDiff']
+          assert audit['stage0Required'] and not audit['formalPromotionAllowed']
+          assert audit['canonicalDbWrites']==0
+          assert not audit['stage1PureInputAllowed']
+          assert obj['native33']=='0/33' and obj['exact34']=='0/34' and obj['field']=='0/30' and obj['formal']=='DENY'
+          print('R27162_REAL_FOUR_SOURCE_PROVENANCE_AND_SEMANTICS_PASS')
+          print('R27162_OFFICIAL_ROSTER_INCOMPLETE_STAGE0_REVIEW_REQUIRED')
+          R27162_AUDIT_EOF
+          sha256sum r27162_evidence/source_manifest.json
+          cat r27162_evidence/live_summary.json
+          echo 'Official source evidence captured; eligibility roster and stadium mechanics remain unverified. Stage0 review required; DB and FORMAL unchanged.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve source evidence (also on failure)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r27162-official-evidence
+          path: r27162_evidence/
+          retention-days: 7
+          if-no-files-found: warn
