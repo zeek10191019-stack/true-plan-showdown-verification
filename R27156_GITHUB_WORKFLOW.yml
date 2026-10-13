@@ -1,0 +1,90 @@
+name: R27.156 pinned Showdown M-C transition smoke (public only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  public-pinned-transition:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout public verification scripts only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact public Showdown commit
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pokemon-showdown
+
+      - name: Set exact Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+
+      - name: Verify commit, tree, source blob and public runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "zeek10191019-stack/true-plan-showdown-verification"
+          test "$(node -v)" = 'v22.18.0'
+          cd pokemon-showdown
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(git hash-object sim/battle-stream.ts)" = 'fda9a5b4dc3c99d33110c5efc11bc748bfc742f8'
+          test "$(git hash-object sim/teams.ts)" = '1ed3b631b1b6b0d5905a34882d8c7f8961f18add'
+          test "$(git hash-object data/mods/champions/scripts.ts)" = '7f100a0947a203454a1a97b54f6a99932e808bce'
+          test "$(git hash-object data/mods/champions/rulesets.ts)" = '9d0df8d65bfc486f4577ad220b0105dae158173e'
+          echo 'PINNED_SOURCE_VERIFIED'
+
+      - name: Install and build fixed source
+        working-directory: pokemon-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/battle.js
+          test -f dist/sim/teams.js
+          sha256sum dist/sim/battle.js dist/sim/teams.js
+
+      - name: Execute real Showdown Battle engine (synthetic teams only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/r27156_native_smoke.js pokemon-showdown > r27156_smoke.json
+          python3 - <<'PY'
+          import json,hashlib
+          p=json.load(open('r27156_smoke.json',encoding='utf8'))
+          assert p['schema']=='R27156_PINNED_SHOWDOWN_TRANSITION_V1'
+          assert p['pinned_commit']=='aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          assert p['official_champions_parity'] is False
+          assert p['native33']=='0/33' and p['exact34']=='0/34' and p['formal']=='DENY'
+          assert p['scenario_exact_9_executed']==0
+          assert len(p['runs'])==2
+          for r in p['runs']:
+              assert r['turns'] and r['turns'][0]==1 and r['moves']>=1
+              assert '|move|' in r['battle_log']
+              assert hashlib.sha256(r['battle_log'].encode()).hexdigest()==r['log_sha256']
+          print('REAL_COMMUNITY_ENGINE_TRANSITIONS_VERIFIED')
+          print('RUNS=2; NATIVE33=0/33; EXACT34=0/34; FORMAL=DENY')
+          print('NO_CHAMPIONS_PARITY_CLAIM')
+          PY
+          sha256sum r27156_smoke.json
+          echo 'BEGIN_R27156_SYNTHETIC_SHOWDOWN_JSON'
+          cat r27156_smoke.json
+          echo 'END_R27156_SYNTHETIC_SHOWDOWN_JSON'
+          echo '### R27.156 public synthetic engine smoke' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Pinned source and Node 22.18.0 validated; 2 real Showdown engine transition traces validated.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Not official Champions, not 9 exact scenario executions, no Native33/Exact34 credit.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Native33=0/33, Exact34=0/34, FORMAL=DENY.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No artifact upload, secrets, private code, video, or user battle data.' >> "$GITHUB_STEP_SUMMARY"
