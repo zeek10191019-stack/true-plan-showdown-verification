@@ -1,0 +1,358 @@
+
+name: R27.163 Official Change Classifier and Stage0 Routing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  classify-official-changes:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Set up Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+
+      - name: Offline change classification and fail-closed tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -v)" = 'v22.18.0'
+          cat > r27163_source_classifier.js <<'R27163_JS_END'
+          'use strict';
+          // R27.163 Public-only official-source delta classifier, no Frozen DB writes.
+          const assert=require('node:assert/strict');
+          const crypto=require('node:crypto');
+          const fs=require('node:fs');
+          const path=require('node:path');
+          const root=path.resolve(process.env.R27163_OUTPUT||'r27163_evidence');
+          const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+          const URLS=Object.freeze({
+            season:'https://news.pokemon-home.com/en/page/845.html',
+            regulation:'https://news.pokemon-home.com/en/page/816.html',
+            patch:'https://news.pokemon-home.com/en/page/817.html',
+            update:'https://news.pokemon-home.com/ja/page/844.html'
+          });
+          const CATEGORIES=Object.freeze([
+            'SEASON_METADATA','REGULATION','SPECIES_ELIGIBILITY','FORM_ELIGIBILITY',
+            'MOVE_LEARNSET','MOVE_PP','ABILITY','ITEM','MEGA','STADIUM_CATALOG',
+            'STADIUM_MECHANICS','TIMER','BATTLE_MECHANICS'
+          ]);
+          const GATES=Object.freeze({
+            SEASON_METADATA:['SEASON_VERSION','TEACHER_ROUTING'],
+            REGULATION:['STAGE0_RULES','STAGE0_LEGAL_ACTION','STAGE0_TEAM_PREVIEW','STAGE1_FROZEN_DB'],
+            SPECIES_ELIGIBILITY:['STAGE0_SPECIES','STAGE0_LEGALITY','STAGE0_STATS_66P','STAGE1_FROZEN_DB'],
+            FORM_ELIGIBILITY:['STAGE0_FORMS','STAGE0_STATS_66P','STAGE0_MEGA','STAGE1_FROZEN_DB'],
+            MOVE_LEARNSET:['STAGE0_LEARNSET','STAGE0_LEGAL_ACTION','STAGE1_FROZEN_DB'],
+            MOVE_PP:['STAGE0_PP','STAGE0_TURN_AWARE','STAGE0_LEGAL_ACTION'],
+            ABILITY:['STAGE0_ABILITIES','STAGE0_BATTLE_PHYSICS'],
+            ITEM:['STAGE0_ITEMS','STAGE0_LEGALITY','STAGE0_BATTLE_PHYSICS'],
+            MEGA:['STAGE0_MEGA','STAGE0_FORMS','STAGE0_LEGAL_ACTION'],
+            STADIUM_CATALOG:['STAGE0_STADIUM_PROVENANCE'],
+            STADIUM_MECHANICS:['STAGE0_STADIUM_MECHANICS','STAGE0_BATTLE_PHYSICS'],
+            TIMER:['STAGE0_TIMER','STAGE0_ACTION_CLOCK'],
+            BATTLE_MECHANICS:['STAGE0_BATTLE_PHYSICS','STAGE0_TURN_AWARE','STAGE0_EXACT']
+          });
+          const clone=x=>JSON.parse(JSON.stringify(x));
+          const normal=x=>JSON.stringify(x);
+          function decision(before,after,sourceVerified=true){
+            const p=before||{},n=after||{};
+            const fields={
+              SEASON_METADATA:['season','seasonWindowUTC'],
+              REGULATION:['regulation','regulationWindowUTC','rule'],
+              SPECIES_ELIGIBILITY:['eligibleSpecies'],
+              FORM_ELIGIBILITY:['eligibleForms'],
+              MOVE_LEARNSET:['learnsets'],
+              MOVE_PP:['movePP'],
+              ABILITY:['abilities'],
+              ITEM:['items'],
+              MEGA:['mega'],
+              STADIUM_CATALOG:['stadiums'],
+              STADIUM_MECHANICS:['stadiumEffects'],
+              TIMER:['timers'],
+              BATTLE_MECHANICS:['mechanics']
+            };
+            const changes=CATEGORIES.filter(k=>fields[k].some(f=>normal(p[f])!==normal(n[f])));
+            const visualOnly=changes.length>0&&changes.every(k=>k==='SEASON_METADATA'||k==='STADIUM_CATALOG')
+              && (!changes.includes('STADIUM_CATALOG') || (n.stadiums||[]).every(s=>s.effectClass==='VISUAL_ONLY_VERIFIED'));
+            const stage0=changes.filter(k=>k!=='SEASON_METADATA' && (k!=='STADIUM_CATALOG'||!visualOnly));
+            const unknownStadium=(n.stadiums||[]).some(s=>s.effectClass!=='VISUAL_ONLY_VERIFIED')||
+              (n.stadiumEffects||{}).unknown===true;
+            if(unknownStadium && !stage0.includes('STADIUM_MECHANICS')) stage0.push('STADIUM_MECHANICS');
+            const gates=[...new Set(stage0.flatMap(k=>GATES[k]||[]))].sort();
+            const quarantined=!!stage0.length || !sourceVerified;
+            return {changes,stage0Categories:stage0,gates,
+              status:!sourceVerified?'BLOCKED_UNVERIFIED_PROVENANCE':quarantined?'QUARANTINE_STAGE0_REQUIRED':'METADATA_REVIEW_ONLY',
+              canonicalDbWrites:0,stage1PureAllowed:false,teacherReverseFlowAllowed:false,
+              formalPromotionAllowed:false,sourceVerified,unknownStadium};
+          }
+          function fixture(){return {
+            season:'M-7',seasonWindowUTC:['start','end'],regulation:'M-C',regulationWindowUTC:['start','end'],
+            rule:{pick:3,megaLimit:1},eligibleSpecies:['A','B'],eligibleForms:['Base'],
+            learnsets:{A:['Tackle']},movePP:{Wish:8},abilities:['Alpha'],items:['Stone'],mega:['Mega A'],
+            stadiums:[{id:'old',effectClass:'VISUAL_ONLY_VERIFIED'}],stadiumEffects:{unknown:false},
+            timers:{turn:45},mechanics:{priority:'v1'}
+          };}
+          function selftest(){
+            const b=fixture();const cases=[];
+            function check(name,mutate,want,stage0,sourceVerified=true){
+              const n=clone(b),preHash=sha(normal(b));mutate(n);
+              const r=decision(b,n,sourceVerified);
+              assert.equal(r.changes.includes(want),true,`${name} change mismatch`);
+              assert.equal(r.stage0Categories.length>0,stage0,`${name} gate mismatch`);
+              assert.equal(r.canonicalDbWrites,0);
+              assert.equal(r.stage1PureAllowed,false);
+              assert.equal(r.teacherReverseFlowAllowed,false);
+              assert.equal(r.formalPromotionAllowed,false);
+              assert.equal(sha(normal(b)),preHash,'frozen fixture mutated');
+              cases.push({case:name,category:want,status:r.status,gates:r.gates});
+            }
+            check('season_only',x=>x.season='M-8','SEASON_METADATA',false);
+            check('regulation_rule',x=>x.rule.pick=6,'REGULATION',true);
+            check('new_species',x=>x.eligibleSpecies.push('C'),'SPECIES_ELIGIBILITY',true);
+            check('new_form',x=>x.eligibleForms.push('Mega C'),'FORM_ELIGIBILITY',true);
+            check('learnset_move',x=>x.learnsets.A.push('Slash'),'MOVE_LEARNSET',true);
+            check('move_pp',x=>x.movePP.Wish=7,'MOVE_PP',true);
+            check('ability',x=>x.abilities.push('Beta'),'ABILITY',true);
+            check('item',x=>x.items.push('Berry'),'ITEM',true);
+            check('mega',x=>x.mega.push('Mega C'),'MEGA',true);
+            check('visual_stadium',x=>x.stadiums.push({id:'new',effectClass:'VISUAL_ONLY_VERIFIED'}),'STADIUM_CATALOG',false);
+            check('unknown_stadium',x=>x.stadiums.push({id:'new',effectClass:'UNKNOWN'}),'STADIUM_CATALOG',true);
+            check('stadium_effect',x=>x.stadiumEffects.unknown=true,'STADIUM_MECHANICS',true);
+            check('turn_timer',x=>x.timers.turn=30,'TIMER',true);
+            check('battle_mechanics',x=>x.mechanics.priority='v2','BATTLE_MECHANICS',true);
+            check('unverified_source',x=>x.season='M-8','SEASON_METADATA',false,false);
+            assert.equal(cases.at(-1).status,'BLOCKED_UNVERIFIED_PROVENANCE');
+            assert.deepEqual(decision(b,clone(b)).changes,[]);
+            assert.equal(decision(b,clone(b)).canonicalDbWrites,0);
+            assert.equal(Object.keys(GATES).length,CATEGORIES.length);
+            // The parser must reject unexpected source changes, not silently accept an old pin.
+            const pages={
+              season:`<html><body><h1>Ranked Battles Season M-7 Underway!</h1> October 7, 2026 at 02:00 UTC to November 4, 2026 at 01:59 UTC. Season M-7 will follow Regulation Set M-C. Eligible Pokemon in game.</body></html>`,
+              regulation:`<html><body><h1>Regulation Set M-C</h1> September 9, 2026 at 02:00 UTC to December 2, 2026 at 01:59 UTC. Mega Absol Z, Mega Salamence, Mega Garchomp Z, Mega Lucario Z, Mega Golisopod, Mega Baxcalibur. Certain Pokémon can Mega Evolve holding a Mega Stone, only one time per battle. Duplicate held items are not allowed. Total Time: 20 minutes Player Time: 7 minutes Turn Time: 45 seconds Preview Time: 90 seconds.</body></html>`,
+              patch:`<html><body>Maintenance notice. Politoed: Pound removed. Archaludon: Mirror Coat, Metal Burst removed. Slash was added. Wish: 12 → 8. Strength Sap: 12 → 8. Pokemon Champions update.</body></html>`,
+              update:`<html><body><h1>2026年10月7日 Pokémon Champions 更新データ</h1>一部の不具合の修正を行いました。2026年10月7日にメンテナンスを実施しました。公式のお知らせです。今後もサービスを改善して参ります。引き続き公式サイトのお知らせをご確認ください。</body></html>`
+            };
+            const parsed=classifyKnownNotices(pages);
+            assert.equal(parsed.season,'M-7');
+            assert.equal(parsed.regulation,'M-C');
+            const broken=[
+              ['season',p=>p.season=p.season.replace('Season M-7 Underway','Season M-8 Underway')],
+              ['regulation',p=>p.regulation=p.regulation.replace('Mega Golisopod','REDACTED')],
+              ['pp',p=>p.patch=p.patch.replace('Wish: 12 → 8','Wish: 12 → 7')],
+              ['missing',p=>p.update='']
+            ];
+            for(const [name,mutate] of broken){
+              const p=clone(pages);mutate(p);
+              assert.throws(()=>classifyKnownNotices(p),/OFFICIAL_SEMANTIC_DRIFT|SOURCE_MISSING_OR_SHORT/,name);
+            }
+            const result={schema:'R27163_DELTA_CONTRACT_TEST_V1',fixtureCount:cases.length,sourceDriftFixtures:broken.length,
+              cases,immutableFixture:true,officialGameParity:false,native33:'0/33',exact34:'0/34',field:'0/30',formal:'DENY'};
+            fs.mkdirSync(root,{recursive:true});
+            fs.writeFileSync(path.join(root,'fixture_results.json'),JSON.stringify(result,null,2)+'\n');
+            console.error('R27163_FIFTEEN_CLASSIFIER_FIXTURES_PASS');
+            return result;
+          }
+          function visibleText(html){
+            let s=html.replace(/<!--[\s\S]*?-->/g,' ')
+              .replace(/<(script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/gi,' ')
+              .replace(/<[^>]*>/g,' ');
+            const entities={amp:'&',lt:'<',gt:'>',quot:'"',apos:"'",nbsp:' ',ndash:'-',mdash:'-',rarr:'→',larr:'←'};
+            s=s.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi,(_,k)=>{
+              if(k.startsWith('#')) {const z=k[1].toLowerCase()==='x'?parseInt(k.slice(2),16):parseInt(k.slice(1),10);
+                return Number.isSafeInteger(z)&&z>0&&z<=0x10ffff?String.fromCodePoint(z):' ';}
+              return entities[k.toLowerCase()]||' ';
+            });
+            return s.replace(/\s+/g,' ').trim();
+          }
+          function must(t,re,label){if(!re.test(t))throw Error('OFFICIAL_SEMANTIC_DRIFT:'+label);}
+          const megaNames=['Mega Absol Z','Mega Salamence','Mega Garchomp Z','Mega Lucario Z','Mega Golisopod','Mega Baxcalibur'];
+          function classifyKnownNotices(pages){
+            for(const name of Object.keys(URLS))if(typeof pages[name]!=='string'||pages[name].length<160)
+              throw Error('SOURCE_MISSING_OR_SHORT:'+name);
+            const s=visibleText(pages.season),r=visibleText(pages.regulation),p=visibleText(pages.patch),u=visibleText(pages.update);
+            must(s,/Ranked\s+Battles\s+Season\s+M[-‐‑–]?7/i,'M7_NAME');
+            must(s,/Regulation\s+Set\s+M[-‐‑–]?C/i,'M7_REGULATION');
+            must(s,/October\s+7,?\s+2026/i,'SEASON_START');
+            must(s,/November\s+4,?\s+2026/i,'SEASON_END');
+            must(r,/Regulation\s+Set\s+M[-‐‑–]?C/i,'REG_NAME');
+            must(r,/September\s+9,?\s+2026/i,'REG_START');
+            must(r,/December\s+2,?\s+2026/i,'REG_END');
+            must(r,/Duplicate\s+held\s+items\s+are\s+not\s+allowed/i,'ITEM_CLAUSE');
+            must(r,/Mega\s+Stone/i,'MEGA_STONE');
+            must(r,/one\s+time\s+per\s+battle/i,'ONE_MEGA');
+            for(const name of megaNames)must(r,new RegExp(name.replaceAll(' ','\\s+'),'i'),'MEGA_'+name);
+            for(const [key,re] of Object.entries({turn:/Turn\s+Time\s*:?\s*45\s+seconds/i,
+              preview:/Preview\s+Time\s*:?\s*90\s+seconds/i,
+              total:/Total\s+Time\s*:?\s*20\s+minutes/i,
+              player:/Player\s+Time\s*:?\s*7\s+minutes/i}))must(r,re,'TIMER_'+key);
+            must(p,/Politoed\s*:?\s*Pound/i,'POLITOED_LEARNSET');
+            must(p,/Archaludon\s*:?\s*Mirror\s+Coat\s*,?\s*Metal\s+Burst/i,'ARCHALUDON_LEARNSET');
+            must(p,/Slash/i,'SLASH_LEARNSET');
+            for(const name of ['Wish','Strength Sap'])must(p,new RegExp(name.replaceAll(' ','\\s+')+'\\s*:?\\s*12\\s*(?:→|->|to|–|-)\\s*8','i'),'MOVE_PP_'+name);
+            must(u,/2026\s*年\s*10\s*月\s*7\s*日|10\s*月\s*7\s*日/i,'UPDATE_DATE');
+            must(u,/不具合/i,'UPDATE_BUGFIX');
+            // This is a bounded observation of four historical notices, NOT a full season DB.
+            return {
+              scope:'FOUR_KNOWN_OFFICIAL_NOTICE_URLS',season:'M-7',regulation:'M-C',
+              officialEvidence:{
+                SEASON_METADATA:['season M-7','Oct 7 to Nov 4 2026'],
+                REGULATION:['regulation M-C','Sep 9 to Dec 2 2026'],
+                MOVE_LEARNSET:['Politoed:Pound removed','Archaludon:Mirror Coat removed',
+                  'Archaludon:Metal Burst removed','Slash added'],
+                MOVE_PP:['Wish:12->8','Strength Sap:12->8'],
+                ITEM:['duplicate held items prohibited'],
+                MEGA:['mega stone required','one activation per battle',...megaNames],
+                TIMER:['total 20min','player 7min','turn 45sec','preview 90sec'],
+                BATTLE_MECHANICS:['Oct 7 2026 update acknowledges unspecified fixes']
+              },
+              unknownCoverage:{
+                SPECIES_ELIGIBILITY:'NOT_EXTRACTED_COMPLETE_LIST',
+                FORM_ELIGIBILITY:'NOT_EXTRACTED_COMPLETE_LIST',
+                MOVE_LEARNSET:'NOT_EXTRACTED_FULL_LEARNSET',
+                ABILITY:'NOT_EXTRACTED',ITEM:'PARTIAL_CLAUSE_ONLY',
+                MEGA:'ONLY_NAMED_IN_NOTICE',STADIUM_CATALOG:'NOT_VERIFIED',
+                STADIUM_MECHANICS:'UNKNOWN',BATTLE_MECHANICS:'BUGFIX_DETAILS_UNSPECIFIED'
+              },
+              detectionLimit:'NEW_SEASON_ANNOUNCEMENT_URL_DISCOVERY_NOT_YET_IMPLEMENTED'
+            };
+          }
+          async function fetchOfficial(url){
+            let u=new URL(url);
+            for(let redirects=0;redirects<3;redirects++){
+              if(u.protocol!=='https:'||!['news.pokemon-home.com','champions-news.pokemon-home.com'].includes(u.hostname)||
+                !/^\/(en|ja)\/page\/\d+\.html$/.test(u.pathname))throw Error('UNTRUSTED_URL:'+u.href);
+              const resp=await fetch(u.href,{redirect:'manual',signal:AbortSignal.timeout(20000),headers:{Accept:'text/html','User-Agent':'TRUE-PLAN-R27163-PublicAudit/1.0'}});
+              if([301,302,303,307,308].includes(resp.status)){
+                const loc=resp.headers.get('location');if(!loc)throw Error('NO_REDIRECT_LOCATION');
+                u=new URL(loc,u);continue;
+              }
+              if(resp.status!==200)throw Error('HTTP_NOT_200:'+resp.status);
+              if(!/text\/html/i.test(resp.headers.get('content-type')||''))throw Error('NON_HTML');
+              const chunks=[];let bytes=0;const reader=resp.body.getReader();
+              for(;;){const{done,value}=await reader.read();if(done)break;bytes+=value.byteLength;
+                if(bytes>2000000){await reader.cancel();throw Error('DOCUMENT_TOO_LARGE');}
+                chunks.push(Buffer.from(value));}
+              const raw=Buffer.concat(chunks);
+              if(raw.length<160)throw Error('DOCUMENT_TOO_SHORT');
+              return {html:raw.toString('utf8'),evidence:{requestedUrl:url,finalUrl:u.href,
+                fetchedAtUtc:new Date().toISOString(),httpStatus:resp.status,
+                contentType:resp.headers.get('content-type'),bytes:raw.length,sha256:sha(raw)}};
+            }
+            throw Error('TOO_MANY_REDIRECTS');
+          }
+          async function live(){
+            fs.mkdirSync(root,{recursive:true});
+            const manifest={schema:'R27163_REAL_OFFICIAL_CLASSIFIER_V1',sourceScope:'FOUR_KNOWN_URLS_ONLY',
+              sources:{},failures:[],stage0Required:true,certification:'NOT_GRANTED',
+              changedCanonicalDb:false,changedEngine:false,stage1PureInputAllowed:false,
+              native33:'0/33',exact34:'0/34',field:'0/30',formal:'DENY',status:'FETCHING'};
+            const pages={};
+            for(const [name,url] of Object.entries(URLS))try{
+              const got=await fetchOfficial(url);pages[name]=got.html;manifest.sources[name]=got.evidence;
+              fs.writeFileSync(path.join(root,'source_'+name+'.html'),got.html);
+            }catch(e){manifest.failures.push({name,url,error:String(e.message)});}
+            try{
+              if(manifest.failures.length)throw Error('SOURCE_FETCH_INCOMPLETE');
+              manifest.observation=classifyKnownNotices(pages);
+              // No complete frozen canonical snapshot was supplied. Never fabricate a delta.
+              manifest.realCanonicalDiff={status:'NOT_COMPUTABLE_NO_CANONICAL_DB',
+                observedOfficialCategories:Object.keys(manifest.observation.officialEvidence),
+                unknownCoverage:manifest.observation.unknownCoverage,
+                inferredNewSpecies:[],inferredNewStadiums:[],
+                automaticChangesApplied:0};
+              const need=new Set([
+                ...Object.keys(manifest.observation.officialEvidence)
+                  .flatMap(x=>GATES[x]||[]),
+                ...['STAGE0_SPECIES','STAGE0_FORMS','STAGE0_LEARNSET',
+                  'STAGE0_STADIUM_PROVENANCE','STAGE0_STADIUM_MECHANICS',
+                  'STAGE0_BATTLE_PHYSICS','STAGE0_EXACT']
+              ]);
+              manifest.recertificationPlan={requiredGates:[...need].sort(),
+                cause:'PARTIAL_OFFICIAL_COVERAGE_AND_UNSPECIFIED_PATCH',
+                action:'QUARANTINE_AND_STAGE0_REVIEW',
+                sourceDiscovery:'PENDING_R27164',
+                frozenDbPromotion:'DENY',purePrimaryUse:'DENY',teacherBackflow:'DENY'};
+              manifest.status='OFFICIAL_FOUR_SOURCE_CLASSIFIED_MANUAL_STAGE0_REQUIRED';
+            }catch(e){manifest.status='BLOCKED_FAIL_CLOSED';manifest.blocker=String(e.message);}
+            fs.writeFileSync(path.join(root,'source_manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+            process.stdout.write(JSON.stringify({status:manifest.status,sourceCount:Object.keys(manifest.sources).length,
+              failures:manifest.failures,canonicalDbWrites:0,formal:'DENY'})+'\n');
+            if(manifest.status==='BLOCKED_FAIL_CLOSED')process.exitCode=1;
+            else console.error('R27163_FOUR_LIVE_SOURCES_CLASSIFIED_REVIEW_REQUIRED');
+          }
+          if(require.main===module){
+            const arg=process.argv[2];
+            if(arg==='--selftest')selftest();
+            else if(arg==='--live')live().catch(e=>{console.error('R27163_UNHANDLED_FAIL_CLOSED',e);process.exitCode=1;});
+            else throw Error('EXPECTED_--selftest_OR_--live');
+          }
+          R27163_JS_END
+          node --check r27163_source_classifier.js
+          mkdir -p r27163_evidence
+          R27163_OUTPUT=r27163_evidence node r27163_source_classifier.js --selftest
+          python3 - <<'R27163_TEST_END'
+          import json
+          from pathlib import Path
+          x=json.loads(Path('r27163_evidence/fixture_results.json').read_text())
+          assert x['schema']=='R27163_DELTA_CONTRACT_TEST_V1'
+          assert x['fixtureCount']==15 and x['sourceDriftFixtures']==4
+          assert x['immutableFixture'] is True
+          assert x['formal']=='DENY' and x['native33']=='0/33' and x['exact34']=='0/34'
+          assert len(x['cases'])==15
+          assert all(item['status'] in ('QUARANTINE_STAGE0_REQUIRED','METADATA_REVIEW_ONLY','BLOCKED_UNVERIFIED_PROVENANCE') for item in x['cases'])
+          print('R27163_FIFTEEN_DELTA_FOUR_DRIFT_FIXTURES_AUDITED')
+          R27163_TEST_END
+
+      - name: Fetch and classify four known official notices
+        shell: bash
+        run: |
+          set -euo pipefail
+          R27163_OUTPUT=r27163_evidence node r27163_source_classifier.js --live > r27163_evidence/live_summary.json
+          python3 - <<'R27163_LIVE_AUDIT_END'
+          import json,hashlib
+          from pathlib import Path
+          root=Path('r27163_evidence')
+          x=json.loads((root/'source_manifest.json').read_text())
+          assert x['schema']=='R27163_REAL_OFFICIAL_CLASSIFIER_V1'
+          assert x['status']=='OFFICIAL_FOUR_SOURCE_CLASSIFIED_MANUAL_STAGE0_REQUIRED'
+          assert x['sourceScope']=='FOUR_KNOWN_URLS_ONLY'
+          assert not x['failures'] and len(x['sources'])==4
+          for key,meta in x['sources'].items():
+              raw=(root/f'source_{key}.html').read_bytes()
+              assert hashlib.sha256(raw).hexdigest()==meta['sha256']
+              assert meta['httpStatus']==200 and raw
+              assert meta['finalUrl'].startswith('https://news.pokemon-home.com/') or meta['finalUrl'].startswith('https://champions-news.pokemon-home.com/')
+          obs=x['observation']
+          assert obs['season']=='M-7' and obs['regulation']=='M-C'
+          assert 'MOVE_PP' in obs['officialEvidence']
+          assert obs['unknownCoverage']['STADIUM_MECHANICS']=='UNKNOWN'
+          assert obs['detectionLimit']=='NEW_SEASON_ANNOUNCEMENT_URL_DISCOVERY_NOT_YET_IMPLEMENTED'
+          assert x['realCanonicalDiff']['status']=='NOT_COMPUTABLE_NO_CANONICAL_DB'
+          assert x['realCanonicalDiff']['automaticChangesApplied']==0
+          assert x['recertificationPlan']['frozenDbPromotion']=='DENY'
+          assert x['recertificationPlan']['purePrimaryUse']=='DENY'
+          assert x['recertificationPlan']['teacherBackflow']=='DENY'
+          assert x['stage1PureInputAllowed'] is False and x['changedCanonicalDb'] is False
+          assert x['native33']=='0/33' and x['exact34']=='0/34' and x['field']=='0/30' and x['formal']=='DENY'
+          print('R27163_LIVE_CLASSIFIER_PROVENANCE_FOUR_SOURCES_PASS')
+          print('R27163_STAGE0_REVALIDATION_ROUTING_PASS')
+          print('R27163_CANONICAL_DB_AND_STAGE1_PURE_NOT_MUTATED')
+          R27163_LIVE_AUDIT_END
+          sha256sum r27163_evidence/fixture_results.json r27163_evidence/source_manifest.json
+          cat r27163_evidence/live_summary.json
+          echo 'R27.163: Official known-source classifier and Stage0 routing passed. No new announcement discovery, complete species list, stadium effects, or Frozen DB reconciliation yet. Native33=0/33, Exact34=0/34, Field=0/30, FORMAL DENY.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve classification evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r27163-official-classification-evidence
+          path: r27163_evidence/
+          retention-days: 7
+          if-no-files-found: warn
