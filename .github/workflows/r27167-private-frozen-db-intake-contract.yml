@@ -1,0 +1,558 @@
+name: R27.167 Public Synthetic Private Frozen DB Intake Boundary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r27167-public-private-intake-contract
+  cancel-in-progress: false
+
+jobs:
+  public-synthetic-intake-contract:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Enforce public manual-only synthetic boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'zeek10191019-stack/true-plan-showdown-verification'
+          test '${{ github.event.repository.private }}' = 'false'
+          echo 'R27.167 public fixtures ONLY. Never supply or upload real Frozen DB or fact evidence.'
+
+      - name: Verify original R27.166 engine and R27.167 secure intake synthetic tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r27166_diff.py <<'R27166_EOF'
+          #!/usr/bin/env python3
+          """R27.166: offline, read-only Frozen Canonical DB vs official evidence candidates.
+
+          NEVER grants Stage0 certification or permits Stage1 PURE ingestion.  Run only with
+          explicitly supplied, locally staged, versioned Frozen DB and evidence bundle.
+          Public GitHub Actions run is deliberately fixture-only; do not upload private DB.
+          """
+          from __future__ import annotations
+          import argparse
+          import copy
+          import hashlib
+          import html
+          import json
+          import re
+          import sys
+          import unittest
+          from pathlib import Path
+          from urllib.parse import urlsplit
+
+          CATS=("species","forms","learnsets","moves","movePP","abilities","items","mega","stadiumCatalog","stadiumEffects","timers","mechanics","regulations","eligibilityRules")
+          GATES={
+          "species":"STAGE0_SPECIES", "forms":"STAGE0_FORMS", "learnsets":"STAGE0_LEARNSETS",
+          "moves":"STAGE0_MOVES", "movePP":"STAGE0_MOVE_PP", "abilities":"STAGE0_ABILITIES",
+          "items":"STAGE0_ITEMS", "mega":"STAGE0_MEGA", "stadiumCatalog":"STAGE0_STADIUM_CATALOG",
+          "stadiumEffects":"STAGE0_STADIUM_MECHANICS", "timers":"STAGE0_TIMERS",
+          "mechanics":"STAGE0_BATTLE_MECHANICS", "regulations":"STAGE0_REGULATIONS",
+          "eligibilityRules":"STAGE0_ELIGIBILITY_RULES"}
+          OFFICIAL_HOSTS={"news.pokemon-home.com","champions-news.pokemon-home.com"}
+          SHA_RE=re.compile(r"[a-f0-9]{64}\Z")
+          MISSING=object()
+
+          class Blocked(Exception):
+              def __init__(self, code):
+                  self.code=code
+                  super().__init__(code)
+
+          def canonical(x):return json.dumps(x,sort_keys=True,ensure_ascii=False,separators=(',',':'),allow_nan=False)
+          def hash_obj(x):return hashlib.sha256(canonical(x).encode('utf-8')).hexdigest()
+          def hash_bytes(x):return hashlib.sha256(x).hexdigest()
+          def valid_version(s):return isinstance(s,str) and bool(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._+\-/]{0,99}',s))
+          def require(ok,code):
+              if not ok:raise Blocked(code)
+          def no_duplicate_json_pairs(pairs):
+              o={}
+              for k,v in pairs:
+                  if k in o:raise Blocked('DUPLICATE_JSON_KEY')
+                  o[k]=v
+              return o
+
+          def strict_load(path):
+              p=Path(path)
+              require(p.is_file(),'INPUT_FILE_MISSING')
+              require(p.stat().st_size<=16_000_000,'INPUT_TOO_LARGE')
+              try:return json.loads(p.read_text(encoding='utf-8'),object_pairs_hook=no_duplicate_json_pairs,
+                                     parse_constant=lambda v:(_ for _ in ()).throw(Blocked('INVALID_JSON_NUMBER')))
+              except Blocked:raise
+              except (OSError,UnicodeDecodeError,json.JSONDecodeError) as e:raise Blocked('INVALID_JSON_FILE') from e
+
+          def valid_snapshot(s):
+              require(isinstance(s,dict) and s.get('schema')=='TRUE_PLAN_FROZEN_CANONICAL_DB_V1','FROZEN_SCHEMA_UNSUPPORTED')
+              require(s.get('scope')=='CHAMPIONS_SINGLES','FROZEN_SCOPE_MISMATCH')
+              require(s.get('frozen') is True,'FROZEN_FLAG_REQUIRED')
+              require(valid_version(s.get('dbVersion')) and valid_version(s.get('engineVersion')),'UNKNOWN_DB_OR_ENGINE_VERSION')
+              require(isinstance(s.get('season'),str) and bool(re.fullmatch(r'M-[0-9]+',s['season'])),'UNKNOWN_SEASON')
+              require(isinstance(s.get('regulation'),str) and bool(re.fullmatch(r'M-[A-Z]',s['regulation'])),'UNKNOWN_REGULATION')
+              complete=s.get('completeCategories')
+              require(isinstance(complete,list) and len(complete)==len(CATS) and all(isinstance(x,str) for x in complete) and set(complete)==set(CATS),'DB_CATEGORIES_INCOMPLETE')
+              data=s.get('data')
+              require(isinstance(data,dict) and set(data)==set(CATS),'DB_DATA_CATEGORIES_MISSING')
+              for c in CATS:
+                  require(isinstance(data[c],dict),'DB_CATEGORY_NOT_MAP:'+c)
+                  require(all(isinstance(k,str) and bool(k) for k in data[c]),'INVALID_DB_KEYS:'+c)
+              require(isinstance(s.get('dataSha256'),str) and bool(SHA_RE.fullmatch(s['dataSha256'])),'DB_SHA_MISSING')
+              require(hash_obj(data)==s['dataSha256'],'DB_SHA_MISMATCH')
+              # A declared complete snapshot is necessary but is not an independently audited
+              # claim that every Pokemon / form / stadium really exists in the DB.
+              return data
+
+          def evidence_for(claim):
+              require(isinstance(claim,dict),'CLAIM_NOT_OBJECT')
+              require(claim.get('category') in CATS,'UNSUPPORTED_CATEGORY')
+              require(isinstance(claim.get('id'),str) and bool(re.fullmatch(r'[\w.:-]{1,128}',claim['id'])),'INVALID_CANONICAL_ID')
+              require('proposedValue' in claim,'PROPOSED_VALUE_MISSING')
+              require('source' in claim and isinstance(claim['source'],dict),'SOURCE_MISSING')
+              proof=claim['source']
+              require(proof.get('productBucket')=='CHAMPIONS_RELEVANT','NON_CHAMPIONS_OR_AMBIGUOUS_SOURCE')
+              try:
+                  u=urlsplit(proof.get('url',''))
+                  valid=(u.scheme=='https' and u.hostname in OFFICIAL_HOSTS and not u.username and not u.password
+                         and u.port is None and u.fragment=='' and not u.query and re.fullmatch(r'/(en|ja)/page/[0-9]{1,6}\.html',u.path))
+              except (TypeError,ValueError):valid=False
+              require(valid,'OFFICIAL_URL_INVALID')
+              raw=proof.get('rawHtml')
+              require(isinstance(raw,str) and 20<=len(raw.encode('utf-8'))<=1_500_000,'RAW_OFFICIAL_EVIDENCE_REQUIRED')
+              require(isinstance(proof.get('sha256'),str) and bool(SHA_RE.fullmatch(proof['sha256'])),'SOURCE_SHA_MISSING')
+              require(hash_bytes(raw.encode('utf-8'))==proof['sha256'],'SOURCE_SHA_MISMATCH')
+              quote=proof.get('evidenceQuote')
+              require(isinstance(quote,str) and len(quote)>=6 and len(quote)<=512,'EVIDENCE_QUOTE_MISSING')
+              require(quote in html.unescape(raw),'QUOTE_NOT_FOUND_IN_SOURCE')
+              # Source text proximity is established, but machine-extracted semantic meaning
+              # is not enough for eligibility or Stage0 certification.
+              try:canonical(claim['proposedValue'])
+              except (TypeError,ValueError):raise Blocked('UNSERIALIZABLE_CLAIM')
+              return {'url':proof['url'],'sha256':proof['sha256'],'evidenceQuote':quote}
+
+          def compare(snapshot,observations):
+              data=valid_snapshot(snapshot)
+              require(isinstance(observations,dict) and observations.get('schema')=='R27166_STAGE0_FACT_CANDIDATES_V1','OBSERVATION_SCHEMA_INVALID')
+              require(observations.get('status')=='QUARANTINED','OBSERVATIONS_MUST_BE_QUARANTINED')
+              require(observations.get('scope')=='CHAMPIONS_SINGLES','OBSERVATION_SCOPE_MISMATCH')
+              require(observations.get('referenceDbVersion')==snapshot['dbVersion'],'OBSERVATION_DB_VERSION_MISMATCH')
+              require(observations.get('referenceSeason')==snapshot['season'],'OBSERVATION_SEASON_MISMATCH')
+              claims=observations.get('claims')
+              require(isinstance(claims,list) and 0<len(claims)<=2000,'NO_REVIEWABLE_STRUCTURED_CLAIMS')
+              groups={}
+              for item in claims:
+                  proof=evidence_for(item)
+                  k=(item['category'],item['id'])
+                  groups.setdefault(k,[]).append((item['proposedValue'],proof))
+              diffs=[]; conflicts=[]
+              for (cat,key),entries in sorted(groups.items()):
+                  byval={canonical(value) for value,_ in entries}
+                  if len(byval)>1:
+                      conflicts.append({'category':cat,'id':key,'sources':[p for _,p in entries]})
+                      continue
+                  proposed=entries[0][0]
+                  old=data[cat].get(key,MISSING)
+                  status='NEW_ENTITY_CANDIDATE' if old is MISSING else ('NO_CHANGE' if canonical(old)==canonical(proposed) else 'VALUE_CHANGED_CANDIDATE')
+                  diffs.append({'category':cat,'id':key,'change':status,
+                      'oldExists':old is not MISSING,'oldValue':None if old is MISSING else old,
+                      'proposedValue':proposed,'evidence':[p for _,p in entries],
+                      'requiredGate':GATES[cat],'stage0Certified':False})
+              unchanged=sum(x['change']=='NO_CHANGE' for x in diffs)
+              changed=sum(x['change']=='VALUE_CHANGED_CANDIDATE' for x in diffs)
+              new=sum(x['change']=='NEW_ENTITY_CANDIDATE' for x in diffs)
+              result={'schema':'R27166_FROZEN_CANDIDATE_DELTA_V1','status':'BLOCKED_CONFLICT_REQUIRES_STAGE0' if conflicts else 'CANDIDATE_DELTA_REVIEW_REQUIRED',
+                  'dbVersion':snapshot['dbVersion'],'engineVersion':snapshot['engineVersion'],
+                  'season':snapshot['season'],'regulation':snapshot['regulation'],'dbSha256':snapshot['dataSha256'],
+                  'counts':{'unchanged':unchanged,'changed':changed,'newEntityCandidates':new,'conflicts':len(conflicts)},
+                  'diffs':diffs,'conflicts':conflicts,
+                  'notSupported':['AUTOMATIC_DELETIONS','FULL_DB_COMPLETENESS_CERTIFICATION','STAGE0_CERTIFICATION','OFFICIAL_GAME_PARITY'],
+                  'stage0RequiredGates':sorted(set(x['requiredGate'] for x in diffs if x['change']!='NO_CHANGE')|{GATES[x['category']] for x in conflicts}),
+                  'snapshotClaimedCompleteNotIndependentlyVerified':True,
+                  'canonicalDbWrites':0,'engineWrites':0,'stage1PureInputAllowed':False,
+                  'teacherBackflowAllowed':False,'automaticPromotions':0,
+                  'native33':'0/33','exact34':'0/34','field':'0/30','formal':'DENY'}
+              return result
+
+          def safe_execute(db_file=None,official_file=None):
+              if not db_file or not official_file:
+                  return {'schema':'R27166_GATE_STATUS_V1','status':'BLOCKED_MISSING_FROZEN_CANONICAL_DB_AND_OR_OFFICIAL_FACTS',
+                          'realCanonicalDiff':'NOT_COMPUTED','reason':'R27165_DISCOVERY_MANIFEST_HAS_CATEGORIES_BUT_NOT_VERIFIED_STRUCTURED_FACTS',
+                          'canonicalDbWrites':0,'stage1PureInputAllowed':False,'native33':'0/33','exact34':'0/34','field':'0/30','formal':'DENY'}
+              try:
+                  a=strict_load(db_file);b=strict_load(official_file)
+                  return compare(a,b)
+              except Blocked as e:
+                  return {'schema':'R27166_GATE_STATUS_V1','status':'BLOCKED_FAIL_CLOSED','blocker':e.code,
+                          'realCanonicalDiff':'NOT_COMPUTED','canonicalDbWrites':0,'stage1PureInputAllowed':False,
+                          'native33':'0/33','exact34':'0/34','field':'0/30','formal':'DENY'}
+
+          def fixture():
+              db={c:{} for c in CATS}
+              db['movePP']={'Wish':8,'StrengthSap':8}
+              db['mega']={'MegaLucarioZ':True}
+              db['stadiumEffects']={'stadium1':'UNKNOWN'}
+              snap={'schema':'TRUE_PLAN_FROZEN_CANONICAL_DB_V1','scope':'CHAMPIONS_SINGLES','frozen':True,
+                'dbVersion':'FROZEN_M7_TEST_ONLY','engineVersion':'R27165_TEST_ONLY','season':'M-7','regulation':'M-C',
+                'completeCategories':list(CATS),'data':db,'dataSha256':hash_obj(db)}
+              raw='<html><p>Wish: 12 → 7. Mega Lucario Z is permitted.</p></html>'
+              src={'url':'https://news.pokemon-home.com/en/page/817.html','rawHtml':raw,
+                   'sha256':hash_bytes(raw.encode('utf-8')),'evidenceQuote':'Wish: 12 → 7',
+                   'productBucket':'CHAMPIONS_RELEVANT'}
+              facts={'schema':'R27166_STAGE0_FACT_CANDIDATES_V1','status':'QUARANTINED',
+                  'scope':'CHAMPIONS_SINGLES','referenceDbVersion':snap['dbVersion'],'referenceSeason':'M-7',
+                  'claims':[{'category':'movePP','id':'Wish','proposedValue':7,'source':src}]}
+              return snap,facts
+
+          class Cases(unittest.TestCase):
+              def setUp(self):self.s,self.f=fixture()
+              def fail_code(self,code):
+                  with self.assertRaises(Blocked) as x:compare(self.s,self.f)
+                  self.assertEqual(x.exception.code,code)
+              def test_01_basic_change(self):self.assertEqual(compare(self.s,self.f)['counts']['changed'],1)
+              def test_02_stage0(self):self.assertEqual(compare(self.s,self.f)['stage0RequiredGates'],['STAGE0_MOVE_PP'])
+              def test_03_no_db_write(self):
+                  old=hash_obj(self.s);compare(self.s,self.f);self.assertEqual(old,hash_obj(self.s))
+              def test_04_no_fact_write(self):
+                  old=hash_obj(self.f);compare(self.s,self.f);self.assertEqual(old,hash_obj(self.f))
+              def test_05_no_pure(self):self.assertFalse(compare(self.s,self.f)['stage1PureInputAllowed'])
+              def test_06_formal_deny(self):self.assertEqual(compare(self.s,self.f)['formal'],'DENY')
+              def test_07_new(self):
+                  self.f['claims'][0]['id']='NewMove';self.assertEqual(compare(self.s,self.f)['counts']['newEntityCandidates'],1)
+              def test_08_unchanged(self):
+                  self.f['claims'][0]['proposedValue']=8;self.assertEqual(compare(self.s,self.f)['counts']['unchanged'],1)
+              def test_09_duplicate_same(self):
+                  self.f['claims'].append(copy.deepcopy(self.f['claims'][0]));self.assertEqual(len(compare(self.s,self.f)['diffs']),1)
+              def test_10_conflict(self):
+                  a=copy.deepcopy(self.f['claims'][0]);a['proposedValue']=6;self.f['claims'].append(a)
+                  self.assertEqual(compare(self.s,self.f)['status'],'BLOCKED_CONFLICT_REQUIRES_STAGE0')
+              def test_11_missing_db(self):self.assertIn('BLOCKED',safe_execute()['status'])
+              def test_12_unknown_categories(self):self.s['completeCategories'].pop();self.fail_code('DB_CATEGORIES_INCOMPLETE')
+              def test_13_unknown_data_category(self):self.s['data'].pop('mega');self.fail_code('DB_DATA_CATEGORIES_MISSING')
+              def test_14_bad_sha(self):self.s['dataSha256']='0'*64;self.fail_code('DB_SHA_MISMATCH')
+              def test_15_wrong_scope(self):self.s['scope']='CHAMPIONS_DOUBLES';self.fail_code('FROZEN_SCOPE_MISMATCH')
+              def test_16_not_frozen(self):self.s['frozen']=False;self.fail_code('FROZEN_FLAG_REQUIRED')
+              def test_17_db_version_missing(self):self.s['dbVersion']='';self.fail_code('UNKNOWN_DB_OR_ENGINE_VERSION')
+              def test_18_engine_missing(self):self.s['engineVersion']='';self.fail_code('UNKNOWN_DB_OR_ENGINE_VERSION')
+              def test_19_db_reference_mismatch(self):self.f['referenceDbVersion']='OTHER';self.fail_code('OBSERVATION_DB_VERSION_MISMATCH')
+              def test_20_season_mismatch(self):self.f['referenceSeason']='M-8';self.fail_code('OBSERVATION_SEASON_MISMATCH')
+              def test_21_not_quarantined(self):self.f['status']='CERTIFIED';self.fail_code('OBSERVATIONS_MUST_BE_QUARANTINED')
+              def test_22_missing_claims(self):self.f['claims']=[];self.fail_code('NO_REVIEWABLE_STRUCTURED_CLAIMS')
+              def test_23_url_external(self):self.f['claims'][0]['source']['url']='https://bad.example/en/page/817.html';self.fail_code('OFFICIAL_URL_INVALID')
+              def test_24_url_http(self):self.f['claims'][0]['source']['url']='http://news.pokemon-home.com/en/page/817.html';self.fail_code('OFFICIAL_URL_INVALID')
+              def test_25_url_query(self):self.f['claims'][0]['source']['url']+='?x=1';self.fail_code('OFFICIAL_URL_INVALID')
+              def test_26_bad_source_sha(self):self.f['claims'][0]['source']['sha256']='0'*64;self.fail_code('SOURCE_SHA_MISMATCH')
+              def test_27_missing_raw_html(self):self.f['claims'][0]['source']['rawHtml']='';self.fail_code('RAW_OFFICIAL_EVIDENCE_REQUIRED')
+              def test_28_quote_absent(self):self.f['claims'][0]['source']['evidenceQuote']='missing';self.fail_code('QUOTE_NOT_FOUND_IN_SOURCE')
+              def test_29_category_unknown(self):self.f['claims'][0]['category']='newField';self.fail_code('UNSUPPORTED_CATEGORY')
+              def test_30_invalid_id(self):self.f['claims'][0]['id']='../bad';self.fail_code('INVALID_CANONICAL_ID')
+              def test_31_unknown_regulation(self):self.s['regulation']='M-foo';self.fail_code('UNKNOWN_REGULATION')
+              def test_32_bad_data_type(self):self.s['data']['moves']=[];self.fail_code('DB_CATEGORY_NOT_MAP:moves')
+              def test_33_source_missing(self):self.f['claims'][0].pop('source');self.fail_code('SOURCE_MISSING')
+              def test_34_fact_schema(self):self.f['schema']='R27165';self.fail_code('OBSERVATION_SCHEMA_INVALID')
+              def test_35_no_deletions(self):self.assertIn('AUTOMATIC_DELETIONS',compare(self.s,self.f)['notSupported'])
+              def test_36_conflict_gated(self):
+                  a=copy.deepcopy(self.f['claims'][0]);a['proposedValue']=12;self.f['claims'].append(a)
+                  self.assertIn('STAGE0_MOVE_PP',compare(self.s,self.f)['stage0RequiredGates'])
+              def test_37_deterministic(self):self.assertEqual(hash_obj(compare(self.s,self.f)),hash_obj(compare(self.s,self.f)))
+              def test_38_stage0_not_certified(self):self.assertFalse(compare(self.s,self.f)['diffs'][0]['stage0Certified'])
+              def test_39_no_automatic_promotion(self):self.assertEqual(compare(self.s,self.f)['automaticPromotions'],0)
+              def test_41_other_product_rejected(self):
+                  self.f['claims'][0]['source']['productBucket']='OTHER_PRODUCT';self.fail_code('NON_CHAMPIONS_OR_AMBIGUOUS_SOURCE')
+              def test_42_ambiguous_rejected(self):
+                  self.f['claims'][0]['source']['productBucket']='AMBIGUOUS_MANUAL_REVIEW';self.fail_code('NON_CHAMPIONS_OR_AMBIGUOUS_SOURCE')
+              def test_40_duplicate_json(self):
+                  with self.assertRaises(Blocked) as ctx:json.loads('{"a":1,"a":2}',object_pairs_hook=no_duplicate_json_pairs)
+                  self.assertEqual(ctx.exception.code,'DUPLICATE_JSON_KEY')
+
+
+          def cli():
+              a=argparse.ArgumentParser();a.add_argument('command',choices=['selftest','gate','compare']);a.add_argument('--db');a.add_argument('--facts');v=a.parse_args()
+              if v.command=='selftest':
+                  test=unittest.TextTestRunner(verbosity=1).run(unittest.defaultTestLoader.loadTestsFromTestCase(Cases))
+                  if not test.wasSuccessful():raise SystemExit(1)
+                  print(f'R27166_OFFLINE_{test.testsRun}_PASS')
+                  return
+              if v.command=='gate':
+                  result=safe_execute();print('R27166_GATE_STATUS='+canonical(result))
+                  require(result['status'].startswith('BLOCKED'),'MISSING_DB_NOT_BLOCKED')
+                  return
+              result=safe_execute(v.db,v.facts)
+              print('R27166_COMPARISON_RESULT='+canonical(result))
+              print('R27166_RESULT_SHA256='+hash_obj(result))
+              if result['status'].startswith('BLOCKED'):raise SystemExit(2)
+
+          if __name__=='__main__':cli()
+          R27166_EOF
+          cat > r27167_private_bridge.py <<'R27167_EOF'
+          #!/usr/bin/env python3
+          """R27.167: local private-only intake contract for R27.166 candidate comparison.
+
+          Do NOT deploy or execute compare against real DB in public GitHub Actions.
+          The user supplies independent out-of-band SHA-256 pins for both inputs.
+          Output containing DB values is written ONLY to a private local folder; console is redacted.
+          No network, cloud, GitHub write, cache, or artifact operations.
+          """
+          from __future__ import annotations
+          import argparse
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import stat
+          import sys
+          import tempfile
+          import unittest
+
+          import r27166_diff as diff
+
+          ENGINE_HASH='9fc9a415a111d1e5b635c653fac0fa0dc7cf0634a3341ae1c0ecde96731328af'
+          PIN_SCHEMA='R27167_OUT_OF_BAND_PRIVATE_PINS_V1'
+          SHA_PATTERN=re.compile(r'^[a-f0-9]{64}$')
+          MAX_BYTES=16_000_000
+
+          class IntakeBlocked(Exception):
+              def __init__(self, reason):
+                  self.reason=reason
+                  super().__init__(reason)
+
+          def enforce(cond, code):
+              if not cond:raise IntakeBlocked(code)
+
+          def hash_bytes(data):return hashlib.sha256(data).hexdigest()
+
+          def is_repo_path(p):
+              # Refuse private DB paths under any Git checkout.
+              return any((anc/'.git').exists() or (anc/'.github/workflows').exists() for anc in (p,*p.parents))
+
+          def private_root_checked(root):
+              root=Path(root)
+              enforce(root.is_absolute(),'PRIVATE_ROOT_MUST_BE_ABSOLUTE')
+              enforce(root.exists() and root.is_dir() and not root.is_symlink(),'PRIVATE_ROOT_INVALID')
+              resolved=root.resolve()
+              enforce(not is_repo_path(resolved),'PRIVATE_ROOT_INSIDE_GIT_REPOSITORY')
+              return resolved
+
+          def private_file(root,raw,name):
+              enforce(isinstance(raw,(str,Path)),'INVALID_PATH:'+name)
+              p=Path(raw)
+              enforce(p.is_absolute(),'INPUT_PATH_MUST_BE_ABSOLUTE:'+name)
+              enforce(not p.is_symlink(),'SYMLINK_DENIED:'+name)
+              enforce(p.exists() and p.is_file(),'FILE_MISSING:'+name)
+              p=p.resolve(strict=True)
+              enforce(p.is_relative_to(root),'INPUT_OUTSIDE_PRIVATE_ROOT:'+name)
+              enforce(not is_repo_path(p),'GIT_TRACKED_INPUT_DENIED:'+name)
+              mode=p.stat().st_mode
+              enforce(stat.S_ISREG(mode),'NON_REGULAR_INPUT:'+name)
+              size=p.stat().st_size
+              enforce(0<size<=MAX_BYTES,'INPUT_SIZE_INVALID:'+name)
+              return p
+
+          def load_json(data):
+              try:
+                  return json.loads(data,object_pairs_hook=diff.no_duplicate_json_pairs,
+                      parse_constant=lambda _x:(_ for _ in ()).throw(IntakeBlocked('NONFINITE_JSON_NUMBER')))
+              except diff.Blocked as e:raise IntakeBlocked(e.code) from e
+              except (json.JSONDecodeError,UnicodeDecodeError,TypeError):raise IntakeBlocked('INVALID_JSON')
+
+          def read_pins(path):
+              obj=load_json(path.read_bytes().decode('utf-8'))
+              enforce(isinstance(obj,dict) and obj.get('schema')==PIN_SCHEMA,'PIN_SCHEMA_INVALID')
+              required={'schema','frozenSha256','factsSha256','engineSha256','dbVersion','engineVersion','season','regulation'}
+              enforce(set(obj)==required,'PIN_FIELDS_MISMATCH')
+              for key in ('frozenSha256','factsSha256','engineSha256'):
+                  enforce(isinstance(obj[key],str) and bool(SHA_PATTERN.fullmatch(obj[key])),'PIN_HASH_INVALID:'+key)
+              enforce(obj['engineSha256']==ENGINE_HASH,'ENGINE_CODE_PIN_MISMATCH')
+              for key in ('dbVersion','engineVersion','season','regulation'):
+                  enforce(diff.valid_version(obj[key]),'PIN_VERSION_INVALID:'+key)
+              return obj
+
+          def check_input_sha(p,expected,label):
+              data=p.read_bytes()
+              enforce(hash_bytes(data)==expected,'INPUT_SHA256_MISMATCH:'+label)
+              return load_json(data.decode('utf-8'))
+
+          def preflight_status():
+              return {'schema':'R27167_PRIVATE_INTAKE_V1','status':'BLOCKED_REAL_INPUTS_NOT_PROVIDED',
+                      'realDbCompared':False,'stage0Certified':False,'canonicalDbWrites':0,
+                      'stage1PureInputAllowed':False,'native33':'0/33','exact34':'0/34','field':'0/30','formal':'DENY'}
+
+          def compare_private(root,db_file,facts_file,pins_file,output_file=None):
+              base=private_root_checked(root)
+              db=private_file(base,db_file,'frozen');facts=private_file(base,facts_file,'facts');pins=private_file(base,pins_file,'pins')
+              enforce(len({db,facts,pins})==3,'INPUT_PATH_COLLISION')
+              pin=read_pins(pins)
+              local_engine=Path(__file__).with_name('r27166_diff.py')
+              enforce(local_engine.is_file() and hash_bytes(local_engine.read_bytes())==ENGINE_HASH,'ENGINE_BINARY_HASH_MISMATCH')
+              snapshot=check_input_sha(db,pin['frozenSha256'],'frozen')
+              observations=check_input_sha(facts,pin['factsSha256'],'facts')
+              enforce(isinstance(snapshot,dict),'FROZEN_NOT_OBJECT')
+              for field,check in [('dbVersion','dbVersion'),('engineVersion','engineVersion'),('season','season'),('regulation','regulation')]:
+                  enforce(snapshot.get(field)==pin[check],'PIN_METADATA_MISMATCH:'+field)
+              try:
+                  result=diff.compare(snapshot,observations)
+              except diff.Blocked as e:
+                  raise IntakeBlocked('DIFF_BLOCKED:'+e.code) from e
+              enforce(result['stage1PureInputAllowed'] is False and result['canonicalDbWrites']==0 and result['formal']=='DENY',
+                      'R27166_SAFETY_INVARIANTS_FAILED')
+              output= {'schema':'R27167_PRIVATE_COMPARISON_REPORT_V1',
+                       'status':'PRIVATE_REVIEW_ONLY_NOT_STAGE0_CERTIFIED',
+                       'provenance':'LOCAL_FILES_WITH_OUT_OF_BAND_SHA256_PINS_NOT_OFFICIAL_GAME_PARITY',
+                       'sourceInputsVerified':True,'snapshotCompletenessIndependentlyAudited':False,
+                       'officialEvidenceIndependentlyCertified':False,
+                       'stage0Certified':False,'native33':'0/33','exact34':'0/34','field':'0/30','formal':'DENY',
+                       'candidateComparison':result}
+              if output_file is not None:
+                  out=Path(output_file)
+                  enforce(out.is_absolute() and not out.is_symlink(),'OUTPUT_PATH_INVALID')
+                  enforce(out.parent.exists() and out.parent.is_dir(),'OUTPUT_DIR_MISSING')
+                  target=out.resolve()
+                  enforce(target.is_relative_to(base) and not is_repo_path(target),'OUTPUT_OUTSIDE_PRIVATE_ROOT')
+                  enforce(target not in {db,facts,pins},'INPUT_OUTPUT_COLLISION')
+                  enforce(not target.exists(),'OUTPUT_ALREADY_EXISTS')
+                  payload=(json.dumps(output,ensure_ascii=False,sort_keys=True,indent=2,allow_nan=False)+'\n').encode('utf-8')
+                  descriptor=os.open(str(target),os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+                  try:
+                      with os.fdopen(descriptor,'wb') as handle:
+                          handle.write(payload)
+                          handle.flush();os.fsync(handle.fileno())
+                  except BaseException:
+                      try: target.unlink(missing_ok=True)
+                      finally:raise
+              # Console deliberately excludes the values, DB hash, pins, URLs and excerpts.
+              return {'schema':'R27167_REDACTED_STATUS_V1','status':output['status'],
+                     'reportWritten':output_file is not None,'candidateDeltaCount':len(result['diffs']),
+                     'conflictCount':len(result['conflicts']),'stage0Certified':False,
+                     'canonicalDbWrites':0,'stage1PureInputAllowed':False,
+                     'native33':'0/33','exact34':'0/34','field':'0/30','formal':'DENY'}
+
+          def private_fixture(root):
+              s,f=diff.fixture()
+              files=[]
+              for filename,obj in [('frozen.json',s),('facts.json',f)]:
+                  p=root/filename
+                  p.write_text(json.dumps(obj,ensure_ascii=False,indent=2),encoding='utf-8')
+                  files.append(p)
+              pin={'schema':PIN_SCHEMA,'frozenSha256':hash_bytes(files[0].read_bytes()),
+                  'factsSha256':hash_bytes(files[1].read_bytes()),'engineSha256':ENGINE_HASH,
+                  'dbVersion':s['dbVersion'],'engineVersion':s['engineVersion'],'season':s['season'],
+                  'regulation':s['regulation']}
+              p=root/'pins.json';p.write_text(json.dumps(pin,indent=2),encoding='utf-8')
+              return files[0],files[1],p
+
+          class ContractTests(unittest.TestCase):
+              def setUp(self):
+                  self.t=tempfile.TemporaryDirectory();self.addCleanup(self.t.cleanup)
+                  self.root=Path(self.t.name);self.db,self.fact,self.pin=private_fixture(self.root)
+              def invoke(self):return compare_private(self.root,self.db,self.fact,self.pin)
+              def failure(self,code,db=None,fact=None,pin=None,root=None,out=None):
+                  with self.assertRaises(IntakeBlocked) as x:
+                      compare_private(root or self.root,db or self.db,fact or self.fact,pin or self.pin,out)
+                  self.assertEqual(x.exception.reason,code)
+              def alter_pin(self,field,val):
+                  o=json.loads(self.pin.read_text());o[field]=val;self.pin.write_text(json.dumps(o))
+              def test_01_fixture(self):self.assertEqual(self.invoke()['candidateDeltaCount'],1)
+              def test_02_blocked_preflight(self):self.assertEqual(preflight_status()['status'],'BLOCKED_REAL_INPUTS_NOT_PROVIDED')
+              def test_03_no_stage0(self):self.assertFalse(self.invoke()['stage0Certified'])
+              def test_04_no_pure(self):self.assertFalse(self.invoke()['stage1PureInputAllowed'])
+              def test_05_no_db_mutation(self):
+                  h=hash_bytes(self.db.read_bytes());self.invoke();self.assertEqual(hash_bytes(self.db.read_bytes()),h)
+              def test_06_no_fact_mutation(self):
+                  h=hash_bytes(self.fact.read_bytes());self.invoke();self.assertEqual(hash_bytes(self.fact.read_bytes()),h)
+              def test_07_db_sha_tamper(self):self.db.write_text(self.db.read_text()+' ');self.failure('INPUT_SHA256_MISMATCH:frozen')
+              def test_08_fact_sha_tamper(self):self.fact.write_text(self.fact.read_text()+' ');self.failure('INPUT_SHA256_MISMATCH:facts')
+              def test_09_engine_pin_wrong(self):self.alter_pin('engineSha256','a'*64);self.failure('ENGINE_CODE_PIN_MISMATCH')
+              def test_10_invalid_pin_sha(self):self.alter_pin('factsSha256','bad');self.failure('PIN_HASH_INVALID:factsSha256')
+              def test_11_pin_schema(self):self.alter_pin('schema','bad');self.failure('PIN_SCHEMA_INVALID')
+              def test_12_pin_version(self):self.alter_pin('dbVersion','DIFFERENT');self.failure('PIN_METADATA_MISMATCH:dbVersion')
+              def test_13_pin_engine_version(self):self.alter_pin('engineVersion','DIFFERENT');self.failure('PIN_METADATA_MISMATCH:engineVersion')
+              def test_14_pin_season(self):self.alter_pin('season','M-8');self.failure('PIN_METADATA_MISMATCH:season')
+              def test_15_pin_regulation(self):self.alter_pin('regulation','M-D');self.failure('PIN_METADATA_MISMATCH:regulation')
+              def test_16_missing_file(self):self.db.unlink();self.failure('FILE_MISSING:frozen')
+              def test_17_relative_path(self):self.failure('INPUT_PATH_MUST_BE_ABSOLUTE:frozen',db='frozen.json')
+              def test_18_outside_root(self):
+                  with tempfile.TemporaryDirectory() as t:
+                      p=Path(t)/'frozen.json';p.write_bytes(self.db.read_bytes());self.failure('INPUT_OUTSIDE_PRIVATE_ROOT:frozen',db=p)
+              def test_19_symlink(self):
+                  x=self.root/'sym.json';x.symlink_to(self.db);self.failure('SYMLINK_DENIED:frozen',db=x)
+              def test_20_duplicate_pin(self):self.pin.write_text('{"schema":1,"schema":2}');self.failure('DUPLICATE_JSON_KEY')
+              def test_21_duplicate_db(self):
+                  self.db.write_text('{"a":1,"a":2}');o=json.loads(self.pin.read_text());o['frozenSha256']=hash_bytes(self.db.read_bytes());self.pin.write_text(json.dumps(o));self.failure('DUPLICATE_JSON_KEY')
+              def test_22_ambiguous_source(self):
+                  o=json.loads(self.fact.read_text());o['claims'][0]['source']['productBucket']='OTHER_PRODUCT';self.fact.write_text(json.dumps(o));pin=json.loads(self.pin.read_text());pin['factsSha256']=hash_bytes(self.fact.read_bytes());self.pin.write_text(json.dumps(pin));self.failure('DIFF_BLOCKED:NON_CHAMPIONS_OR_AMBIGUOUS_SOURCE')
+              def test_23_existing_output_protected(self):
+                  p=self.root/'report.json';p.write_text('KEEP');self.failure('OUTPUT_ALREADY_EXISTS',out=p);self.assertEqual(p.read_text(),'KEEP')
+              def test_24_private_output(self):
+                  p=self.root/'report.json';s=compare_private(self.root,self.db,self.fact,self.pin,p)
+                  self.assertEqual(s['reportWritten'],True);self.assertEqual(stat.S_IMODE(p.stat().st_mode),0o600)
+                  self.assertFalse(json.loads(p.read_text())['stage0Certified'])
+              def test_25_output_outside(self):
+                  with tempfile.TemporaryDirectory() as t:self.failure('OUTPUT_OUTSIDE_PRIVATE_ROOT',out=Path(t)/'report.json')
+              def test_26_git_guard(self):
+                  (self.root/'.git').mkdir();self.failure('PRIVATE_ROOT_INSIDE_GIT_REPOSITORY')
+              def test_27_nonfinite(self):
+                  self.pin.write_text(self.pin.read_text()[:-1]+',"x":NaN}')
+                  self.failure('NONFINITE_JSON_NUMBER')
+              def test_28_conflicting_evidence(self):
+                  o=json.loads(self.fact.read_text());extra=json.loads(json.dumps(o['claims'][0]));extra['proposedValue']=6;o['claims'].append(extra)
+                  self.fact.write_text(json.dumps(o));p=json.loads(self.pin.read_text());p['factsSha256']=hash_bytes(self.fact.read_bytes());self.pin.write_text(json.dumps(p))
+                  self.assertEqual(self.invoke()['conflictCount'],1)
+              def test_29_diff_hash_tamper(self):
+                  o=json.loads(self.db.read_text());o['dataSha256']='0'*64;self.db.write_text(json.dumps(o));p=json.loads(self.pin.read_text());p['frozenSha256']=hash_bytes(self.db.read_bytes());self.pin.write_text(json.dumps(p));self.failure('DIFF_BLOCKED:DB_SHA_MISMATCH')
+              def test_30_inputs_collision(self):self.failure('INPUT_PATH_COLLISION',fact=self.db)
+              def test_31_invalid_output_parent(self):self.failure('OUTPUT_DIR_MISSING',out=self.root/'newdir'/'report.json')
+              def test_32_missing_engine_file(self):
+                  self.assertEqual(hash_bytes(Path(__file__).with_name('r27166_diff.py').read_bytes()),ENGINE_HASH)
+
+          def main():
+              a=argparse.ArgumentParser()
+              a.add_argument('command',choices=['selftest','preflight','compare'])
+              a.add_argument('--private-root');a.add_argument('--frozen');a.add_argument('--facts');a.add_argument('--pins');a.add_argument('--private-output')
+              args=a.parse_args()
+              if args.command=='selftest':
+                  outcome=unittest.TextTestRunner(verbosity=1).run(unittest.defaultTestLoader.loadTestsFromTestCase(ContractTests))
+                  if not outcome.wasSuccessful():sys.exit(1)
+                  print('R27167_PRIVATE_INTAKE_OFFLINE_'+str(outcome.testsRun)+'_PASS');return
+              if args.command=='preflight':print(json.dumps(preflight_status(),sort_keys=True));return
+              try:
+                  if not all([args.private_root,args.frozen,args.facts,args.pins]):
+                      raise IntakeBlocked('MISSING_REQUIRED_LOCAL_PRIVATE_INPUTS')
+                  status=compare_private(args.private_root,args.frozen,args.facts,args.pins,args.private_output)
+                  print(json.dumps(status,sort_keys=True))
+              except IntakeBlocked as e:
+                  print(json.dumps({'status':'BLOCKED_FAIL_CLOSED','reason':e.reason,'realDbCompared':False,
+                      'canonicalDbWrites':0,'native33':'0/33','exact34':'0/34','field':'0/30','formal':'DENY'},sort_keys=True))
+                  sys.exit(2)
+
+          if __name__=='__main__':main()
+          R27167_EOF
+          printf '%s  %s\n' '9fc9a415a111d1e5b635c653fac0fa0dc7cf0634a3341ae1c0ecde96731328af' r27166_diff.py '65482798b4294996069be35d86c4663be3959df686b6c399a1072a63c999f34b' r27167_private_bridge.py | sha256sum -c -
+          python3 -m py_compile r27166_diff.py r27167_private_bridge.py
+          python3 r27166_diff.py selftest
+          python3 r27167_private_bridge.py selftest
+          python3 r27167_private_bridge.py preflight | tee preflight_public_redacted.json
+          python3 - <<'R27167_GUARD_EOF'
+          import json
+          from pathlib import Path
+          obj=json.loads(Path('preflight_public_redacted.json').read_text())
+          assert obj['status']=='BLOCKED_REAL_INPUTS_NOT_PROVIDED'
+          assert obj['realDbCompared'] is False
+          assert obj['canonicalDbWrites']==0
+          assert obj['stage1PureInputAllowed'] is False
+          assert obj['native33']=='0/33' and obj['exact34']=='0/34'
+          assert obj['field']=='0/30' and obj['formal']=='DENY'
+          print('R27167_PUBLIC_NO_REAL_DB_FAIL_CLOSED_PASS')
+          R27167_GUARD_EOF
+          echo 'R27.167: R27.166 42/42 + R27.167 32/32 synthetic PASS. Real private inputs NOT staged.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Private DB bytes: NONE. Official proof bytes: SYNTHETIC ONLY. Public test cannot certify real DB.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve formal safety gates
+        if: always()
+        shell: bash
+        run: |
+          echo 'Native33=0/33, Exact34=0/34, Field=0/30, FORMAL=DENY.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No checkout, paid runner, artifact upload, cache, outbound paid API, real DB or private output.' >> "$GITHUB_STEP_SUMMARY"
