@@ -1,0 +1,503 @@
+name: R27.165 Official Relevance and Coverage Audit (Manual Public Read-Only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r27165-official-relevance-public-audit
+  cancel-in-progress: false
+
+jobs:
+  official-public-audit:
+    if: ${{ github.event.repository.private == false && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Enforce public-only manual execution and no paid storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = 'zeek10191019-stack/true-plan-showdown-verification'
+          test "${{ github.event.repository.private }}" = 'false'
+          python3 --version
+          echo 'Manual public ubuntu-24.04 runner. Read-only; no checkout, artifact or cache.'
+
+      - name: R27.165 offline contracts and live official relevance audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r27165_discover.py <<'R27165_SCRIPT_EOF'
+          #!/usr/bin/env python3
+          """R27.165 bounded official new-notice audit; public sources only, no DB mutation.
+          
+          Compatibility: R27.164 was a one-file workflow with a bundled script. This
+          version is standalone and does not require checkout or network packages.
+          Every discovered item is quarantined; a product classification is NOT Stage0 certification.
+          """
+          from __future__ import annotations
+          
+          import argparse
+          import hashlib
+          from html import unescape
+          from html.parser import HTMLParser
+          import json
+          import os
+          import re
+          import shutil
+          import subprocess
+          import sys
+          import time
+          import unittest
+          from urllib.parse import urljoin, urlsplit, urlunsplit, parse_qs
+          from urllib.request import Request, HTTPRedirectHandler, build_opener
+          from datetime import datetime, timezone
+          
+          HOSTS = frozenset(('champions-news.pokemon-home.com', 'news.pokemon-home.com'))
+          INDEX_ROOTS = tuple(f'https://{host}/{language}/list' for host in sorted(HOSTS) for language in ('en', 'ja'))
+          ANCHORS = (
+              'https://news.pokemon-home.com/en/page/845.html',
+              'https://news.pokemon-home.com/en/page/816.html',
+              'https://news.pokemon-home.com/en/page/817.html',
+              'https://news.pokemon-home.com/ja/page/844.html',
+          )
+          MAX_INDEX = 24
+          MAX_ARTICLES = 84
+          MAX_BYTES = 1_500_000
+          MAX_RENDER = 4
+          MAX_SECONDS = 240
+          PAGE_TIMEOUT = 10
+          BASELINE_SEASON = 7
+          BASELINE_REGULATION = 'C'
+          CHAMPIONS_RE = re.compile(r'Pok[eé]mon\s+Champions|ポケモンチャンピオンズ|Pok[eé]mon\s+CHAMPIONS', re.I)
+          HOME_RE = re.compile(r'Pok[eé]mon\s+HOME|ポケモンHOME', re.I)
+          
+          
+          def digest(raw: bytes) -> str:
+              return hashlib.sha256(raw).hexdigest()
+          
+          
+          def clean_url(raw: str, base: str | None = None) -> str | None:
+              """Enforce HTTPS + exact official host + language/path + safe pagination.
+          
+              Never use untrusted HTML's URL directly in an HTTP request or Chrome invocation.
+              """
+              try:
+                  url = urlsplit(urljoin(base, raw) if base else raw)
+                  if url.scheme != 'https' or url.hostname not in HOSTS or url.username or url.password or url.port is not None or url.fragment:
+                      return None
+                  if re.fullmatch(r'/(en|ja)/page/[0-9]{1,6}\.html', url.path) and not url.query:
+                      return urlunsplit(('https', url.hostname, url.path, '', ''))
+                  if re.fullmatch(r'/(en|ja)/list/?', url.path):
+                      query = parse_qs(url.query, keep_blank_values=True)
+                      if set(query) - {'page'}:
+                          return None
+                      if 'page' in query and (len(query['page']) != 1 or not re.fullmatch('[0-9]{1,3}', query['page'][0])):
+                          return None
+                      return urlunsplit(('https', url.hostname, url.path.rstrip('/'), 'page=' + query['page'][0] if 'page' in query else '', ''))
+                  return None
+              except (ValueError, TypeError):
+                  return None
+          
+          
+          def is_article(url: str) -> bool:
+              try:
+                  return bool(re.fullmatch(r'/(en|ja)/page/[0-9]{1,6}\.html', urlsplit(url).path))
+              except ValueError:
+                  return False
+          
+          
+          class Parser(HTMLParser):
+              """Extract separately title, document text, main/article text and hrefs."""
+              def __init__(self):
+                  super().__init__(convert_charrefs=True)
+                  self.links: list[str] = []
+                  self.text: list[str] = []
+                  self.scoped_text: list[str] = []
+                  self.title_text: list[str] = []
+                  self.meta_titles: list[str] = []
+                  self.h1: list[str] = []
+                  self.hidden: list[str] = []
+                  self.scopes: list[str] = []
+                  self.in_title = False
+                  self.in_h1 = False
+          
+              def handle_starttag(self, tag, attrs):
+                  attrs = dict(attrs)
+                  if tag in ('a', 'link') and attrs.get('href'):
+                      self.links.append(attrs['href'])
+                  if tag == 'meta' and (attrs.get('property') in ('og:title', 'og:description') or attrs.get('name') == 'description'):
+                      if attrs.get('content'):
+                          self.meta_titles.append(attrs['content'])
+                  if tag in ('script', 'style', 'noscript', 'svg'):
+                      self.hidden.append(tag)
+                  if tag in ('main', 'article'):
+                      self.scopes.append(tag)
+                  if tag == 'title':
+                      self.in_title = True
+                  if tag == 'h1':
+                      self.in_h1 = True
+          
+              def handle_endtag(self, tag):
+                  if tag in ('script', 'style', 'noscript', 'svg') and tag in self.hidden:
+                      self.hidden.remove(tag)
+                  if tag in ('main', 'article') and tag in self.scopes:
+                      self.scopes.remove(tag)
+                  if tag == 'title':
+                      self.in_title = False
+                  if tag == 'h1':
+                      self.in_h1 = False
+          
+              def handle_data(self, data):
+                  if not self.hidden:
+                      self.text.append(data)
+                      if self.scopes:
+                          self.scoped_text.append(data)
+                      if self.in_title:
+                          self.title_text.append(data)
+                      if self.in_h1:
+                          self.h1.append(data)
+          
+          
+          def collapse(x: str) -> str:
+              return re.sub(r'\s+', ' ', unescape(x)).strip()
+          
+          
+          def extract(raw: bytes, origin: str) -> dict:
+              markup = raw.decode('utf-8', 'replace')
+              p = Parser()
+              p.feed(markup)
+              hydrated = unescape(markup.replace('\\u002F', '/').replace('\\u002f', '/').replace('\\/', '/'))
+              pattern = (r'(?:https://(?:champions-news|news)\.pokemon-home\.com)?'
+                         r'/(?:en|ja)/(?:page/[0-9]{1,6}\.html|list(?:\?page=[0-9]{1,3})?)')
+              matched = re.findall(pattern, hydrated)
+              links = sorted({x for y in p.links + matched if (x := clean_url(unescape(y), origin))})
+              return {
+                  'links': links,
+                  'title': collapse(' '.join(p.h1 or p.title_text or p.meta_titles))[:250],
+                  'articleText': collapse(' '.join(p.scoped_text)),
+                  'pageText': collapse(' '.join(p.text)),
+                  'hasArticleScope': bool(p.scoped_text),
+              }
+          
+          
+          def product_bucket(url: str, page: dict) -> tuple[str, list[str]]:
+              """Tri-state, conservative: do not infer Champions from generic season/mega words.
+          
+              Pokemon HOME list/season articles are rejected for Stage0 but recorded in audit.
+              Ambiguous pages are review-only; they are never silently marked as irrelevant.
+              """
+              title = page['title']
+              body = page['articleText'] or page['pageText']
+              host = urlsplit(url).hostname
+              title_champions = bool(CHAMPIONS_RE.search(title))
+              title_home = bool(HOME_RE.search(title))
+              body_champions = bool(CHAMPIONS_RE.search(body))
+              body_home = bool(HOME_RE.search(body))
+              signals = [x for cond,x in ((title_champions,'TITLE_CHAMPIONS'),(title_home,'TITLE_HOME'),
+                                               (body_champions,'BODY_CHAMPIONS'),(body_home,'BODY_HOME'),
+                                               (host == 'champions-news.pokemon-home.com','CHAMPIONS_HOST')) if cond]
+              if host == 'champions-news.pokemon-home.com':
+                  if title_home and not title_champions:
+                      return 'AMBIGUOUS_MANUAL_REVIEW', signals
+                  return 'CHAMPIONS_RELEVANT', signals
+              if title_home and not title_champions:
+                  return ('AMBIGUOUS_MANUAL_REVIEW' if body_champions else 'OTHER_PRODUCT'), signals
+              if title_champions:
+                  return 'CHAMPIONS_RELEVANT', signals
+              if body_champions and not body_home:
+                  return 'CHAMPIONS_RELEVANT', signals
+              if body_home and not body_champions:
+                  return 'OTHER_PRODUCT', signals
+              return 'AMBIGUOUS_MANUAL_REVIEW', signals
+          
+          
+          def categories_for(page: dict) -> dict:
+              # Prefer article section over site-wide navigation to avoid cross-article matches.
+              s = page['title'] + ' ' + (page['articleText'] or page['pageText'])
+              pats = {
+                  'SEASON': r'Ranked\s+Battles\s+Season|ランクバトル.{0,20}シーズン|シーズン\s*M[-‐‑–]?\d+',
+                  'REGULATION': r'Regulation\s+Set|レギュレーション',
+                  'SPECIES_FORMS': r'Eligible\s+Pok[eé]mon|Pok[eé]mon\s+Roster|参加できるポケモン',
+                  'MEGA': r'\bMega\s+[A-Za-z]|メガシンカ|メガ[ァ-ヺ]{2,}',
+                  'STADIUM': r'\bStadium\b|スタジアム',
+                  'MECHANICS': r'Maintenance|\bPP\b|[Bb]alance\s+adjustment|メンテナンス|更新データ|不具合',
+              }
+              cats = sorted(k for k,pat in pats.items() if re.search(pat,s,re.I))
+              seasons = sorted({int(x) for x in re.findall(r'(?:Season|シーズン)\s*M[-‐‑–]?(\d+)',s,re.I)})
+              regulations = sorted({x.upper() for x in re.findall(r'(?:Regulation(?:\s+Set)?|レギュレーション)\s*M[-‐‑–]?([A-Z])',s,re.I)})
+              if any(x > BASELINE_SEASON for x in seasons):
+                  cats.append('NEW_SEASON_CANDIDATE')
+              if any(x > BASELINE_REGULATION for x in regulations):
+                  cats.append('NEW_REGULATION_CANDIDATE')
+              gates = {
+                  'SEASON':'STAGE0_SEASON','NEW_SEASON_CANDIDATE':'STAGE0_SEASON',
+                  'REGULATION':'STAGE0_REGULATION','NEW_REGULATION_CANDIDATE':'STAGE0_REGULATION',
+                  'SPECIES_FORMS':'STAGE0_SPECIES_FORMS','MEGA':'STAGE0_MEGA',
+                  'STADIUM':'STAGE0_STADIUM_CATALOG_MECHANICS',
+                  'MECHANICS':'STAGE0_MOVE_PP_BATTLE_MECHANICS',
+              }
+              return {'categories':cats, 'seasonMentions':seasons,'regulationMentions':regulations,
+                      'requiredGates':sorted({gates[k] for k in cats})}
+          
+          
+          class StrictRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, target):
+                  if clean_url(target) is None:
+                      raise ValueError('DISALLOWED_REDIRECT')
+                  return super().redirect_request(req, fp, code, msg, headers, target)
+          
+          
+          def fetch_official(url: str) -> tuple[bytes,dict]:
+              if clean_url(url) != url:
+                  raise ValueError('DISALLOWED_FETCH')
+              request = Request(url,headers={'User-Agent':'TruePlan-R27165-PublicAudit/1.0','Accept':'text/html'})
+              with build_opener(StrictRedirect()).open(request,timeout=PAGE_TIMEOUT) as resp:
+                  if resp.status != 200 or clean_url(resp.geturl()) is None:
+                      raise ValueError('INVALID_FINAL_URL_OR_STATUS')
+                  if 'text/html' not in resp.headers.get('Content-Type','').lower():
+                      raise ValueError('NON_HTML_OFFICIAL_DOCUMENT')
+                  raw = resp.read(MAX_BYTES+1)
+                  if not (100 <= len(raw) <= MAX_BYTES):
+                      raise ValueError('DOCUMENT_TOO_SHORT_OR_LARGE')
+                  return raw,{'url':url,'finalUrl':resp.geturl(),'sha256':digest(raw),'bytes':len(raw),
+                              'httpStatus':200,'evidenceClass':'VERIFIED_HTTPS_RAW_HTML'}
+          
+          
+          def render_for_links(url: str) -> tuple[bytes,dict]:
+              """Browser DOM is ONLY a URL discovery hint; it is NEVER source verification."""
+              if clean_url(url) != url:
+                  raise ValueError('DISALLOWED_BROWSER_URL')
+              chrome=next((p for b in ('google-chrome','chromium','chromium-browser') if (p:=shutil.which(b))),None)
+              if not chrome:
+                  raise RuntimeError('CHROME_UNAVAILABLE')
+              proc=subprocess.run([chrome,'--headless','--no-sandbox','--disable-gpu',
+                  '--disable-extensions','--no-first-run','--incognito','--disable-background-networking',
+                  '--virtual-time-budget=5000','--dump-dom',url],capture_output=True,timeout=22)
+              if proc.returncode or not (100 <= len(proc.stdout) <= MAX_BYTES):
+                  raise RuntimeError('RENDER_FAILED_OR_OVERSIZED')
+              return proc.stdout,{'sha256':digest(proc.stdout),'evidenceClass':'UNVERIFIED_BROWSER_DOM_DISCOVERY_ONLY'}
+          
+          
+          def discover(fetch=fetch_official, render=render_for_links, *, max_index=MAX_INDEX,
+                       max_articles=MAX_ARTICLES, max_seconds=MAX_SECONDS) -> dict:
+              queue=list(INDEX_ROOTS)
+              seen=set()
+              indexes={}
+              failures=[]
+              discover_links={}
+              fallback_proofs=[]
+              page_trunc=False
+              start=time.monotonic()
+              while queue and len(indexes)<max_index:
+                  if time.monotonic()-start > max_seconds-60:
+                      page_trunc=True;break
+                  url=queue.pop(0)
+                  if url in seen:continue
+                  seen.add(url)
+                  try:
+                      raw,proof=fetch(url)
+                      page=extract(raw,url)
+                      hrefs=page['links']
+                      if not any(is_article(v) for v in hrefs) and len(fallback_proofs)<MAX_RENDER:
+                          try:
+                              dom,fp=render(url)
+                              hints=extract(dom,url)['links']
+                              # Reject any unverified render as provenance, even if it shows many links.
+                              hrefs=sorted(set(hrefs)|set(hints))
+                              fallback_proofs.append({'url':url,'sha256':fp['sha256'],'hintCount':len(hints),
+                                                      'provenance':'UNVERIFIED_BROWSER_DOM_ONLY'})
+                          except Exception as e:
+                              fallback_proofs.append({'url':url,'error':type(e).__name__+':'+str(e)[:100]})
+                      article_links=[v for v in hrefs if is_article(v)]
+                      indexes[url]={**proof,'articleLinkCount':len(article_links)}
+                      for other in sorted(article_links):
+                          discover_links[other]={'discoveredFrom':url}
+                      for other in sorted(v for v in hrefs if not is_article(v)):
+                          if other not in seen and other not in queue:
+                              queue.append(other)
+                  except Exception as e:
+                      failures.append({'url':url,'error':type(e).__name__+':'+str(e)[:100]})
+              if queue or len(indexes)>=max_index and queue:
+                  page_trunc=True
+              unknown=[u for u in discover_links if u not in ANCHORS]
+              # Crucial: prioritize Champions host; do NOT preferentially inspect high-numbered HOME pages.
+              # Inspect entire bounded set where feasible; any truncated unknowns are explicit.
+              unknown=sorted(unknown,key=lambda u:(urlsplit(u).hostname!='champions-news.pokemon-home.com',u))
+              inspect=unknown[:max(0,max_articles-len(ANCHORS))] + list(ANCHORS)
+              article_cap_hit=len(unknown)>max(0,max_articles-len(ANCHORS))
+              observations=[];article_failures=[]
+              for url in inspect:
+                  if time.monotonic()-start>max_seconds:
+                      article_cap_hit=True;break
+                  try:
+                      raw,proof=fetch(url)
+                      page=extract(raw,url)
+                      bucket,signals=product_bucket(url,page)
+                      semantic=categories_for(page) if bucket=='CHAMPIONS_RELEVANT' else {'categories':[], 'requiredGates':[], 'seasonMentions':[], 'regulationMentions':[]}
+                      observations.append({'url':url,'title':page['title'],'productBucket':bucket,
+                              'productSignals':signals,'rawProof':proof,'baselineAnchor':url in ANCHORS,
+                              'semantic':semantic,'stage0Certified':False,'reviewOnly':True})
+                  except Exception as e:
+                      article_failures.append({'url':url,'error':type(e).__name__+':'+str(e)[:100]})
+              buckets={k:sum(x['productBucket']==k for x in observations if not x['baselineAnchor'])
+                       for k in ('CHAMPIONS_RELEVANT','OTHER_PRODUCT','AMBIGUOUS_MANUAL_REVIEW')}
+              roots_with_links=sum(indexes.get(u,{}).get('articleLinkCount',0)>0 for u in INDEX_ROOTS)
+              proven_anchors={x['url'] for x in observations if x['baselineAnchor'] and x['rawProof']['evidenceClass']=='VERIFIED_HTTPS_RAW_HTML'}
+              gaps=[]
+              if roots_with_links<1:gaps.append('NO_INDEX_WITH_LINKS')
+              if len(proven_anchors)!=len(ANCHORS):gaps.append('BASELINE_ANCHOR_INCOMPLETE')
+              if page_trunc:gaps.append('PAGINATION_INCOMPLETE')
+              if article_cap_hit:gaps.append('ARTICLE_INSPECTION_INCOMPLETE')
+              if failures:gaps.append('INDEX_ERRORS')
+              if article_failures:gaps.append('ARTICLE_ERRORS')
+              if fallback_proofs:gaps.append('BROWSER_HINT_PROVENANCE_UNVERIFIED')
+              # Never report absolute announcement completeness: source may withhold additional pages.
+              critical=roots_with_links<1 or len(proven_anchors)!=len(ANCHORS) or bool(article_failures)
+              status='BLOCKED_FAIL_CLOSED' if critical else ('BOUNDED_SCAN_WITH_GAPS' if gaps else 'BOUNDED_SCAN_COMPLETE_QUARANTINED')
+              stage0=[{'url':x['url'],'title':x['title'],'gates':x['semantic']['requiredGates'],'categories':x['semantic']['categories']}
+                      for x in observations if x['productBucket']=='CHAMPIONS_RELEVANT' and not x['baselineAnchor'] and x['semantic']['requiredGates']]
+              manual=[{'url':x['url'],'title':x['title']} for x in observations if x['productBucket']=='AMBIGUOUS_MANUAL_REVIEW' and not x['baselineAnchor']]
+              return {
+                  'schema':'R27165_OFFICIAL_RELEVANCE_COVERAGE_V1',
+                  'observedAtUTC':datetime.now(timezone.utc).isoformat(),
+                  'status':status,'coverage':'BOUNDED_OBSERVATION_NOT_COMPLETE_FROZEN_DB',
+                  'sources':indexes,'indexErrors':failures,'untrackedUrlCount':len(unknown),
+                  'notKnownAnchorDoesNotImplyNewAnnouncement':True,
+                  'inspectedArticleCount':len(observations),'articleErrors':article_failures,
+                  'productBuckets':buckets,'stage0CandidateQueue':stage0,'manualAmbiguousReview':manual,
+                  'articleObservations':observations,'browserLinkHints':fallback_proofs,'gaps':gaps,
+                  'indexLimit':max_index,'articleLimit':max_articles,'paginationCapped':page_trunc,'articleCapped':article_cap_hit,
+                  'newSeasonCertified':False,'newRegulationCertified':False,
+                  'speciesCoverage':'NOT_PROVEN','megaCoverage':'NOT_PROVEN','stadiumCoverage':'NOT_PROVEN',
+                  'frozenDbDiff':'NOT_COMPUTABLE_NO_FROZEN_DB_INPUT','officialGameParity':False,
+                  'canonicalDbWrites':0,'engineWrites':0,'stage1PureInputAllowed':False,
+                  'teacherBackflowAllowed':False,'native33':'0/33','exact34':'0/34','field':'0/30','formal':'DENY',
+              }
+          
+          
+          def selftest():
+              class Contract(unittest.TestCase):
+                  def page(self,title,body='',host='news.pokemon-home.com'):
+                      page=extract(('<main><h1>'+title+'</h1><p>'+body+'</p></main>').encode(),f'https://{host}/en/page/800.html')
+                      return page
+                  def test_host(self):self.assertIsNone(clean_url('https://news.pokemon-home.com.evil.org/en/list'))
+                  def test_http(self):self.assertIsNone(clean_url('http://news.pokemon-home.com/en/list'))
+                  def test_user(self):self.assertIsNone(clean_url('https://x@news.pokemon-home.com/en/list'))
+                  def test_port(self):self.assertIsNone(clean_url('https://news.pokemon-home.com:8080/en/list'))
+                  def test_query(self):self.assertIsNone(clean_url('https://news.pokemon-home.com/en/list?token=x'))
+                  def test_paging(self):self.assertIsNotNone(clean_url('https://news.pokemon-home.com/en/list?page=2'))
+                  def test_dup_page(self):self.assertIsNone(clean_url('https://news.pokemon-home.com/en/list?page=1&page=2'))
+                  def test_article_query(self):self.assertIsNone(clean_url(ANCHORS[0]+'?x=1'))
+                  def test_article_links(self):self.assertIn('https://news.pokemon-home.com/en/page/800.html',extract(b'<a href="/en/page/800.html">Link</a>',INDEX_ROOTS[2])['links'])
+                  def test_hydration_link(self):self.assertTrue(any(is_article(x) for x in extract(b'"\\u002Fen\\u002Fpage\\u002F805.html"',INDEX_ROOTS[2])['links']))
+                  def test_hidden_script(self):self.assertNotIn('M-100',extract(b'<script>M-100</script><main>M-7</main>',INDEX_ROOTS[2])['pageText'])
+                  def test_scoped_over_navigation(self):
+                      p=extract(b'<nav>Pokemon HOME Season 18</nav><main>Pokemon Champions Season M-7</main>',ANCHORS[0])
+                      self.assertEqual(product_bucket(ANCHORS[0],p)[0],'CHAMPIONS_RELEVANT')
+                  def test_home_title_excluded(self):self.assertEqual(product_bucket(ANCHORS[0],self.page('Season 18 Underway!', 'Pokemon HOME Season 18 updates'))[0],'OTHER_PRODUCT')
+                  def test_home_android_excluded(self):self.assertEqual(product_bucket(ANCHORS[0],self.page('Pokemon HOME Ends Support for Android Devices'))[0],'OTHER_PRODUCT')
+                  def test_champions_english(self):self.assertEqual(product_bucket(ANCHORS[0],self.page('Pokémon Champions: Ranked Battles Season M-8'))[0],'CHAMPIONS_RELEVANT')
+                  def test_champions_japanese(self):self.assertEqual(product_bucket(ANCHORS[0],self.page('ポケモンチャンピオンズ更新データ'))[0],'CHAMPIONS_RELEVANT')
+                  def test_champions_host(self):
+                      url='https://champions-news.pokemon-home.com/en/page/855.html'
+                      self.assertEqual(product_bucket(url,self.page('Maintenance Completion Notice',host='champions-news.pokemon-home.com'))[0],'CHAMPIONS_RELEVANT')
+                  def test_ambiguous(self):self.assertEqual(product_bucket(ANCHORS[0],self.page('New battle event announced'))[0],'AMBIGUOUS_MANUAL_REVIEW')
+                  def test_home_with_champions_reference(self):self.assertEqual(product_bucket(ANCHORS[0],self.page('Pokemon HOME update', 'Pokemon Champions compatibility'))[0],'AMBIGUOUS_MANUAL_REVIEW')
+                  def test_mechanics_only_champions(self):
+                      page=self.page('Maintenance Completion Notice', 'PP changes')
+                      self.assertIn('MECHANICS',categories_for(page)['categories'])
+                  def test_new_season(self):self.assertIn('NEW_SEASON_CANDIDATE',categories_for(self.page('Pokémon Champions', 'Ranked Battles Season M-8'))['categories'])
+                  def test_old_season(self):self.assertNotIn('NEW_SEASON_CANDIDATE',categories_for(self.page('Pokémon Champions', 'Ranked Battles Season M-7'))['categories'])
+                  def test_new_reg(self):self.assertIn('NEW_REGULATION_CANDIDATE',categories_for(self.page('Pokémon Champions','Regulation Set M-D'))['categories'])
+                  def test_stadium_gate(self):self.assertIn('STAGE0_STADIUM_CATALOG_MECHANICS',categories_for(self.page('Pokémon Champions', 'New Stadium'))['requiredGates'])
+                  def test_cross_host_identity(self):
+                      x='https://champions-news.pokemon-home.com/en/page/845.html'
+                      self.assertNotIn(x, ANCHORS)
+                  def test_fallback_only_as_hint(self):
+                      def f(url):
+                          html=b'<main>Open</main>' if '/list' in url else '<main>Pokémon Champions Regulation Set M-D</main>'.encode()
+                          return html,{'sha256':digest(html),'evidenceClass':'VERIFIED_HTTPS_RAW_HTML'}
+                      def b(url):return b'<a href="/en/page/899.html">notice</a>',{'sha256':'a'*64,'evidenceClass':'UNVERIFIED_BROWSER_DOM_DISCOVERY_ONLY'}
+                      v=discover(fetch=f,render=b,max_index=5,max_articles=12)
+                      self.assertIn('BROWSER_HINT_PROVENANCE_UNVERIFIED',v['gaps'])
+                      self.assertEqual(v['canonicalDbWrites'],0)
+                      self.assertEqual(v['formal'],'DENY')
+                  def test_integration_relevance_and_roster(self):
+                      def f(url):
+                          if '/list' in url:
+                              h=b'<a href="/en/page/900.html">X</a><a href="/en/page/901.html">Y</a>'
+                          elif url.endswith('900.html'):
+                              h='<main><h1>Pokémon HOME Season 18 Underway!</h1><p>New Mega roster</p></main>'.encode()
+                          elif url.endswith('901.html'):
+                              h='<main><h1>Pokémon Champions Season M-8</h1><p>Regulation Set M-D, Stadium</p></main>'.encode()
+                          else:
+                              h='<main><h1>Pokémon Champions current rules</h1></main>'.encode()
+                          return h,{'sha256':digest(h),'evidenceClass':'VERIFIED_HTTPS_RAW_HTML'}
+                      v=discover(fetch=f,render=lambda url:self.fail('no render expected'))
+                      self.assertEqual(v['status'],'BOUNDED_SCAN_COMPLETE_QUARANTINED')
+                      self.assertEqual(v['productBuckets']['OTHER_PRODUCT'],1)
+                      self.assertEqual(v['productBuckets']['AMBIGUOUS_MANUAL_REVIEW'],1)
+                      self.assertEqual(v['productBuckets']['CHAMPIONS_RELEVANT'],2)
+                      self.assertEqual(len(v['stage0CandidateQueue']),2)
+                      self.assertTrue(all(x['url'].endswith('901.html') for x in v['stage0CandidateQueue']))
+                      self.assertFalse(v['stage1PureInputAllowed'])
+                  def test_integration_article_cap(self):
+                      def f(url):
+                          if '/list' in url:
+                              h=b'<a href="/en/page/900.html">1</a><a href="/en/page/901.html">2</a><a href="/en/page/902.html">3</a>'
+                          else:h='<main><h1>Pokémon Champions Season M-8</h1></main>'.encode()
+                          return h,{'sha256':digest(h),'evidenceClass':'VERIFIED_HTTPS_RAW_HTML'}
+                      v=discover(fetch=f,render=lambda url:self.fail('render unexpected'),max_articles=5)
+                      self.assertTrue(v['articleCapped'])
+                      self.assertIn('ARTICLE_INSPECTION_INCOMPLETE',v['gaps'])
+                  def test_integration_failclosed(self):
+                      def f(url):raise RuntimeError('simulated outage')
+                      v=discover(fetch=f,render=lambda url:self.fail('render unexpected'),max_index=4)
+                      self.assertEqual(v['status'],'BLOCKED_FAIL_CLOSED')
+                      self.assertEqual(v['native33'],'0/33')
+                      self.assertEqual(v['exact34'],'0/34')
+              result=unittest.TextTestRunner(verbosity=1).run(unittest.defaultTestLoader.loadTestsFromTestCase(Contract))
+              if not result.wasSuccessful():sys.exit(1)
+              print(f'R27165_OFFLINE_{result.testsRun}_PASS')
+          
+          
+          def main():
+              parser=argparse.ArgumentParser()
+              parser.add_argument('action',choices=['selftest','live'])
+              args=parser.parse_args()
+              if args.action=='selftest':
+                  selftest();return
+              m=discover()
+              encoded=json.dumps(m,ensure_ascii=False,sort_keys=True)
+              print('R27165_MANIFEST_JSON='+encoded)
+              print('R27165_MANIFEST_SHA256='+digest((encoded+'\n').encode()))
+              print('R27165_SUMMARY='+json.dumps({k:m[k] for k in ('status','untrackedUrlCount','inspectedArticleCount','productBuckets','gaps','canonicalDbWrites','native33','exact34','field','formal')},ensure_ascii=False))
+              summary=os.environ.get('GITHUB_STEP_SUMMARY')
+              if summary:
+                  with open(summary,'a',encoding='utf-8') as f:
+                      f.write('## R27.165 Public Official Relevance and Coverage Audit\n')
+                      f.write(f"- Status: {m['status']}\n- Product buckets: {m['productBuckets']}\n")
+                      f.write(f"- Stage0 candidate review: {len(m['stage0CandidateQueue'])}, ambiguous manual review: {len(m['manualAmbiguousReview'])}\n")
+                      f.write(f"- Coverage gaps: {m['gaps']} (cannot claim global completeness)\n")
+                      f.write('- Frozen Canonical DB and Engine writes: 0; Stage1 PURE: DENY; FORMAL: DENY.\n')
+                      f.write('- Native33=0/33, Exact34=0/34, Field=0/30. No artifact/cache storage.\n')
+              if m['status']=='BLOCKED_FAIL_CLOSED':sys.exit('R27165_FAIL_CLOSED')
+          
+          if __name__=='__main__':main()
+          R27165_SCRIPT_EOF
+          echo '17d983188cac57bde7b654b94ffb429135eca18de5d99426b9f09e552affd5cf  r27165_discover.py' | sha256sum -c -
+          python3 -m py_compile r27165_discover.py
+          python3 r27165_discover.py selftest
+          python3 r27165_discover.py live
+
+      - name: Preserve Stage Gate denial on success or failure
+        if: always()
+        shell: bash
+        run: |
+          echo 'R27.165 is a bounded announcement audit, not complete official or in-game certification.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Frozen Canonical DB: NO WRITES; Stage1 PURE: DENY; Teacher backflow: DENY.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Native33=0/33; Exact34=0/34; Field Validation=0/30; FORMAL=DENY.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'No upload-artifact or cache, no external paid services.'
