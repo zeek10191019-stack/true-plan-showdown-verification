@@ -1,0 +1,88 @@
+name: R27.171 Pinned Champions M-C Validator Public Smoke
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r27171-pinned-validator-public-smoke
+  cancel-in-progress: true
+jobs:
+  pinned-champions-validation:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Install exact Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Acquire exact pinned open-source commit
+        shell: bash
+        env:
+          PIN: 812501ede865eea397cd6e9a6f040d73ff57cc84
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          mkdir -p "$RUNNER_TEMP/r27171_showdown"
+          git -C "$RUNNER_TEMP/r27171_showdown" init -q
+          git -C "$RUNNER_TEMP/r27171_showdown" fetch --depth=1 https://github.com/smogon/pokemon-showdown.git "$PIN"
+          git -C "$RUNNER_TEMP/r27171_showdown" -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/r27171_showdown" rev-parse HEAD)" = "$PIN"
+          printf 'R27171_SOURCE_COMMIT_PIN_PASS\n'
+      - name: Build actual pinned Showdown from clean checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/r27171_showdown"
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/dex.js
+          test -f dist/sim/team-validator.js
+          printf 'R27171_PINNED_NPM_BUILD_PASS\n'
+      - name: Verify private-free smoke script and pinned M-C format
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/r27171_showdown/r27171_public_probe.js" <<'R27171_PUBLIC_JS'
+          'use strict';
+          const assert = require('node:assert/strict');
+          const fs=require('node:fs');
+          const cp=require('node:child_process');
+          const PIN='812501ede865eea397cd6e9a6f040d73ff57cc84';
+          assert.equal(cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),PIN);
+          for(const f of ['dist/sim/dex.js','dist/sim/team-validator.js','dist/data/mods/champions/learnsets.js'])assert.ok(fs.existsSync(f),`missing ${f}`);
+          const {Dex}=require('./dist/sim/dex.js');
+          const {TeamValidator}=require('./dist/sim/team-validator.js');
+          const dex=Dex.mod('champions');
+          const fmt=dex.formats.get('gen9championsbssregmc');
+          assert.equal(fmt.exists,true);
+          assert.equal(fmt.mod,'champions');
+          assert.notEqual(fmt.gameType,'doubles');
+          assert.equal(fmt.id,'gen9championsbssregmc');
+          const validator=TeamValidator.get('gen9championsbssregmc');
+          assert.equal(typeof validator.validateSet,'function');
+          assert.equal(typeof validator.getValidationSpecies,'function');
+          for(const id of ['politoed','meowsticfmega','archaludon','garchompmegaz']) {
+            const spec=dex.species.get(id);assert.ok(spec.exists,`${id} missing`);
+          }
+          const set={species:'Pikachu',ability:'Static',item:'',moves:['Thunderbolt'],nature:'Adamant',evs:{hp:1,atk:32,def:1,spa:0,spd:0,spe:32},ivs:{hp:31,atk:31,def:31,spa:31,spd:31,spe:31},level:50};
+          assert.ok(Array.isArray(validator.validateSet(set,{})||[]));
+          console.log('R27171_PINNED_FORMAT_LOAD_AND_VALIDATOR_API_PASS');
+          console.log('R27171_PINNED_COMMIT='+PIN);
+          console.log('R27171_NO_PRIVATE_DB_IN_PUBLIC_WORKFLOW');
+          console.log('R27171_NATIVE33=0/33 EXACT34=0/34 FIELD=0/30 FORMAL=DENY');
+          R27171_PUBLIC_JS
+          echo 'e55f614f97a9ba7c56ecfd2c991dcd1cd4bb44fdd455d6202d1fcee052300a27  '"$RUNNER_TEMP/r27171_showdown/r27171_public_probe.js" | sha256sum -c -
+          cd "$RUNNER_TEMP/r27171_showdown"
+          node r27171_public_probe.js
+      - name: Verify no official gate promotion
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'R27171_PUBLIC_STATUS=PINNED_SOURCE_SMOKE_ONLY\n'
+          printf 'R27171_PRIVATE_375=NOT_EXECUTED_IN_PUBLIC_WORKFLOW\n'
+          printf 'R27171_M6_RUNTIME_CERTIFICATION=NOT_PROVEN\n'
+          printf 'R27171_CURRENT_M7_STAGE0=NOT_CERTIFIED\n'
+          printf 'R27171_NATIVE33=0/33 EXACT34=0/34 FIELD=0/30 FORMAL=DENY\n'
