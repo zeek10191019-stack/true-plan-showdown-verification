@@ -1,0 +1,129 @@
+name: R27.172 Pinned Public Showdown Runtime Portable Export
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r27172-public-pinned-runtime-export
+  cancel-in-progress: true
+jobs:
+  portable-public-runtime:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Install exact Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Acquire exact public commit from Showdown
+        shell: bash
+        env:
+          PIN: 812501ede865eea397cd6e9a6f040d73ff57cc84
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          mkdir -p "$RUNNER_TEMP/showdown"
+          git -C "$RUNNER_TEMP/showdown" init -q
+          git -C "$RUNNER_TEMP/showdown" fetch --depth=1 https://github.com/smogon/pokemon-showdown.git "$PIN"
+          git -C "$RUNNER_TEMP/showdown" -c advice.detachedHead=false checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/showdown" rev-parse HEAD)" = "$PIN"
+          printf 'R27172_EXACT_SOURCE_PIN_PASS\n'
+      - name: Compile exact public runtime and run M-C probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/showdown"
+          npm ci --no-audit --no-fund
+          npm run build
+          cat > r27172_public_probe.js <<'R27172_PROBE_JS'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const fs=require('node:fs');
+          const cp=require('node:child_process');
+          const PIN='812501ede865eea397cd6e9a6f040d73ff57cc84';
+          assert.equal(cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),PIN);
+          for(const f of ['dist/sim/dex.js','dist/sim/team-validator.js','dist/data/mods/champions/learnsets.js']) assert.ok(fs.existsSync(f),`MISSING_PUBLIC_BUILD_${f}`);
+          const {Dex}=require('./dist/sim/dex.js');
+          const {TeamValidator}=require('./dist/sim/team-validator.js');
+          const dex=Dex.mod('champions');
+          const fmt=dex.formats.get('gen9championsbssregmc');
+          assert.equal(fmt.exists,true);assert.equal(fmt.id,'gen9championsbssregmc');
+          assert.equal(fmt.mod,'champions');assert.notEqual(fmt.gameType,'doubles');
+          const validator=TeamValidator.get(fmt.id);
+          assert.equal(typeof validator.validateSet,'function');
+          assert.equal(typeof validator.getValidationSpecies,'function');
+          const expected={
+           politoed:{pound:false},
+           archaludon:{metalburst:false,mirrorcoat:false},
+           meowsticf:{extrasensory:true,futuresight:true,imprison:false,meanlook:false,mistyterrain:false,quickguard:false,wish:false},
+           garchomp:{slash:true}
+          };
+          let obs=0;
+          for(const [id,moves] of Object.entries(expected)) {
+           const pokemon=dex.species.get(id);assert.equal(pokemon.exists,true,`MISSING_${id}`);
+           const learnset=dex.species.getLearnsetData(pokemon.id).learnset||{};
+           for(const [move,should] of Object.entries(moves)) {
+            assert.equal(Object.hasOwn(learnset,move),should,`DIRECT_SOURCE_MEMBERSHIP_${id}_${move}`);obs++;
+           }
+          }
+          for(const id of ['meowsticfmega','garchompmegaz'])assert.equal(dex.species.get(id).exists,true);
+          const set={species:'Pikachu',ability:'Static',item:'',moves:['Thunderbolt'],nature:'Adamant',evs:{hp:1,atk:32,def:1,spa:0,spd:0,spe:32},ivs:{hp:31,atk:31,def:31,spa:31,spd:31,spe:31},level:50};
+          assert.ok(Array.isArray(validator.validateSet(set,{})||[]));
+          console.log('R27172_PUBLIC_PIN_AND_RUNTIME_SMOKE_PASS');
+          console.log('R27172_PUBLIC_M6_MC_DIRECT_LEARNSET_PROBES='+obs);
+          console.log('R27172_PRIVATE_375_NOT_UPLOADED');
+          console.log('R27172_NATIVE33=0/33 EXACT34=0/34 FIELD=0/30 FORMAL=DENY');
+          R27172_PROBE_JS
+          echo 'dc5bcbbb5cf1b71a86a1b6ecd42397d558ceac88123d72db87fe10d45b232788  r27172_public_probe.js' | sha256sum -c -
+          node r27172_public_probe.js
+          printf 'R27172_PINNED_NPM_BUILD_AND_PROBE_PASS\n'
+      - name: Assemble public-only portable runtime and verify clean extraction
+        shell: bash
+        env:
+          PIN: 812501ede865eea397cd6e9a6f040d73ff57cc84
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/r27172_release"
+          cd "$RUNNER_TEMP"
+          # --dereference resolves npm .bin symlinks into regular files. No private repo checkout.
+          tar --dereference --sort=name --owner=0 --group=0 --numeric-owner \
+            -czf r27172_release/r27172_pinned_public_showdown_runtime.tar.gz \
+            showdown/.git showdown/dist showdown/node_modules showdown/package.json showdown/package-lock.json \
+            showdown/config/formats.ts showdown/data/mods/champions
+          python3 - <<'PY_RECEIPT'
+          import hashlib,json,os,pathlib
+          d=pathlib.Path(os.environ['RUNNER_TEMP'])/'r27172_release'
+          f=d/'r27172_pinned_public_showdown_runtime.tar.gz'
+          receipt={'schema':'R27172_PINNED_PUBLIC_SHOWDOWN_RUNTIME_RECEIPT_V1','sourceCommit':os.environ['PIN'],'source':'smogon/pokemon-showdown','distribution':'OPEN_SOURCE_ONLY','tarSha256':hashlib.sha256(f.read_bytes()).hexdigest(),'privateDataIncluded':False,'stage0Certified':False,'native33':'0/33','exact34':'0/34','field':'0/30','formal':'DENY'}
+          (d/'r27172_runtime_receipt.json').write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
+          PY_RECEIPT
+          mkdir -p "$RUNNER_TEMP/r27172_cleanroom"
+          tar -C "$RUNNER_TEMP/r27172_cleanroom" -xzf r27172_release/r27172_pinned_public_showdown_runtime.tar.gz
+          cp "$RUNNER_TEMP/showdown/r27172_public_probe.js" "$RUNNER_TEMP/r27172_cleanroom/showdown/"
+          cd "$RUNNER_TEMP/r27172_cleanroom/showdown"
+          test "$(git rev-parse HEAD)" = "$PIN"
+          node r27172_public_probe.js
+          echo 'R27172_CLEANROOM_PUBLIC_PORTABLE_RUNTIME_PASS'
+          echo 'R27172_PRIVATE_375_NOT_INCLUDED'
+      - name: Upload public source portable runtime artifact only
+        uses: actions/upload-artifact@v4
+        with:
+          name: r27172-public-pinned-mc-runtime
+          path: |
+            ${{ runner.temp }}/r27172_release/r27172_pinned_public_showdown_runtime.tar.gz
+            ${{ runner.temp }}/r27172_release/r27172_runtime_receipt.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Preserve exact current certification gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo R27172_PUBLIC_RUNTIME_ARTIFACT_READY
+          echo R27172_PRIVATE_375_FULL_VALIDATION_NOT_EXECUTED
+          echo R27172_M6_MC_CERTIFICATION=NOT_PROVEN
+          echo R27172_CURRENT_M7_STAGE0=NOT_CERTIFIED
+          echo R27172_NATIVE33=0/33 EXACT34=0/34 FIELD=0/30 FORMAL=DENY
