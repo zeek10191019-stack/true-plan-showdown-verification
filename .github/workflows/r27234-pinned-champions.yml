@@ -1,0 +1,133 @@
+name: R27.234 Pinned Champions M-C smoke (public standard runner)
+
+# Manual only; NEVER enable push/schedule/pull_request on this verifier.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r27234-pinned-champions
+  cancel-in-progress: false
+
+jobs:
+  pinned-champions-smoke:
+    # Skip BEFORE allocating a runner unless the destination repo is PUBLIC.
+    if: ${{ github.event.repository.visibility == 'public' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Check repository visibility without secrets
+        shell: bash
+        env:
+          REPO_VISIBILITY: ${{ github.event.repository.visibility }}
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$REPO_VISIBILITY" = "public"
+          test "$REPO_PRIVATE" = "false"
+          echo "REPOSITORY_PUBLIC_STANDARD_RUNNER_OK"
+
+      - name: Checkout public pinned Showdown only
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: 812501ede865eea397cd6e9a6f040d73ff57cc84
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-showdown
+
+      - name: Setup exact Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+          cache: ''
+
+      - name: Verify exact source and runtime
+        working-directory: pinned-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "812501ede865eea397cd6e9a6f040d73ff57cc84"
+          test "$(node --version)" = "v22.18.0"
+          test -f package-lock.json
+          test -f data/mods/champions/scripts.ts
+          test -f data/mods/champions/learnsets.ts
+          # Pin seven source blobs independently of checkout metadata.
+          test "$(git hash-object --no-filters data/mods/champions/scripts.ts)" = "7f100a0947a203454a1a97b54f6a99932e808bce"
+          test "$(git hash-object --no-filters data/mods/champions/moves.ts)" = "8852acd15a76b8287c99e08fc4cba70f5f2c132a"
+          test "$(git hash-object --no-filters data/mods/champions/items.ts)" = "283b1179727c9106d59125d8fb7e3cc68da6fbd5"
+          test "$(git hash-object --no-filters data/mods/champions/learnsets.ts)" = "10f2b1e5ba8af72077928be3cc89e16da80f7e8b"
+          test "$(git hash-object --no-filters config/formats.ts)" = "b4f9a7d9a6f05d6d875dd7569c3872eea265a868"
+          test "$(git hash-object --no-filters data/items.ts)" = "7d29297383e34097c308a01486a74435140746af"
+          test "$(git hash-object --no-filters data/abilities.ts)" = "e80995806899d09a6e12d677b3433c9a36fd5d90"
+          echo "SEVEN_SOURCE_BLOB_SHA1_OK"
+          echo "PINNED_COMMIT_AND_NODE_OK"
+          git show -s --format='%H %s' HEAD
+
+      - name: Install and build the full public simulator
+        working-directory: pinned-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/dex.js
+          test -f dist/sim/battle.js
+          echo "FULL_BUILD_OK"
+
+      - name: Champions M-C format and runtime smoke
+        working-directory: pinned-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          'use strict';
+          const assert = require('node:assert/strict');
+          const { Dex } = require('./dist/sim/dex');
+          const { Battle } = require('./dist/sim/battle');
+          const format = Dex.formats.get('gen9championsbssregmc');
+          assert.equal(format.exists, true, 'M-C singles format absent');
+          assert.equal(format.mod, 'champions', 'wrong mod');
+          const dex = Dex.mod('champions');
+          const species = ['archaludon','mimikyu','garchomp','delphox','sylveon','gyarados'];
+          species.forEach(id => assert.equal(dex.species.get(id).exists, true, 'missing species '+id));
+          const moves = ['steelbeam','dracometeor','thunderbolt','stealthrock','playrough','shadowsneak','swordsdance','curse','earthquake','scaleshot','dragontail','flamethrower','psyshock','grassknot','nastyplot','hypervoice','detect','yawn','wish','dragondance','icefang','powerwhip'];
+          moves.forEach(id => assert.equal(dex.moves.get(id).exists, true, 'missing move '+id));
+          const wish = dex.moves.get('wish');
+          assert.equal(wish.pp, 5, 'base PP drift');
+          assert.equal(dex.items.get('delphoxite').exists, true);
+          assert.equal(dex.items.get('gyaradosite').exists, true);
+          const lineup = [
+            {species:'Archaludon',ability:'Sturdy',item:'White Herb',nature:'Modest',moves:['Steel Beam','Draco Meteor','Thunderbolt','Stealth Rock'],evs:{hp:2,spa:32,spe:32}},
+            {species:'Mimikyu',ability:'Disguise',item:'Life Orb',nature:'Adamant',moves:['Play Rough','Shadow Sneak','Swords Dance','Curse'],evs:{hp:1,atk:32,def:1,spe:32}},
+            {species:'Garchomp',ability:'Rough Skin',item:'Focus Sash',nature:'Adamant',moves:['Earthquake','Scale Shot','Dragon Tail','Stealth Rock'],evs:{hp:2,atk:32,spe:32}},
+            {species:'Delphox',ability:'Blaze',item:'Delphoxite',nature:'Modest',moves:['Flamethrower','Psyshock','Grass Knot','Nasty Plot'],evs:{hp:1,def:1,spa:32,spe:32}},
+            {species:'Sylveon',ability:'Pixilate',item:'Leftovers',nature:'Bold',moves:['Hyper Voice','Detect','Yawn','Wish'],evs:{hp:32,def:31,spe:3}},
+            {species:'Gyarados',ability:'Intimidate',item:'Gyaradosite',nature:'Adamant',moves:['Dragon Dance','Earthquake','Ice Fang','Power Whip'],evs:{hp:1,atk:32,def:1,spe:32}},
+          ];
+          for (const set of lineup) { assert.equal(Object.values(set.evs).reduce((a,b)=>a+b,0),66); set.level=50; }
+          const battle = new Battle({formatid:'gen9championsbssregmc',seed:[1,2,3,4]});
+          battle.setPlayer('p1',{name:'TestA',team:lineup});
+          battle.setPlayer('p2',{name:'TestB',team:[...lineup].reverse()});
+          assert.equal(battle.started,true,'battle failed to start');
+          if (battle.requestState==='teampreview') battle.makeChoices('team 123','team 123');
+          assert.equal(battle.requestState,'move','battle not at move phase');
+          battle.makeChoices('move 1','move 1');
+          assert.ok(battle.turn>=1,'one-turn smoke failed');
+          console.log(JSON.stringify({commit:'812501ede865eea397cd6e9a6f040d73ff57cc84',format:format.id,mod:format.mod,species_checked:species.length,defined_moves_checked:moves.length,first_battle_turn:battle.turn,tag:'SHOWDOWN_SIMULATOR_SMOKE_ONLY',current_game_legal:'0/38',Native33:'0/33',Exact34:'0/34',Field:'0/30',formal:'DENY'}));
+          NODE
+
+      - name: Output reproducibility summary (no Actions artifacts)
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## R27.234 pinned Showdown source/build/smoke'
+            echo '- Commit: `812501ede865eea397cd6e9a6f040d73ff57cc84`'
+            echo '- Node: `22.18.0` / ubuntu-24.04 standard runner'
+            echo '- Job outcome: `${{ job.status }}`'
+            echo '- SOURCE/BUILD/SMOKE ONLY. Not actual Champions v1.2.2 validation.'
+            echo '- Native33=0/33, Exact34=0/34, Field=0/30, legal38=0/38, acceptance=0/8, FORMAL=DENY.'
+          } >> "$GITHUB_STEP_SUMMARY"
