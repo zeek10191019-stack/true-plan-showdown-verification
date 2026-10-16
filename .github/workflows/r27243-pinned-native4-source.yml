@@ -1,0 +1,98 @@
+name: R27.243 pinned Champions M-C four source-difference controls
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  additional-native4:
+    if: ${{ github.event.repository.visibility == 'public' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Public repository gate
+        env:
+          VISIBILITY: ${{ github.event.repository.visibility }}
+          PRIVATE: ${{ github.event.repository.private }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$VISIBILITY" = public
+          test "$PRIVATE" = false
+      - name: Checkout immutable source
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: 812501ede865eea397cd6e9a6f040d73ff57cc84
+          fetch-depth: 1
+          persist-credentials: false
+          path: showdown
+      - name: Set up Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify, install, build
+        shell: bash
+        working-directory: showdown
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 812501ede865eea397cd6e9a6f040d73ff57cc84
+          test "$(node --version)" = v22.18.0
+          test "$(git hash-object --no-filters data/mods/champions/moves.ts)" = 8852acd15a76b8287c99e08fc4cba70f5f2c132a
+          test "$(git hash-object --no-filters data/moves.ts)" = cef991de31479632bddbbc8830d74e7e5d32c417
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/dex.js
+          echo R27243_BUILD_OK
+      - name: Run four source-difference cases
+        shell: bash
+        working-directory: showdown
+        run: |
+          set -euo pipefail
+          cat > r27243_native4_source_diffs.cjs <<'R27243_END_JS'
+          'use strict';
+          // Additional canonical named cases on the pinned SHOWDOWN simulator only; NEVER auto-promote retail-game formal gates.
+          const assert=require('node:assert/strict');
+          const {Dex}=require('./dist/sim/dex');
+          const PIN='812501ede865eea397cd6e9a6f040d73ff57cc84';
+          const FORMAT='gen9championsbssregmc';
+          const fields=[
+            ['METEOR_ASSAULT_BP170','meteorassault','basePower',170,150],
+            ['MILK_DRINK_TARGET','milkdrink','target','adjacentAllyOrSelf','self'],
+            ['SLASH_BP80','slash','basePower',80,70],
+            ['SNIPE_SHOT_BP85','snipeshot','basePower',85,80],
+          ];
+          const mod=Dex.mod('champions'); const gen9=Dex.mod('gen9');
+          const format=Dex.formats.get(FORMAT);
+          assert.equal(format.exists,true);assert.equal(format.mod,'champions');
+          let failures=0;
+          const cases=[];
+          for(const [id,move,field,expected,control] of fields){
+            try{
+             const c=mod.moves.get(move),b=gen9.moves.get(move);
+             assert.equal(c.exists,true,`${move} absent in Champions mod`);
+             assert.equal(b.exists,true,`${move} absent in base Gen9`);
+             assert.equal(c[field],expected,`${move} Champions expected ${field} ${expected}`);
+             assert.equal(b[field],control,`${move} base Gen9 expected ${field} ${control}`);
+             assert.notEqual(c[field],b[field]);
+             const row={id,status:'PASS_SHOWDOWN_DUAL_CONTROL_ONLY',positive:{mod:'champions',field,value:c[field]},negative:{mod:'gen9',field,value:b[field]},retail_parity:'NOT_MEASURED',canonical_contract_raw:'NOT_VERIFIED'};
+             cases.push(row);console.log('R27243_CASE '+JSON.stringify(row));
+            }catch(e){failures++;const row={id,status:'FAIL_SHOWDOWN',error:String(e?.stack||e).slice(0,1400)};cases.push(row);console.log('R27243_CASE '+JSON.stringify(row));}
+          }
+          const r={revision:'R27.243',upstream_commit:PIN,case_total:cases.length,passed_showdown_only:cases.length-failures,failed:failures,casewise:cases,formal_gates:{Native33:'0/33',Exact34:'0/34',legal38:'0/38',Field:'0/30',acceptance:'0/8',FORMAL:'DENY'}};
+          console.log('R27243_REPORT '+JSON.stringify(r));
+          if(failures)process.exitCode=1;
+          R27243_END_JS
+          node --check r27243_native4_source_diffs.cjs
+          node r27243_native4_source_diffs.cjs | tee r27243_native4.log
+          test "$(grep -c '^R27243_CASE ' r27243_native4.log)" = 4
+          grep -q '^R27243_REPORT ' r27243_native4.log
+      - name: Strict certification firewall
+        if: always()
+        shell: bash
+        run: |
+          echo '## R27.243 Showdown source-difference controls' >> "$GITHUB_STEP_SUMMARY"
+          echo '- GitHub outcome: `${{ job.status }}`; official source and retail parity separately outstanding' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Native33=0/33, Exact34=0/34, legal38=0/38, Field=0/30, acceptance=0/8, FORMAL=DENY' >> "$GITHUB_STEP_SUMMARY"
