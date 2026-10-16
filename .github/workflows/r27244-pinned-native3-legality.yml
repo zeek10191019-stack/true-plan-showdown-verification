@@ -1,0 +1,107 @@
+name: R27.244 Pinned Champions three native legality dual controls
+
+# Manual only. Public standard runner, no private system code or paid runners.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legal-three:
+    if: ${{ github.event.repository.visibility == 'public' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Public repository guard
+        shell: bash
+        env:
+          VISIBILITY: ${{ github.event.repository.visibility }}
+          IS_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$VISIBILITY" = public
+          test "$IS_PRIVATE" = false
+      - name: Checkout immutable pinned Showdown
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: 812501ede865eea397cd6e9a6f040d73ff57cc84
+          fetch-depth: 1
+          persist-credentials: false
+          path: showdown
+      - name: Exact Node.js version
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify source hashes and build
+        working-directory: showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 812501ede865eea397cd6e9a6f040d73ff57cc84
+          test "$(node --version)" = v22.18.0
+          test "$(git hash-object --no-filters data/mods/champions/learnsets.ts)" = 10f2b1e5ba8af72077928be3cc89e16da80f7e8b
+          test "$(git hash-object --no-filters sim/team-validator.ts)" = 89ce5bda43670169be6718cb304ac73902eada7a
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/team-validator.js
+          echo R27244_PINNED_BUILD_PASS
+      - name: Execute three legality controls with source diagnostic
+        working-directory: showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r27244_native3_legality.cjs <<'R27244_JS_END'
+          'use strict';
+          // Research only. This tests pinned Showdown's 3 named Native33 legality cases,
+          // NOT actual retail Champions conformance and NOT a certified full canonical case.
+          const assert=require('node:assert/strict');
+          const {Dex}=require('./dist/sim/dex');
+          const {TeamValidator}=require('./dist/sim/team-validator');
+          const commit='812501ede865eea397cd6e9a6f040d73ff57cc84';
+          const format='gen9championsbssregmc';
+          const v=TeamValidator.get(format);
+          const dex=Dex.mod('champions');
+          const rows=[];
+          function clone(x){return JSON.parse(JSON.stringify(x));}
+          function run(id,baseline,rejectedMove){
+            try{
+              const positive=v.validateSet(clone(baseline),{});
+              assert.ok(!positive?.length, `positive baseline rejected: ${JSON.stringify(positive)}`);
+              const negative=clone(baseline);
+              negative.moves=[rejectedMove,...baseline.moves.slice(1)];
+              const errs=v.validateSet(negative,{});
+              assert.ok(Array.isArray(errs)&&errs.length>0,`${id}: negative variant not rejected`);
+              assert.ok(errs.some(e=>e.toLowerCase().includes(rejectedMove.toLowerCase())),`${id}: rejection did not name move: ${JSON.stringify(errs)}`);
+              const entry={id,status:'PASS_SHOWDOWN_DUAL_CONTROL_ONLY',positive:{species:baseline.species,legal_move:baseline.moves[0],accepted:true},negative:{move:rejectedMove,rejected:true,errors:errs},retail_parity:'NOT_MEASURED',canonical_contract_raw:'NOT_VERIFIED'};
+              rows.push(entry); console.log('R27244_CASE '+JSON.stringify(entry));
+            }catch(e){const entry={id,status:'FAIL_SHOWDOWN',error:String(e?.stack||e).slice(0,1400),retail_parity:'NOT_MEASURED'};rows.push(entry);console.log('R27244_CASE '+JSON.stringify(entry));}
+          }
+          const arch={species:'Archaludon',ability:'Sturdy',item:'White Herb',nature:'Modest',level:50,moves:['Draco Meteor','Thunderbolt','Steel Beam','Stealth Rock'],evs:{hp:2,spa:32,spe:32}};
+          const poli={species:'Politoed',ability:'Drizzle',item:'Leftovers',nature:'Modest',level:50,moves:['Surf','Ice Beam','Encore','Protect'],evs:{hp:32,spa:32,spe:2}};
+          assert.equal(dex.species.get('Politoed').exists,true);
+          assert.equal(dex.species.get('Archaludon').exists,true);
+          run('POLITOED_POUND_REJECTS',poli,'Pound');
+          run('ARCHALUDON_MIRROR_COAT_REJECTS',arch,'Mirror Coat');
+          run('ARCHALUDON_METAL_BURST_REJECTS',arch,'Metal Burst');
+          const move=dex.moves.get('doubleshock');
+          const diagnostic={id:'DOUBLE_SHOCK_PUNCH_FLAG',expected_punch:true,showdown_flag_punch:!!move.flags.punch,showdown_move_exists:move.exists,classification:move.flags.punch?'SOURCE_MATCH_CANDIDATE':'SOURCE_MISMATCH_SUSPECTED',status:'DIAGNOSTIC_NOT_CERTIFYING'};
+          console.log('R27244_DIAGNOSTIC '+JSON.stringify(diagnostic));
+          const pass=rows.filter(r=>r.status==='PASS_SHOWDOWN_DUAL_CONTROL_ONLY').length;
+          const report={revision:'R27.244',source_commit:commit,format,case_total:rows.length,passed_showdown_only:pass,failed:rows.length-pass,rows,diagnostic,canonical_native33:'0/33',exact34:'0/34',legal38:'0/38',field30:'0/30',acceptance:'0/8',formal:'DENY',original_contract_raw_verified:false,retail_parity_verified:false};
+          console.log('R27244_REPORT '+JSON.stringify(report));
+          if(pass!==3)process.exitCode=1;
+          R27244_JS_END
+          node --check r27244_native3_legality.cjs
+          node r27244_native3_legality.cjs | tee r27244_probe.log
+          test "$(grep -c '^R27244_CASE ' r27244_probe.log)" = 3
+          test "$(grep -c '^R27244_DIAGNOSTIC ' r27244_probe.log)" = 1
+          test "$(grep -c '^R27244_REPORT ' r27244_probe.log)" = 1
+      - name: Gate status (no promotion)
+        if: always()
+        shell: bash
+        run: |
+          echo '## R27.244 Showdown legality source check only' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Job: `${{ job.status }}`; casewise R27244_CASE, R27244_DIAGNOSTIC, R27244_REPORT in official job log.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Native33=0/33, Exact34=0/34, legal38=0/38, Field=0/30, acceptance=0/8, FORMAL=DENY.' >> "$GITHUB_STEP_SUMMARY"
