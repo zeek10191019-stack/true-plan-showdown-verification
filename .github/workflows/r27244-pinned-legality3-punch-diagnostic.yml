@@ -1,0 +1,126 @@
+name: R27.244 pinned Champions M-C legality and punch diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legality-diagnostic:
+    if: ${{ github.event.repository.visibility == 'public' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Public repository guard
+        shell: bash
+        env:
+          VIS: ${{ github.event.repository.visibility }}
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$VIS" = public
+          test "$PRIVATE" = false
+      - name: Checkout exact public Showdown
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: 812501ede865eea397cd6e9a6f040d73ff57cc84
+          fetch-depth: 1
+          persist-credentials: false
+          path: showdown
+      - name: Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify pinned source and full build
+        shell: bash
+        working-directory: showdown
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 812501ede865eea397cd6e9a6f040d73ff57cc84
+          test "$(node -v)" = v22.18.0
+          test "$(git hash-object --no-filters data/mods/champions/learnsets.ts)" = 10f2b1e5ba8af72077928be3cc89e16da80f7e8b
+          test "$(git hash-object --no-filters sim/team-validator.ts)" = 89ce5bda43670169be6718cb304ac73902eada7a
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/team-validator.js
+          echo R27244_BUILD_PASS
+      - name: Native 3 negative-legal controls and one punch diagnostic
+        shell: bash
+        working-directory: showdown
+        run: |
+          set -euo pipefail
+          cat > r27244_diagnostic.cjs <<'R27244_JS_END'
+          'use strict';
+          // Source-based diagnostics only. NO Native33 or game-parity promotion.
+          const assert = require('node:assert/strict');
+          const {Dex} = require('./dist/sim/dex');
+          const {TeamValidator} = require('./dist/sim/team-validator');
+          const source = '812501ede865eea397cd6e9a6f040d73ff57cc84';
+          const format = 'gen9championsbssregmc';
+          assert.equal(Dex.formats.get(format).mod, 'champions');
+          const validator=TeamValidator.get(format);
+          const dex=Dex.mod('champions');
+          const standard=Dex.mod('gen9');
+          const arch={species:'Archaludon',ability:'Sturdy',item:'White Herb',nature:'Modest',level:50,moves:['Steel Beam','Draco Meteor','Thunderbolt','Stealth Rock'],evs:{hp:2,spa:32,spe:32}};
+          const poli={species:'Politoed',ability:'Water Absorb',item:'Leftovers',nature:'Modest',level:50,moves:['Surf'],evs:{hp:2,spa:32,spe:32}};
+          const checks=[
+           ['POLITOED_POUND_REJECTS',poli,'Pound'],
+           ['ARCHALUDON_MIRROR_COAT_REJECTS',arch,'Mirror Coat'],
+           ['ARCHALUDON_METAL_BURST_REJECTS',arch,'Metal Burst'],
+          ];
+          const cases=[];
+          for(const [id,baseline,illegalMove] of checks){
+           const p={id,source_commit:source,retail_parity:'NOT_MEASURED',canonical_contract_raw:'NOT_VERIFIED'};
+           try {
+            const good=structuredClone(baseline);
+            const valid=validator.validateSet(good,{});
+            assert.ok(!valid?.length,`baseline rejected: ${JSON.stringify(valid)}`);
+            const bad=structuredClone(baseline);bad.moves=[illegalMove];
+            const invalid=validator.validateSet(bad,{});
+            assert.ok(Array.isArray(invalid)&&invalid.length>0,`${illegalMove} not rejected`);
+            const badID=illegalMove.toLowerCase().replace(/\W/g,'');
+            const learnset=dex.data.Learnsets[bad.species.toLowerCase()]?.learnset;
+            assert.ok(learnset,'no learnset');
+            assert.ok(!learnset[badID],`forbidden move found in pinned learnset: ${illegalMove}`);
+            assert.ok(invalid.some(x=>new RegExp(illegalMove.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'i').test(x)),`rejected for unrelated reason: ${JSON.stringify(invalid)}`);
+            p.status='PASS_SHOWDOWN_LEARNSET_DUAL_ONLY';
+            p.positive={species:good.species,moves:good.moves,validator:'accepted'};
+            p.negative={move:illegalMove,validator_errors:invalid.slice(0,4),learnset_absent:true};
+           } catch(e){p.status='FAIL';p.error=String(e.stack||e).slice(0,1200);}
+           cases.push(p);console.log('R27244_CASE '+JSON.stringify(p));
+          }
+          {
+           const p={id:'DOUBLE_SHOCK_PUNCH_FLAG',source_commit:source,retail_parity:'NOT_MEASURED',canonical_contract_raw:'NOT_VERIFIED'};
+           try {
+            const cur=dex.moves.get('doubleshock'),base=standard.moves.get('doubleshock');
+            assert.ok(cur.exists&&base.exists);
+            const c=!!cur.flags.punch, b=!!base.flags.punch;
+            p.expected_in_canonical_proposal=true;
+            p.actual_champions_punch=c;p.actual_gen9_punch=b;
+            p.status=c?'PASS_SHOWDOWN_PUNCH_FLAG_ONLY':'GAP_CANDIDATE_PUNCH_FLAG_NOT_SET';
+            p.note='Observation of pinned simulator source; retail-game behavior not verified';
+           }catch(e){p.status='FAIL';p.error=String(e.stack||e).slice(0,1200);}
+           cases.push(p);console.log('R27244_CASE '+JSON.stringify(p));
+          }
+          assert.equal(cases.length,4);
+          const fail=cases.filter(x=>x.status==='FAIL').length;
+          const gap=cases.filter(x=>x.status.startsWith('GAP_')).length;
+          const passed=cases.filter(x=>x.status.startsWith('PASS_')).length;
+          const report={revision:'R27.244',source_commit:source,case_total:cases.length,passed_showdown_only:passed,potential_gaps:gap,execution_failures:fail,cases,formal_gates:{Native33:'0/33',Exact34:'0/34',legal38:'0/38',Field:'0/30',acceptance:'0/8',FORMAL:'DENY'}};
+          console.log('R27244_REPORT '+JSON.stringify(report));
+          if(fail)process.exitCode=1;
+          R27244_JS_END
+          node --check r27244_diagnostic.cjs
+          node r27244_diagnostic.cjs | tee r27244_case_report.log
+          test "$(grep -c '^R27244_CASE ' r27244_case_report.log)" = 4
+          grep -q '^R27244_REPORT ' r27244_case_report.log
+      - name: Certification firewall
+        if: always()
+        shell: bash
+        run: |
+          echo "## R27.244 pinned simulator research-only checks" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Result: ${{ job.status }}; 3 illegal-move dual controls and 1 punch flag diagnostic" >> "$GITHUB_STEP_SUMMARY"
+          echo "- A punch-flag gap may be reported; job success alone does not mean four passing checks." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Native33 0/33; Exact34 0/34; legal38 0/38; Field 0/30; acceptance 0/8; FORMAL DENY" >> "$GITHUB_STEP_SUMMARY"
