@@ -1,0 +1,137 @@
+name: R27.249 Pinned Champions native mega-3 runtime dual controls
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r27249-native-mega3
+  cancel-in-progress: false
+
+jobs:
+  mega-three-research:
+    if: ${{ github.event.repository.visibility == 'public' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 22
+    steps:
+      - name: Public-only safety gate
+        shell: bash
+        env:
+          VISIBILITY: ${{ github.event.repository.visibility }}
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$VISIBILITY" = public
+          test "$PRIVATE" = false
+      - name: Checkout exact public Showdown commit
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: 812501ede865eea397cd6e9a6f040d73ff57cc84
+          fetch-depth: 1
+          persist-credentials: false
+          path: showdown
+      - name: Setup pinned Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify source identity and build
+        shell: bash
+        working-directory: showdown
+        run: |
+          set -euo pipefail
+          test "$(node -v)" = 'v22.18.0'
+          test "$(git rev-parse HEAD)" = '812501ede865eea397cd6e9a6f040d73ff57cc84'
+          test "$(git hash-object --no-filters data/mods/champions/scripts.ts)" = '7f100a0947a203454a1a97b54f6a99932e808bce'
+          test "$(git hash-object --no-filters sim/battle-actions.ts)" = '8626b26bacbf98d8565dc999aa4146d4eb3294c3'
+          test "$(git hash-object --no-filters data/items.ts)" = '7d29297383e34097c308a01486a74435140746af'
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/battle.js
+          echo R27249_BUILD_PASS
+      - name: Execute 3 new positive and negative MEGA simulator cases
+        shell: bash
+        working-directory: showdown
+        run: |
+          set -euo pipefail
+          cat > r27249_mega3.cjs <<'R27249_JS_EOF'
+          'use strict';
+          // R27.249: PINNED SHOWDOWN ONLY. Not retail-game parity nor Native33 certification.
+          const assert = require('node:assert/strict');
+          const {Battle} = require('./dist/sim/battle');
+          const {Dex} = require('./dist/sim/dex');
+          const PIN = '812501ede865eea397cd6e9a6f040d73ff57cc84';
+          const FORMAT = 'gen9championsbssregmc';
+          const ids = ['ONE_MEGA_PER_SIDE','MEGA_STONE_UNREMOVABLE','MEGA_BASE_ABILITY_TRANSITION'];
+          const cases = [];
+          // Minimal PUBLIC synthetic sets. Do not publish the user's full private six exact sets.
+          const sets = [
+           {species:'Gyarados',item:'Gyaradosite',ability:'Intimidate',nature:'Adamant',level:50,evs:{hp:1,atk:1},moves:['Dragon Dance','Waterfall']},
+           {species:'Delphox',item:'Delphoxite',ability:'Blaze',nature:'Modest',level:50,evs:{spa:1},moves:['Flamethrower','Protect']},
+           {species:'Archaludon',item:'White Herb',ability:'Sturdy',nature:'Modest',level:50,evs:{hp:1},moves:['Flash Cannon']},
+           {species:'Mimikyu',item:'Life Orb',ability:'Disguise',nature:'Adamant',level:50,evs:{hp:1},moves:['Shadow Sneak']},
+           {species:'Garchomp',item:'Focus Sash',ability:'Rough Skin',nature:'Adamant',level:50,evs:{hp:1},moves:['Earthquake']},
+           {species:'Sylveon',item:'Leftovers',ability:'Pixilate',nature:'Bold',level:50,evs:{hp:1},moves:['Hyper Voice','Detect']},
+          ];
+          const safeOpp= [sets[5],sets[2],sets[3],sets[4],sets[0],sets[1]];
+          const deep=x=>structuredClone(x);
+          function battle(team=sets){
+           const b=new Battle({formatid:FORMAT,seed:[15,115,215,315]});
+           b.setPlayer('p1',{name:'NativeCaseP1',team:deep(team)});
+           b.setPlayer('p2',{name:'NativeCaseP2',team:deep(safeOpp)});
+           return b;
+          }
+          function start(b){if(b.requestState==='teampreview')b.makeChoices('team 123','team 123');assert.equal(b.requestState,'move');}
+          function ability(p){return p.getAbility().name;}
+          function run(id,fn){try{const out=fn();const row={id,status:'PASS_SHOWDOWN_RUNTIME_DUAL_CONTROL_ONLY',...out,source_commit:PIN,retail_parity:'NOT_MEASURED',canonical_contract_raw:'NOT_VERIFIED'};cases.push(row);console.log('R27249_CASE '+JSON.stringify(row));}catch(e){const row={id,status:'FAIL',error:String(e?.stack||e).slice(0,1800),source_commit:PIN,retail_parity:'NOT_MEASURED'};cases.push(row);console.log('R27249_CASE '+JSON.stringify(row));}}
+          run('ONE_MEGA_PER_SIDE',()=>{
+           const b=battle();start(b);assert.equal(b.p1.active[0].species.name,'Gyarados');
+           const gy=b.p1.active[0],del=b.p1.pokemon[1];
+           assert.equal(gy.canMegaEvo,'Gyarados-Mega');assert.equal(del.canMegaEvo,'Delphox-Mega');
+           b.makeChoices('move 1 mega','move 2');
+           assert.equal(gy.species.name,'Gyarados-Mega');
+           assert.equal(del.canMegaEvo,false);
+           assert.equal(gy.canMegaEvo,false);
+           b.makeChoices('switch 2','move 2');
+           assert.equal(b.p1.active[0].species.name,'Delphox');assert.equal(b.p1.active[0].canMegaEvo,false);
+           let attemptError='';try{b.makeChoices('move 1 mega','move 2')}catch(e){attemptError=String(e).slice(0,200)}
+           assert.equal(b.p1.active[0].species.name,'Delphox','Second Mega should never succeed');
+           return {positive:{first_megated:'Gyarados-Mega',first_side_remaining_mega:false},negative:{second_candidate:'Delphox',second_can_mega:false,after_illegal_request:b.p1.active[0].species.name,rejection_message:attemptError||'second mega did not take effect'}};
+          });
+          run('MEGA_STONE_UNREMOVABLE',()=>{
+           const b=battle();const steal=b.p2.pokemon[0],g=b.p1.pokemon[0],del=b.p1.pokemon[1],arch=b.p1.pokemon[2];
+           assert.equal(g.item,'gyaradosite');assert.equal(del.item,'delphoxite');
+           const gyStone=g.takeItem(steal),delStone=del.takeItem(steal);
+           assert.equal(gyStone,false);assert.equal(delStone,false);
+           assert.equal(g.item,'gyaradosite');assert.equal(del.item,'delphoxite');
+           const herb=arch.takeItem(steal);assert.equal(herb?.id,'whiteherb');assert.equal(arch.item,'');
+           return {positive:{gyaradosite_held:true,delphoxite_held:true,source:'Battle Pokemon.takeItem'},negative:{white_herb_removable:true}};
+          });
+          run('MEGA_BASE_ABILITY_TRANSITION',()=>{
+           const data=[{i:0,original:'Gyarados',pre:'Intimidate',post:'Mold Breaker',mega:'Gyarados-Mega',move:'move 1 mega'},
+           {i:1,original:'Delphox',pre:'Blaze',post:'Levitate',mega:'Delphox-Mega',move:'move 1 mega'}];
+           const result=[];
+           for(const d of data){let team=[sets[d.i],...sets.filter((x,j)=>j!==d.i)],b=battle(team);start(b);let p=b.p1.active[0];
+            assert.equal(p.species.name,d.original);assert.equal(ability(p),d.pre);assert.equal(p.canMegaEvo,d.mega);
+            b.makeChoices(d.move,'move 2');
+            assert.equal(p.species.name,d.mega);assert.equal(ability(p),d.post);
+            result.push({species:d.original,pre:d.pre,post:d.post,mega:d.mega});
+           }
+           return {positive:{ability_switch_verified:result},negative:{pre_mega_ability_was_not_post_mega_ability:true}};
+          });
+          assert.deepEqual(cases.map(x=>x.id),ids);
+          const pass=cases.filter(x=>x.status==='PASS_SHOWDOWN_RUNTIME_DUAL_CONTROL_ONLY').length;
+          const report={revision:'R27.249',engine_source:PIN,format:FORMAT,total:3,passed:pass,failed:3-pass,mode:'SHOWDOWN_RUNTIME_ONLY',retail_parity:'NOT_MEASURED',canonical_contract_raw:'NOT_VERIFIED',formal_gates:{Native33:'0/33',Exact34:'0/34',legal38:'0/38',Field:'0/30',acceptance:'0/8',FORMAL:'DENY'},cases};
+          console.log('R27249_REPORT '+JSON.stringify(report));
+          if(pass!==3)process.exitCode=1;
+          R27249_JS_EOF
+          node --check r27249_mega3.cjs
+          node r27249_mega3.cjs
+      - name: Formal certification boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'R27249_BOUNDARY Native33=0/33 Exact34=0/34 legal38=0/38 Field=0/30 acceptance=0/8 FORMAL=DENY'
+          echo 'R27249_REAL_GAME_PARITY NOT_MEASURED'
