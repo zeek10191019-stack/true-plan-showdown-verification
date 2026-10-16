@@ -1,0 +1,231 @@
+name: R27.237 Pinned Champions M-C native physics probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r27237-pinned-native-physics
+  cancel-in-progress: false
+
+jobs:
+  native-physics-probe:
+    if: ${{ github.event.repository.visibility == 'public' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Public repository hard guard
+        shell: bash
+        env:
+          REPO_VISIBILITY: ${{ github.event.repository.visibility }}
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$REPO_VISIBILITY" = public
+          test "$REPO_PRIVATE" = false
+          echo "R27237_PUBLIC_REPO_OK"
+
+      - name: Checkout fixed public source (no private Battle AI files)
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: 812501ede865eea397cd6e9a6f040d73ff57cc84
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-showdown
+
+      - name: Exact Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+
+      - name: Verify immutable source and seven blobs
+        working-directory: pinned-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "812501ede865eea397cd6e9a6f040d73ff57cc84"
+          test "$(node -v)" = v22.18.0
+          test "$(git hash-object --no-filters data/mods/champions/scripts.ts)" = "7f100a0947a203454a1a97b54f6a99932e808bce"
+          test "$(git hash-object --no-filters data/mods/champions/moves.ts)" = "8852acd15a76b8287c99e08fc4cba70f5f2c132a"
+          test "$(git hash-object --no-filters data/mods/champions/items.ts)" = "283b1179727c9106d59125d8fb7e3cc68da6fbd5"
+          test "$(git hash-object --no-filters data/mods/champions/learnsets.ts)" = "10f2b1e5ba8af72077928be3cc89e16da80f7e8b"
+          test "$(git hash-object --no-filters config/formats.ts)" = "b4f9a7d9a6f05d6d875dd7569c3872eea265a868"
+          test "$(git hash-object --no-filters data/items.ts)" = "7d29297383e34097c308a01486a74435140746af"
+          test "$(git hash-object --no-filters data/abilities.ts)" = "e80995806899d09a6e12d677b3433c9a36fd5d90"
+          test -f package-lock.json
+          echo "R27237_IMMUTABLE_SOURCE_OK"
+
+      - name: Install and build public Showdown
+        working-directory: pinned-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/dex.js
+          test -f dist/sim/battle.js
+          echo "R27237_FULL_BUILD_OK"
+
+      - name: 20 native simulator probes with casewise results
+        working-directory: pinned-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r27237_native_mechanics_probe.cjs <<'R27237_JS_END'
+          'use strict';
+          // R27.237. Research-only Pokémon Showdown simulator probes.
+          // Not evidence of Pokémon Champions retail-game parity or formal Native33/Exact34 certification.
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const { Dex } = require('./dist/sim/dex');
+          const { Battle } = require('./dist/sim/battle');
+          const PIN = '812501ede865eea397cd6e9a6f040d73ff57cc84';
+          const FORMAT = 'gen9championsbssregmc';
+          const cases = [];
+          const observations = {};
+          function check(id, expected, fn) {
+            try {
+              const observed = fn();
+              assert.ok(observed !== false, `${id} returned false`);
+              const entry = { id, status: 'PASS_SHOWDOWN_ONLY', expected, observed: observed === undefined ? true : observed };
+              cases.push(entry);
+              console.log('R27237_CASE', JSON.stringify(entry));
+            } catch (e) {
+              const entry = { id, status: 'FAIL', expected, error: String(e && e.stack || e).slice(0, 1300) };
+              cases.push(entry);
+              console.log('R27237_CASE', JSON.stringify(entry));
+            }
+          }
+          const sets = [
+            { species:'Archaludon', ability:'Sturdy', item:'White Herb', nature:'Modest', moves:['Steel Beam','Draco Meteor','Thunderbolt','Stealth Rock'], evs:{hp:2,spa:32,spe:32}, level:50 },
+            { species:'Mimikyu', ability:'Disguise', item:'Life Orb', nature:'Adamant', moves:['Play Rough','Shadow Sneak','Swords Dance','Curse'], evs:{hp:1,atk:32,def:1,spe:32}, level:50 },
+            { species:'Garchomp', ability:'Rough Skin', item:'Focus Sash', nature:'Adamant', moves:['Earthquake','Scale Shot','Dragon Tail','Stealth Rock'], evs:{hp:2,atk:32,spe:32}, level:50 },
+            { species:'Delphox', ability:'Blaze', item:'Delphoxite', nature:'Modest', moves:['Flamethrower','Psyshock','Grass Knot','Nasty Plot'], evs:{hp:1,def:1,spa:32,spe:32}, level:50 },
+            { species:'Sylveon', ability:'Pixilate', item:'Leftovers', nature:'Bold', moves:['Hyper Voice','Detect','Yawn','Wish'], evs:{hp:32,def:31,spe:3}, level:50 },
+            { species:'Gyarados', ability:'Intimidate', item:'Gyaradosite', nature:'Adamant', moves:['Dragon Dance','Earthquake','Ice Fang','Power Whip'], evs:{hp:1,atk:32,def:1,spe:32}, level:50 },
+          ];
+          const id = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+          const dex = Dex.mod('champions');
+          const format = Dex.formats.get(FORMAT);
+          const newBattle = () => {
+            const b = new Battle({ formatid: FORMAT, seed: [1,2,3,4] });
+            b.setPlayer('p1',{name:'TestA', team:sets});
+            b.setPlayer('p2',{name:'TestB', team:[...sets].reverse()});
+            return b;
+          };
+          check('NATIVE_PROBE_01_FORMAT_ID', 'M-C BSS exists', () => { assert.equal(format.exists,true); assert.equal(format.id,FORMAT); return format.id; });
+          check('NATIVE_PROBE_02_SINGLE_CHAMPIONS_MOD', 'format mod champions singles', () => {
+            assert.equal(format.mod, 'champions');
+            assert.equal(format.gameType || 'singles', 'singles'); return format.mod;
+          });
+          check('NATIVE_PROBE_03_SIX_SPECIES', '6 species exist in mod', () => {
+            sets.forEach(s => assert.equal(dex.species.get(s.species).exists,true,s.species)); return sets.map(s => s.species);
+          });
+          check('NATIVE_PROBE_04_ALL_24_MOVES', '24 selected moves exist', () => {
+            const ids = sets.flatMap(s => s.moves); assert.equal(ids.length,24);
+            ids.forEach(m => assert.equal(dex.moves.get(m).exists,true,m)); return ids.length;
+          });
+          check('NATIVE_PROBE_05_LEARNSETS', 'all 24 pairs present in pinned learnsets', () => {
+            // Do not equate this simulator data with Champions v1.2.2 in-game move legality.
+            for (const set of sets) {
+              const ls = dex.data.Learnsets[id(set.species)]?.learnset;
+              assert.ok(ls, `missing learnset ${set.species}`);
+              for (const move of set.moves) assert.ok(ls[id(move)], `missing ${set.species}/${move}`);
+            } return '24/24 inherited or modded learnset pairs';
+          });
+          check('NATIVE_PROBE_06_SIX_ABILITIES', '6 selected abilities defined', () => {
+            sets.forEach(s=>assert.equal(dex.abilities.get(s.ability).exists,true,s.ability)); return '6/6';
+          });
+          check('NATIVE_PROBE_07_SIX_ITEMS', '6 selected held items defined', () => {
+            sets.forEach(s=>assert.equal(dex.items.get(s.item).exists,true,s.item)); return '6/6';
+          });
+          check('NATIVE_PROBE_08_TWO_MEGA_STONES', 'Delphoxite and Gyaradosite exist', () => {
+            for (const it of ['Delphoxite','Gyaradosite']) assert.equal(dex.items.get(it).exists,true,it);
+            return ['delphoxite','gyaradosite'];
+          });
+          check('NATIVE_PROBE_09_66P_EACH', '6 sets total 66P each', () => {
+            const sums=sets.map(s=>Object.values(s.evs).reduce((a,b)=>a+b,0));
+            sums.forEach((v,i)=>assert.equal(v,66,sets[i].species));return sums;
+          });
+          check('NATIVE_PROBE_10_NO_ITEM_DUPLICATES', 'six unique items', () => {
+            assert.equal(new Set(sets.map(s=>id(s.item))).size,sets.length);return 6;
+          });
+          check('NATIVE_PROBE_11_WISH_PP', 'Wish base PP=5; Champions effective PP=8', () => {
+            const move=dex.moves.get('wish');assert.equal(move.pp,5);
+            const b=newBattle();assert.equal(typeof b.calculatePP,'function');
+            const pp=b.calculatePP(move,3);assert.equal(pp,8);return {base:move.pp,pp_ups:3,effective:pp};
+          });
+          check('NATIVE_PROBE_12_STRENGTH_SAP_PP', 'Strength Sap base PP=5; effective PP=8', () => {
+            const move=dex.moves.get('strengthsap');assert.equal(move.pp,5);
+            const b=newBattle();const pp=b.calculatePP(move,3);assert.equal(pp,8);return pp;
+          });
+          check('NATIVE_PROBE_13_STAT_SPA', 'Modest Archaludon C194 at 50 and 32P', () => {
+            const b=newBattle();let sp=b.p1.pokemon[0].getStat('spa');assert.equal(sp,194);return sp;
+          });
+          check('NATIVE_PROBE_14_STAT_SPEED', 'Adamant Garchomp S154 at 50 and 32P', () => {
+            const b=newBattle();let sp=b.p1.pokemon[2].getStat('spe');assert.equal(sp,154);return sp;
+          });
+          check('NATIVE_PROBE_15_START_PREVIEW', 'real Battle receives six and starts at preview', () => {
+            const b=newBattle();assert.equal(b.started,true);assert.equal(b.sides.length,2);
+            assert.ok(['teampreview','move'].includes(b.requestState));return b.requestState;
+          });
+          check('NATIVE_PROBE_16_TEAM_PREVIEW_TO_MOVE', 'selection transitions to move', () => {
+            const b=newBattle();if(b.requestState==='teampreview') b.makeChoices('team 123','team 123');
+            assert.equal(b.requestState,'move');return {active_p1:b.p1.active[0]?.name,active_p2:b.p2.active[0]?.name};
+          });
+          function oneTurn() {
+            const b=newBattle();if(b.requestState==='teampreview') b.makeChoices('team 123','team 123');
+            const before=b.turn;b.makeChoices('move 1','move 1');
+            return {b,before, after:b.turn, hp:[b.p1.pokemon[0].hp,b.p2.pokemon[0].hp], transcript:b.log.filter(s=>s.startsWith('|move|')||s.startsWith('|-damage|'))};
+          }
+          check('NATIVE_PROBE_17_ONE_TURN', 'one real simulated turn completes', () => {
+            const x=oneTurn(); assert.ok(x.after>x.before);
+            assert.ok(x.transcript.some(x=>x.startsWith('|move|')));return {before:x.before,after:x.after,moves:x.transcript.filter(x=>x.startsWith('|move|')).length};
+          });
+          check('NATIVE_PROBE_18_REPRODUCIBLE_SEED', 'same seed gives identical HP and turn-action transcript', () => {
+            const a=oneTurn(),b=oneTurn();assert.deepEqual(a.hp,b.hp);assert.deepEqual(a.transcript,b.transcript);
+            const digest=crypto.createHash('sha256').update(JSON.stringify(a.transcript)).digest('hex');return {hp:a.hp,sha256:digest};
+          });
+          check('NATIVE_PROBE_19_SWITCH', 'switch after initial turn changes active slot', () => {
+            const {b}=oneTurn(); assert.equal(b.requestState,'move');
+            b.makeChoices('switch 2','move 1');
+            assert.equal(id(b.p1.active[0].species.name),'mimikyu');return {active:b.p1.active[0].species.name,turn:b.turn};
+          });
+          check('NATIVE_PROBE_20_SHADOW_SNEAK_PRIORITY', 'priority move before faster Earthquake', () => {
+            const b=newBattle(); if(b.requestState==='teampreview')b.makeChoices('team 213','team 412');
+            assert.equal(id(b.p1.active[0].species.name),'mimikyu'); assert.equal(id(b.p2.active[0].species.name),'garchomp');
+            b.makeChoices('move 2','move 1');
+            const moveLogs=b.log.filter(line=>line.startsWith('|move|'));
+            assert.ok(moveLogs.length>=1,'no move logs');
+            assert.match(moveLogs[0],/Mimikyu/, 'Shadow Sneak should have priority even when Garchomp is faster');
+            return {first_move:moveLogs[0],total_moves:moveLogs.length};
+          });
+          // Observations only: not assertions nor 33/34 certification.
+          try {
+            const b=newBattle();if(b.requestState==='teampreview')b.makeChoices('team 623','team 123');
+            observations.gyarados_before_mega = {species:b.p1.active[0]?.species?.name,item:b.p1.active[0]?.item,canMegaEvo:typeof b.actions.canMegaEvo==='function'?b.actions.canMegaEvo(b.p1.active[0]):'unknown'};
+          } catch (e) { observations.gyarados_before_mega_error=String(e).slice(0,500); }
+          const passed=cases.filter(x=>x.status==='PASS_SHOWDOWN_ONLY').length;
+          const failed=cases.length-passed;
+          const report={revision:'R27.237',source_commit:PIN,format:FORMAT,case_total:cases.length,passed_showdown_only:passed,failed,observations,cases,certification:{native33:'0/33',exact34:'0/34',champions_v1_2_2_legality:'0/38',field:'0/30',acceptance:'0/8',formal:'DENY'},limitations:['No retail-game reference traces in the test.','Simulator-only assertions are not retail-game parity certification.','No official current-season Frozen DB promotion.']};
+          console.log('R27237_REPORT',JSON.stringify(report));
+          if(failed)process.exitCode=1;
+          R27237_JS_END
+          node --check r27237_native_mechanics_probe.cjs
+          node r27237_native_mechanics_probe.cjs | tee r27237_run.log
+          # All JSON case outputs remain in official Actions step logs.
+          grep -q "^R27237_REPORT " r27237_run.log
+          echo "R27237_NATIVE_PROBE_EXECUTED"
+
+      - name: Quality boundary report
+        if: always()
+        shell: bash
+        run: |
+          echo '## R27.237 - fixed Showdown mechanics probes (research only)' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Commit: `812501ede865eea397cd6e9a6f040d73ff57cc84` / Node: `22.18.0`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Result: `${{ job.status }}`' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Detailed JSON case results: job log `R27237_CASE` and `R27237_REPORT` lines.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- NO retail-game proof; Native33=0/33, Exact34=0/34, legal38=0/38, Field=0/30, acceptance=0/8, FORMAL=DENY.' >> "$GITHUB_STEP_SUMMARY"
