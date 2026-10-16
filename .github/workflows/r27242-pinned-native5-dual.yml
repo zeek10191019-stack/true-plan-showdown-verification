@@ -1,0 +1,166 @@
+name: R27.242 Fixed Champions M-C 5 canonical dual controls (Showdown only)
+
+# Manual trigger and public standard free runner only.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r27242-dual-controls
+  cancel-in-progress: false
+
+jobs:
+  native5-dual:
+    if: ${{ github.event.repository.visibility == 'public' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Public repository safety gate
+        shell: bash
+        env:
+          REPO_PRIVATE: ${{ github.event.repository.private }}
+          REPO_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: |
+          set -euo pipefail
+          test "$REPO_PRIVATE" = false
+          test "$REPO_VISIBILITY" = public
+      - name: Checkout exact public simulator commit
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: 812501ede865eea397cd6e9a6f040d73ff57cc84
+          fetch-depth: 1
+          persist-credentials: false
+          path: showdown
+      - name: Setup exact Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify commit, primary source blob, npm install and build
+        shell: bash
+        working-directory: showdown
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '812501ede865eea397cd6e9a6f040d73ff57cc84'
+          test "$(node -v)" = 'v22.18.0'
+          test "$(git hash-object --no-filters data/mods/champions/scripts.ts)" = '7f100a0947a203454a1a97b54f6a99932e808bce'
+          test "$(git hash-object --no-filters sim/team-validator.ts)" = '89ce5bda43670169be6718cb304ac73902eada7a'
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/battle.js
+          test -f dist/sim/team-validator.js
+          echo 'R27242_BUILD_PASS'
+      - name: Execute 5 positive and negative simulator controls
+        shell: bash
+        working-directory: showdown
+        run: |
+          set -euo pipefail
+          cat > r27242_native5_controls.cjs <<'R27242_JS_EOF'
+          'use strict';
+          // R27.242 research-only controls. Run from pinned pokemon-showdown repository root.
+          // Cannot promote Native33/Exact34 without verified canonical raw contract + actual retail-game evidence.
+          const assert = require('node:assert/strict');
+          const { Dex } = require('./dist/sim/dex');
+          const { Battle } = require('./dist/sim/battle');
+          const { TeamValidator } = require('./dist/sim/team-validator');
+          const PIN='812501ede865eea397cd6e9a6f040d73ff57cc84';
+          const FORMAT='gen9championsbssregmc';
+          const canonicalIds=[
+           'M_C_FORMAT_EXISTS','STAT_POINTS_0_32_TOTAL_LE_66',
+           'WISH_EFFECTIVE_PP8','STRENGTH_SAP_EFFECTIVE_PP8','CHAMPIONS_STAT_POINTS_EFFECTIVE_EV'
+          ];
+          const cases=[];
+          const clone=x=>structuredClone(x);
+          const arch={species:'Archaludon',ability:'Sturdy',item:'White Herb',nature:'Modest',level:50,
+           moves:['Steel Beam','Draco Meteor','Thunderbolt','Stealth Rock'],evs:{hp:2,spa:32,spe:32}};
+          const otherFive=[
+           {species:'Mimikyu',ability:'Disguise',item:'Life Orb',nature:'Adamant',level:50,moves:['Play Rough','Shadow Sneak','Swords Dance','Curse'],evs:{hp:1,atk:32,def:1,spe:32}},
+           {species:'Garchomp',ability:'Rough Skin',item:'Focus Sash',nature:'Adamant',level:50,moves:['Earthquake','Scale Shot','Dragon Tail','Stealth Rock'],evs:{hp:2,atk:32,spe:32}},
+           {species:'Delphox',ability:'Blaze',item:'Delphoxite',nature:'Modest',level:50,moves:['Flamethrower','Psyshock','Grass Knot','Nasty Plot'],evs:{hp:1,def:1,spa:32,spe:32}},
+           {species:'Sylveon',ability:'Pixilate',item:'Leftovers',nature:'Bold',level:50,moves:['Hyper Voice','Detect','Yawn','Wish'],evs:{hp:32,def:31,spe:3}},
+           {species:'Gyarados',ability:'Intimidate',item:'Gyaradosite',nature:'Adamant',level:50,moves:['Dragon Dance','Earthquake','Ice Fang','Power Whip'],evs:{hp:1,atk:32,def:1,spe:32}},
+          ];
+          const six=(head=arch)=>[head,...otherFive];
+          function check(id,positive,negative){
+           try {
+             const observed_positive=positive();
+             const observed_negative=negative();
+             const row={id,status:'PASS_SHOWDOWN_DUAL_CONTROL_ONLY',positive:observed_positive??true,negative:observed_negative??true,
+               retail_parity:'NOT_MEASURED',canonical_contract_raw:'NOT_VERIFIED'};
+             cases.push(row);console.log('R27242_CASE',JSON.stringify(row));
+           } catch(e){let row={id,status:'FAIL',error:String(e&&e.stack||e).slice(0,1500),retail_parity:'NOT_MEASURED'};
+             cases.push(row);console.log('R27242_CASE',JSON.stringify(row));}
+          }
+          function battle(){const b=new Battle({formatid:FORMAT,seed:[1,2,3,4]}); b.setPlayer('p1',{name:'A',team:six()});b.setPlayer('p2',{name:'B',team:six()});return b;}
+          const dex=Dex.mod('champions');
+          check('M_C_FORMAT_EXISTS',()=>{
+            const f=Dex.formats.get(FORMAT);assert.equal(f.exists,true);assert.equal(f.mod,'champions');
+            assert.equal(f.gameType||'singles','singles');return {format:f.id,mod:f.mod,gameType:f.gameType||'singles'};
+          },()=>{
+            const other=Dex.formats.get('gen9championsbssregmb');
+            assert.notEqual(other.id,FORMAT);
+            assert.notEqual(other.mod,'champions');
+            return {reject_other_format_as_current:true,other:other.id,other_mod:other.mod};
+          });
+          check('STAT_POINTS_0_32_TOTAL_LE_66',()=>{
+            const val=TeamValidator.get(FORMAT);
+            const valid=val.validateSet(clone(arch),{});
+            assert.ok(!valid?.length,'66P baseline rejected: '+JSON.stringify(valid));return {set:'archaludon',sum:66,validator:'accepted'};
+          },()=>{
+            const val=TeamValidator.get(FORMAT);
+            const excessTotal=clone(arch);excessTotal.evs.hp=3; // 67, each stat <=32
+            const overSingle=clone(arch);overSingle.evs.spa=33;overSingle.evs.spe=31; // 66 total, one stat >32
+            const e1=val.validateSet(excessTotal,{}),e2=val.validateSet(overSingle,{});
+            assert.ok(Array.isArray(e1)&&e1.some(s=>/66|Stat Points/i.test(s)),'67P must be rejected with stat-point error: '+JSON.stringify(e1));
+            assert.ok(Array.isArray(e2)&&e2.some(s=>/32 Stat Points/i.test(s)),'33P must be rejected: '+JSON.stringify(e2));
+            return {sum67_rejected:e1.filter(s=>/66|Stat Points/i.test(s)).slice(0,2),per_stat33_rejected:e2.filter(s=>/32 Stat Points/i.test(s)).slice(0,2)};
+          });
+          for(const [id,name] of [['WISH_EFFECTIVE_PP8','wish'],['STRENGTH_SAP_EFFECTIVE_PP8','strengthsap']]){
+            check(id,()=>{
+              const m=dex.moves.get(name);assert.equal(m.pp,5);const actual=battle().calculatePP(m,3);
+              assert.equal(actual,8);return {move:name,base:5,pp_ups:3,max_pp:actual};
+            },()=>{
+              const std=Dex.mod('gen9').moves.get(name);assert.equal(std.pp,10);
+              assert.notEqual(std.pp,dex.moves.get(name).pp);
+              assert.equal(battle().calculatePP(std,3),12);return {non_champions_base:10,wrong_when_used_as_champions:12};
+            });
+          }
+          check('CHAMPIONS_STAT_POINTS_EFFECTIVE_EV',()=>{
+           const b=battle();assert.equal(b.p1.pokemon[0].getStat('spa'),194);const evs=clone(arch);evs.evs.spa=0;
+           const control=new Battle({formatid:FORMAT,seed:[1,2,3,4]});control.setPlayer('p1',{name:'C',team:six(evs)});control.setPlayer('p2',{name:'D',team:six()});
+           const stat0=control.p1.pokemon[0].getStat('spa');assert.ok(stat0<194);return {spa32:194,spa0:stat0};
+          },()=>{
+            const source=dex.data.Scripts.statModify;
+            assert.equal(typeof source,'function');
+            // Explicit mutant control: a rule that simply ignores stat points cannot reproduce both values.
+            const hi=battle().p1.pokemon[0].getStat('spa');
+            const base=arch; const broken=clone(base);broken.evs.spa=0;
+            const control=new Battle({formatid:FORMAT,seed:[1,2,3,4]});control.setPlayer('p1',{name:'C',team:six(broken)});control.setPlayer('p2',{name:'D',team:six()});
+            assert.notEqual(hi,control.p1.pokemon[0].getStat('spa'));
+            return {zeroed_32P_mutant_detected:true};
+          });
+          assert.deepEqual(cases.map(x=>x.id),canonicalIds);
+          const passed=cases.filter(x=>x.status==='PASS_SHOWDOWN_DUAL_CONTROL_ONLY').length;
+          const report={revision:'R27.242',source_commit:PIN,format:FORMAT,subset_size:5,total_33:33,passed,failed:5-passed,
+           source_contract_raw_sha256_verified:false,exact34_original_case_ids_verified:false,
+           formal_gates:{Native33:'0/33',Exact34:'0/34',legal38:'0/38',Field:'0/30',acceptance:'0/8',Stage1_PURE:'BLOCKED',FORMAL:'DENY'},cases};
+          console.log('R27242_REPORT',JSON.stringify(report));if(passed!==5)process.exitCode=1;
+          R27242_JS_EOF
+          node --check r27242_native5_controls.cjs
+          node r27242_native5_controls.cjs | tee r27242_native5.log
+          test "$(grep -c '^R27242_CASE ' r27242_native5.log)" = '5'
+          grep -q '^R27242_REPORT ' r27242_native5.log
+      - name: Certification boundary summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## R27.242 Showdown native subset, not retail parity'
+            echo '- Source SHA: `812501ede865eea397cd6e9a6f040d73ff57cc84`'
+            echo '- Research-only 5 dual-control cases; see R27242_CASE and R27242_REPORT.'
+            echo '- Outcome: `${{ job.status }}`'
+            echo '- Original canonical matrix not acquired; Exact34 registry not recovered.'
+            echo '- Native33=0/33, Exact34=0/34, legal38=0/38, Field=0/30, acceptance=0/8, FORMAL=DENY.'
+          } >> "$GITHUB_STEP_SUMMARY"
