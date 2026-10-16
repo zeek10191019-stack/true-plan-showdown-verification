@@ -1,0 +1,203 @@
+name: R27.246 Double Shock multiseed and unrelated move regression
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r27246-double-shock-multiseed
+  cancel-in-progress: false
+
+jobs:
+  compare-original-and-isolated-patch:
+    if: ${{ github.event.repository.visibility == 'public' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Public-only safety guard
+        shell: bash
+        env:
+          VISIBILITY: ${{ github.event.repository.visibility }}
+          PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$VISIBILITY" = public
+          test "$PRIVATE" = false
+      - name: Checkout pinned PUBLIC Showdown into isolated workdir
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: 812501ede865eea397cd6e9a6f040d73ff57cc84
+          path: showdown
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Node.js 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Assert upstream identity, npm install and build
+        working-directory: showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 812501ede865eea397cd6e9a6f040d73ff57cc84
+          test "$(node --version)" = v22.18.0
+          test "$(git hash-object --no-filters data/mods/champions/moves.ts)" = 8852acd15a76b8287c99e08fc4cba70f5f2c132a
+          test "$(git hash-object --no-filters data/moves.ts)" = cef991de31479632bddbbc8830d74e7e5d32c417
+          test "$(git hash-object --no-filters data/abilities.ts)" = e80995806899d09a6e12d677b3433c9a36fd5d90
+          npm ci --no-audit --no-fund
+          npm run build
+          echo R27246_BASE_BUILD_OK
+      - name: Compare 32 RNG seeds, two moves and two abilities before and after temporary patch
+        working-directory: showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > r27246_double_shock_probe.cjs <<'R27246_PROBE_EOF'
+          // Fixed Showdown simulator smoke for Double Shock + Iron Fist. Research-only.
+          'use strict';
+          const assert=require('node:assert/strict');
+          const {Dex}=require('./dist/sim/dex');
+          const {Battle}=require('./dist/sim/battle');
+          const EXPECTED_SOURCE='812501ede865eea397cd6e9a6f040d73ff57cc84';
+          const MODE=process.argv[2];
+          assert.ok(['before','after'].includes(MODE), 'Use before|after');
+          const dex=Dex.mod('champions');
+          const gen9=Dex.mod('gen9');
+          const move=dex.moves.get('doubleshock');
+          const original=gen9.moves.get('doubleshock');
+          assert.equal(move.exists,true);
+          assert.equal(original.exists,true);
+          const championPunch=!!move.flags.punch;
+          const basePunch=!!original.flags.punch;
+          assert.equal(basePunch,false,'GEN9_PUNCH_BASELINE_DRIFT');
+          assert.equal(championPunch,MODE==='after','EXPECTED_BEFORE_AFTER_PUNCH_FLAG');
+          for (const key of ['contact','protect','mirror']) assert.ok(move.flags[key],`LOST_ORIGINAL_FLAG_${key}`);
+          const ability=dex.abilities.get('ironfist');
+          assert.equal(typeof ability.onBasePower, 'function');
+          function abilityHook(m) {
+            let fired=false;
+            const ctx={chainModify(mul){fired=true;return mul;},debug() {}};
+            const result=ability.onBasePower.call(ctx,120,null,null,m);
+            return {fired,result:result??null};
+          }
+          const hook=abilityHook(move);
+          const hookOriginal=abilityHook(original);
+          assert.equal(hook.fired,MODE==='after','IRON_FIST_HOOK_UNEXPECTED');
+          assert.equal(hookOriginal.fired,false);
+          function set(species,ability,moves,evs={}) { return {species,ability,moves,evs,nature:'Adamant',level:50,item:''}; }
+          const SEEDS=Array.from({length:32},(_,i)=>[i+1,i+101,i+201,i+301]);
+          function physicalDamage(attackerAbility, seed, moveName='Double Shock') {
+            const p1=[set('Pawmot',attackerAbility,['Double Shock','Mach Punch'],{hp:2,atk:0,spe:32}),set('Mimikyu','Disguise',['Play Rough']),set('Garchomp','Rough Skin',['Earthquake']),set('Archaludon','Sturdy',['Dragon Pulse']),set('Delphox','Blaze',['Flamethrower']),set('Gyarados','Intimidate',['Waterfall'])];
+            const p2=[set('Sylveon','Pixilate',['Yawn'],{hp:32,def:32}),set('Garchomp','Rough Skin',['Earthquake']),set('Mimikyu','Disguise',['Play Rough']),set('Archaludon','Sturdy',['Dragon Pulse']),set('Delphox','Blaze',['Flamethrower']),set('Gyarados','Intimidate',['Waterfall'])];
+            const battle=new Battle({formatid:'gen9championsbssregmc',seed});
+            battle.setPlayer('p1',{name:'IronFistProbe',team:p1});
+            battle.setPlayer('p2',{name:'TargetProbe',team:p2});
+            assert.equal(battle.started,true);
+            if(battle.requestState==='teampreview')battle.makeChoices('team 123','team 123');
+            assert.equal(battle.p1.active[0].species.id,'pawmot');
+            assert.equal(battle.p2.active[0].species.id,'sylveon');
+            assert.equal(battle.requestState,'move');
+            const beforeHP=battle.p2.active[0].hp;
+            battle.makeChoices(moveName==='Double Shock'?'move 1':'move 2','move 1');
+            const afterHP=battle.p2.active[0].hp;
+            const moveEvents=battle.log.filter(l=>l.startsWith('|move|'));
+            assert.ok(moveEvents.some(l=>l.includes(moveName)),'EXPECTED_MOVE_NOT_USED');
+            const damage=beforeHP-afterHP;
+            assert.ok(damage>0,'NO_DAMAGE');
+            return {damage,beforeHP,afterHP,turn:battle.turn,moveEvent:moveEvents.find(l=>l.includes(moveName))};
+          }
+          const scenarios={};
+          for(const moveName of ['Double Shock','Mach Punch']){
+            scenarios[moveName]=SEEDS.map(seed=>({seed,iron_fist:physicalDamage('Iron Fist',seed,moveName),volt_absorb_control:physicalDamage('Volt Absorb',seed,moveName)}));
+          }
+          const report={revision:'R27.246',mode:MODE,commit:EXPECTED_SOURCE,format:'gen9championsbssregmc',double_shock:{champion_punch:championPunch,gen9_punch:basePunch,flags:move.flags},iron_fist_handler:{champions:hook,gen9:hookOriginal},seed_count:SEEDS.length,scenarios,source:'FIXED_SOURCE_OR_TEMPORARY_OVERLAY',retail_game_parity:'NOT_MEASURED',native33:'0/33',exact34:'0/34',acceptance:'0/8',formal:'DENY'};
+          console.log('R27246_'+MODE.toUpperCase()+' '+JSON.stringify(report));
+          R27246_PROBE_EOF
+          cat > r27246_compare.cjs <<'R27246_COMPARE_EOF'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const before=JSON.parse(fs.readFileSync('r27246_before.json','utf8'));
+          const after=JSON.parse(fs.readFileSync('r27246_after.json','utf8'));
+          assert.equal(before.seed_count,32);
+          assert.equal(after.seed_count,32);
+          assert.equal(before.double_shock.champion_punch,false);
+          assert.equal(after.double_shock.champion_punch,true);
+          assert.equal(before.double_shock.gen9_punch,false);
+          assert.equal(after.double_shock.gen9_punch,false);
+          assert.equal(before.iron_fist_handler.champions.fired,false);
+          assert.equal(after.iron_fist_handler.champions.fired,true);
+          const observations={};
+          for (const moveName of ['Double Shock','Mach Punch']) {
+            const bb=before.scenarios[moveName],aa=after.scenarios[moveName];
+            assert.equal(bb.length,32);assert.equal(aa.length,32);
+            let sumBefore=0,sumAfter=0;
+            for(let i=0;i<32;i++){
+              const pre=bb[i],post=aa[i];
+              assert.deepEqual(pre.seed,post.seed);
+              assert.equal(pre.volt_absorb_control.damage,post.volt_absorb_control.damage,'Non-Iron-Fist baseline drift');
+              assert.ok(pre.iron_fist.damage>0);assert.ok(post.iron_fist.damage>0);
+              if(moveName==='Double Shock') {
+                assert.equal(pre.iron_fist.damage,pre.volt_absorb_control.damage,'Iron Fist unexpectedly active in baseline');
+                assert.ok(post.iron_fist.damage>pre.iron_fist.damage,'Patched Iron Fist not stronger');
+              } else {
+                assert.equal(pre.iron_fist.damage,post.iron_fist.damage,'Unrelated punch changed by overlay');
+                assert.ok(pre.iron_fist.damage>pre.volt_absorb_control.damage,'Existing punching boost absent');
+              }
+              sumBefore+=pre.iron_fist.damage;sumAfter+=post.iron_fist.damage;
+            }
+            observations[moveName]={seeds:32,iron_fist_before_sum:sumBefore,iron_fist_after_sum:sumAfter,delta:sumAfter-sumBefore,unchanged_volt_absorb:true};
+          }
+          const result={revision:'R27.246',tag:'SHOWDOWN_TEMPORARY_PATCH_MULTISEED_ONLY',source_commit:after.commit,seed_count:32,simulated_battles:32*2*2*2,observations,retail_game_parity:'NOT_MEASURED',formal_gates:{Native33:'0/33',Exact34:'0/34',legal38:'0/38',Field:'0/30',acceptance:'0/8',FORMAL:'DENY'}};
+          console.log('R27246_COMPARISON '+JSON.stringify(result));
+          R27246_COMPARE_EOF
+          cat > r27246_temporary_patch.py <<'R27246_PATCH_EOF'
+          #!/usr/bin/env python3
+          """Temporarily patch a checked-out, pinned Showdown worktree. Never patch the canonical source archive."""
+          from pathlib import Path
+          import hashlib
+          import json
+          p=Path('data/mods/champions/moves.ts')
+          raw=p.read_bytes()
+          sha1='8852acd15a76b8287c99e08fc4cba70f5f2c132a'
+          # Source SHA is a git blob SHA1, NOT a plain content SHA1.
+          def git_sha(content):
+              return hashlib.sha1(f'blob {len(content)}\0'.encode('ascii')+content).hexdigest()
+          assert git_sha(raw)==sha1, f'UNEXPECTED_SOURCE_BLOB: {git_sha(raw)}'
+          s=raw.decode('utf-8')
+          anchor="export const Moves: import('../../../sim/dex-moves').ModdedMoveDataTable = {\n"
+          assert s.count(anchor)==1, 'Missing unique table anchor'
+          assert '\tdoubleshock: {' not in s, 'Double Shock already overridden upstream; re-audit manually'
+          addition="\tdoubleshock: {\n\t\tinherit: true,\n\t\tflags: {contact: 1, protect: 1, mirror: 1, punch: 1},\n\t},\n"
+          p.write_text(s.replace(anchor,anchor+addition,1),encoding='utf-8',newline='')
+          new=p.read_bytes()
+          assert new!=raw and new.count(b'doubleshock: {')==1
+          print('R27246_PATCH_APPLIED',json.dumps({'source_git_blob_sha1':sha1,'patched_git_blob_sha1':git_sha(new),'original_preserved_in_public_remote':True}))
+          R27246_PATCH_EOF
+          node --check r27246_double_shock_probe.cjs
+          node --check r27246_compare.cjs
+          python3 -m py_compile r27246_temporary_patch.py
+          node r27246_double_shock_probe.cjs before | tee r27246_before.log
+          grep '^R27246_BEFORE ' r27246_before.log | sed 's/^R27246_BEFORE //' > r27246_before.json
+          python3 r27246_temporary_patch.py
+          npm run build
+          node r27246_double_shock_probe.cjs after | tee r27246_after.log
+          grep '^R27246_AFTER ' r27246_after.log | sed 's/^R27246_AFTER //' > r27246_after.json
+          node r27246_compare.cjs
+          git status --porcelain
+          test "$(git rev-parse HEAD)" = 812501ede865eea397cd6e9a6f040d73ff57cc84
+          echo R27246_ISOLATED_PATCH_COMPARE_DONE
+      - name: Evidence boundary
+        shell: bash
+        if: always()
+        run: |
+          {
+            echo '## R27.246 - research-only Double Shock 32-seed patch experiment'
+            echo '- Source: pinned 812501ede865eea397cd6e9a6f040d73ff57cc84 (worktree temporary patch only)'
+            echo '- Job result: `${{ job.status }}`'
+            echo '- Look for R27246_BEFORE, R27246_AFTER, R27246_COMPARISON in official job log.'
+            echo '- Never merge changes automatically. No private Battle AI code. No artifacts. Seeded 256 isolated simulation battles.'
+            echo '- Original retail Champions comparison missing: Native33=0/33, Exact34=0/34, legal38=0/38, Field=0/30, acceptance=0/8, FORMAL=DENY.'
+          } >> "$GITHUB_STEP_SUMMARY"
