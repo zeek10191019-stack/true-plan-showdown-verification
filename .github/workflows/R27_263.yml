@@ -1,0 +1,357 @@
+# R27.263: Reuses R27.262 tests intact + adds a strict public protocol projection guard.
+# Source-tagged public events are caller-supplied; internal logs/live Champions not certified.
+name: R27.263 Policy Bridge Public-Protocol Source Guard
+'on':
+  workflow_dispatch: null
+permissions:
+  contents: read
+jobs:
+  bridge-recovery:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private
+      == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+    - name: Checkout immutable public Showdown
+      uses: actions/checkout@v4
+      with:
+        repository: smogon/pokemon-showdown
+        ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+        fetch-depth: 1
+        persist-credentials: false
+        path: pokemon-showdown
+    - name: Set Node.js pinned version
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22.18.0
+    - name: Verify pinned commit and compile
+      shell: bash
+      working-directory: pokemon-showdown
+      run: 'set -euo pipefail
+
+        test "$(git rev-parse HEAD)" = ''aa17ca0fac8bc5605df673bd8774c2d0e91efa43''
+
+        test "$(git rev-parse HEAD^{tree})" = ''98c9038b81fa5ed7f1e9818736b701918920501e''
+
+        test "$(node -v)" = ''v22.18.0''
+
+        npm ci --no-audit --no-fund
+
+        npm run build
+
+        echo ''R27_263_PINNED_BUILD PASS''
+
+        '
+    - name: Run portable unit and pinned simulator contract
+      shell: bash
+      working-directory: pokemon-showdown
+      run: "set -euo pipefail\ncat > battle_api.cjs <<'R27_262_FILE_battle_api_cjs'\n'use strict';\n/**\n * R27.259\
+        \ portable and deliberately conservative single-battle contract.\n * Not the original private Battle AI,\
+        \ not a Pokémon Champions physics oracle.\n * Zero dependencies; operates only on the owning side's Showdown\
+        \ request and\n * an explicit PUBLIC opponent observation. Unsupported states fail closed.\n */\nconst crypto\
+        \ = require('node:crypto');\nconst VERSION = 'r27.259.portable.v2';\n\nclass UnsupportedState extends Error\
+        \ {\n  constructor(code, details='') { super(`${code}${details ? ': '+details : ''}`); this.name='UnsupportedState';\
+        \ this.code=code; }\n}\nconst isFainted = p => /(?:^|\\s)fnt(?:\\s|$)/i.test(String(p.condition ?? ''));\n\
+        const sanit = x => String(x ?? '');\nconst ownMon = m => ({\n  ident:sanit(m.ident),details:sanit(m.details),condition:sanit(m.condition),active:!!m.active,\n\
+        \  moves:Array.isArray(m.moves)?m.moves.map(sanit):[],item:sanit(m.item),\n  baseAbility:sanit(m.baseAbility),reviving:!!m.reviving\n\
+        });\nfunction observe(ownRequest, explicitPublicFoe={}) {\n  if (ownRequest?.wait) return {v:VERSION,phase:'wait',own:[],active:null,foe:{species:null},forceSwitch:null,maxChosenTeamSize:null};\n\
+        \  if (!ownRequest || typeof ownRequest!=='object' || !Array.isArray(ownRequest.side?.pokemon))\n    throw\
+        \ new UnsupportedState('NO_OWN_REQUEST');\n  const phase=ownRequest.teamPreview?'preview':Array.isArray(ownRequest.forceSwitch)?'switch':\n\
+        \    Array.isArray(ownRequest.active)?'move':null;\n  if (!phase) throw new UnsupportedState('UNKNOWN_PHASE');\n\
+        \  const o={v:VERSION,phase,own:ownRequest.side.pokemon.map(ownMon),\n    active:Array.isArray(ownRequest.active)?ownRequest.active.map(a=>a?({\n\
+        \      moves:Array.isArray(a.moves)?a.moves.map(m=>({id:sanit(m.id),pp:Number.isFinite(m.pp)?m.pp:null,\n\
+        \        disabled:!!m.disabled})):[],\n      trapped:!!a.trapped,maybeTrapped:!!a.maybeTrapped,maybeDisabled:!!a.maybeDisabled,\n\
+        \      canMegaEvo:!!a.canMegaEvo,canMegaEvoX:!!a.canMegaEvoX,canMegaEvoY:!!a.canMegaEvoY,\n      canTerastallize:!!a.canTerastallize,canDynamax:!!a.canDynamax\n\
+        \    }):null):null,\n    foe:{species:typeof explicitPublicFoe?.species==='string'?explicitPublicFoe.species:null},\n\
+        \    forceSwitch:Array.isArray(ownRequest.forceSwitch)?ownRequest.forceSwitch.map(Boolean):null,\n    maxChosenTeamSize:Number.isInteger(ownRequest.maxChosenTeamSize)?ownRequest.maxChosenTeamSize:null};\n\
+        \  if (o.own.length>6) throw new UnsupportedState('TEAM_OVER_SIX');\n  return o;\n}\nfunction teamPreview(obs,selectionScores){\n\
+        \  if(obs.phase!=='preview'||obs.maxChosenTeamSize!==3||obs.own.length!==6)\n    throw new UnsupportedState('NON_6V3_PREVIEW');\n\
+        \  if(!Array.isArray(selectionScores)||selectionScores.length!==6||!selectionScores.every(Number.isFinite))\n\
+        \    throw new UnsupportedState('INVALID_SELECTION_SCORES');\n  const ranking=[0,1,2,3,4,5].sort((a,b)=>selectionScores[b]-selectionScores[a]||a-b);\n\
+        \  const indices=ranking.slice(0,3);\n  return {command:'team '+indices.map(i=>i+1).join(''),indices,source:'external_score_provider'};\n\
+        }\nfunction legalCandidates(obs,selectionScores){\n  if(obs.phase==='wait') return [{command:'',kind:'wait'}];\n\
+        \  if(obs.phase==='preview') return [{...teamPreview(obs,selectionScores),kind:'preview'}];\n  if(!Array.isArray(obs.own)||obs.own.length===0)throw\
+        \ new UnsupportedState('NO_ROSTER');\n  if(obs.phase==='switch'){\n    if(obs.forceSwitch?.length!==1 ||\
+        \ !obs.forceSwitch[0]) throw new UnsupportedState('ASYMMETRIC_SWITCH_WAIT');\n    const revivalActors=obs.own.filter(m=>m.reviving);\n\
+        \    if(revivalActors.length>1 || (revivalActors.length===1 && !revivalActors[0].active))\n      throw new\
+        \ UnsupportedState('AMBIGUOUS_REVIVAL_REQUEST');\n    const reviving=revivalActors.length===1;\n    const\
+        \ output=obs.own.map((m,i)=>(reviving ? isFainted(m) : (!m.active && !isFainted(m)))?\n      {command:`switch\
+        \ ${i+1}`,kind:reviving?'revival_target':'switch',index:i}:null).filter(Boolean);\n    if(output.length===0)throw\
+        \ new UnsupportedState('NO_SWITCH_TARGET');\n    return output;\n  }\n  if(obs.phase!=='move')throw new\
+        \ UnsupportedState('UNKNOWN_PHASE');\n  if(!Array.isArray(obs.active)||obs.active.length!==1||!obs.active[0])throw\
+        \ new UnsupportedState('NOT_SINGLE_ACTIVE');\n  const a=obs.active[0];\n  const output=[];\n  a.moves.forEach((m,i)=>{\n\
+        \    if(m.disabled || m.pp!==null && m.pp<=0)return;\n    output.push({command:`move ${i+1}`,kind:'move',index:i});\n\
+        \    if(a.canMegaEvo)output.push({command:`move ${i+1} mega`,kind:'mega_move',index:i});\n    if(a.canMegaEvoX)output.push({command:`move\
+        \ ${i+1} megax`,kind:'mega_x_move',index:i});\n    if(a.canMegaEvoY)output.push({command:`move ${i+1} megay`,kind:'mega_y_move',index:i});\n\
+        \  });\n  if(!a.trapped&&!a.maybeTrapped){\n    obs.own.forEach((m,i)=>{if(!m.active&&!isFainted(m))output.push({command:`switch\
+        \ ${i+1}`,kind:'switch',index:i});});\n  }\n  if(output.length===0)throw new UnsupportedState('NO_SAFE_ACTION_OR_STRUGGLE');\n\
+        \  return output;\n}\nfunction selectDecision(obs,candidates,dex){\n  if(!Array.isArray(candidates)||!candidates.length)throw\
+        \ new UnsupportedState('EMPTY_CANDIDATES');\n  if(obs.phase!=='move')return {command:candidates[0].command,kind:candidates[0].kind,policy:'baseline_v1'};\n\
+        \  const foe=obs.foe.species?dex?.species?.get(obs.foe.species):null;\n  const rated=candidates.map((c,seq)=>{\n\
+        \    if(!['move','mega_move','mega_x_move','mega_y_move'].includes(c.kind))return {...c,score:-1e6,seq};\n\
+        \    const moveId=obs.active[0].moves[c.index]?.id;\n    const m=dex?.moves?.get(moveId);\n    if(!m?.exists)\
+        \ return {...c,score:-1000,seq};\n    const typeEffect=foe?.exists?dex.getEffectiveness(m,foe):0;\n    const\
+        \ scale=Math.pow(2,typeEffect);\n    const damageProxy=(m.basePower||0)*scale+(m.priority||0)*5;\n    return\
+        \ {...c,score:damageProxy+(c.kind==='mega_move'?0.5:0),seq};\n  });\n  rated.sort((a,b)=>b.score-a.score||a.seq-b.seq);\n\
+        \  return {command:rated[0].command,kind:rated[0].kind,policy:'baseline_v1',score:rated[0].score};\n}\n\
+        function decision(ownRequest,publicFoe,selectionScores,dex){\n  const obs=observe(ownRequest,publicFoe),candidateList=legalCandidates(obs,selectionScores);\n\
+        \  const selected=selectDecision(obs,candidateList,dex);\n  if(!candidateList.some(c=>c.command===selected.command))throw\
+        \ new UnsupportedState('ILLEGAL_POLICY_ACTION');\n  return {v:VERSION,observation:obs,legal:candidateList.map(c=>c.command),choice:selected.command,\n\
+        \    policy:selected.policy,scope:'conservative_showdown_request',\n    observationHash:crypto.createHash('sha256').update(JSON.stringify(obs)).digest('hex')};\n\
+        }\n/** Explicit two-side battle stepping. `publicFoe` is injected by caller, never taken from foe set. */\n\
+        function step(battle,teamScores,publicFoeProvider){\n  if(battle.ended) return {ended:true};\n  if(!Array.isArray(teamScores)||teamScores.length!==2||typeof\
+        \ publicFoeProvider!=='function')\n    throw new UnsupportedState('BAD_STEP_INPUT');\n  const before=battle.turn,phase=battle.requestState;\n\
+        \  const decisions=battle.sides.map((side,i)=>decision(side.activeRequest,\n    publicFoeProvider(i),teamScores[i],battle.dex));\n\
+        \  battle.makeChoices(...decisions.map(d=>d.choice));\n  return {v:VERSION,phase,before,after:battle.turn,choices:decisions.map(d=>d.choice),\n\
+        \    observationHashes:decisions.map(d=>d.observationHash),ended:battle.ended};\n}\nmodule.exports={VERSION,UnsupportedState,observe,isFainted,teamPreview,legalCandidates,selectDecision,decision,step};\n\
+        R27_262_FILE_battle_api_cjs\ncat > private_policy_bridge.cjs <<'R27_262_FILE_private_policy_bridge_cjs'\n\
+        'use strict';\n/* R27.261 optional PRIVATE policy adapter. NO private source in this public module.\n *\
+        \ Adapts a private policy to R27.259/260 request-based simulator contract.\n * It does not claim compatibility\
+        \ with unavailable private v0.76 runtime.\n */\nconst crypto = require('node:crypto');\nconst { VERSION:\
+        \ CORE_VERSION, UnsupportedState, observe, legalCandidates, selectDecision } = require('./battle_api.cjs');\n\
+        const BRIDGE_VERSION = 'r27.261.policy-bridge.v1';\nconst HASH = v => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');\n\
+        function cloneFreeze(value) {\n  if (value === undefined) throw new UnsupportedState('UNDEFINED_POLICY_INPUT');\n\
+        \  const copy = JSON.parse(JSON.stringify(value));\n  function freeze(o) {\n    if (o && typeof o === 'object')\
+        \ {\n      Object.values(o).forEach(freeze);\n      Object.freeze(o);\n    }\n    return o;\n  }\n  return\
+        \ freeze(copy);\n}\nfunction ensurePlugin(plugin) {\n  if (plugin === undefined || plugin === null) return\
+        \ null;\n  if (typeof plugin !== 'object' || typeof plugin.decide !== 'function') throw new UnsupportedState('POLICY_INTERFACE_MISSING');\n\
+        \  return plugin;\n}\nfunction resolveScores(plugin,obs,explicitScores) {\n  if (obs.phase !== 'preview')\
+        \ return explicitScores;\n  if (explicitScores !== undefined && explicitScores !== null) return explicitScores;\n\
+        \  if (typeof plugin?.scorePreview !== 'function') throw new UnsupportedState('PREVIEW_POLICY_UNAVAILABLE');\n\
+        \  let scores;\n  try { scores = plugin.scorePreview(cloneFreeze(obs)); } catch(e) {throw new UnsupportedState('PREVIEW_POLICY_ERROR',String(e?.message||e));}\n\
+        \  if (scores && typeof scores.then === 'function') throw new UnsupportedState('ASYNC_PREVIEW_NOT_SUPPORTED');\n\
+        \  return scores;\n}\n/**\n * Only the own side request + explicitly declared PUBLIC foe species may enter.\n\
+        \ * Plugin sees serializable frozen {observation, legalActions, context}; neither\n * dex nor battle nor\
+        \ opponent hidden team reaches the plugin.\n * Invalid plugin decisions fail closed; never silently substitute\
+        \ a baseline.\n */\nfunction propose({ownRequest,publicFoe={},selectionScores=null,dex=null,plugin=null,context=null})\
+        \ {\n  plugin = ensurePlugin(plugin);\n  const obs = observe(ownRequest, publicFoe);\n  if (obs.v !== CORE_VERSION)\
+        \ throw new UnsupportedState('CORE_VERSION_MISMATCH');\n  const scores = resolveScores(plugin,obs,selectionScores);\n\
+        \  const candidates = legalCandidates(obs,scores);\n  const legal=candidates.map(c=>c.command);\n  if (new\
+        \ Set(legal).size!==legal.length)throw new UnsupportedState('DUPLICATE_LEGAL_CANDIDATES');\n  let choice,policy;\n\
+        \  if (plugin) {\n    const safeContext={traceId:typeof context?.traceId==='string'?context.traceId:null};\n\
+        \    // Explicitly no candidates' policy score, battle source, dex, or metadata.\n    let response;\n  \
+        \  try {response=plugin.decide(cloneFreeze(obs),cloneFreeze(legal),cloneFreeze(safeContext));}\n    catch(e){throw\
+        \ new UnsupportedState('POLICY_RUNTIME_ERROR',String(e?.message||e));}\n    if(response && typeof response.then==='function')\
+        \ throw new UnsupportedState('ASYNC_POLICY_NOT_SUPPORTED');\n    choice=typeof response==='string'?response:response?.command;\n\
+        \    policy=typeof plugin.id==='string' && plugin.id.trim()?plugin.id:'external_private_policy';\n  } else\
+        \ {\n    const decision=selectDecision(obs,candidates,dex);\n    choice=decision.command;\n    policy=decision.policy;\n\
+        \  }\n  if(typeof choice!=='string'||!legal.includes(choice)) throw new UnsupportedState('POLICY_ILLEGAL_ACTION');\n\
+        \  return Object.freeze({bridgeVersion:BRIDGE_VERSION,coreVersion:CORE_VERSION,phase:obs.phase,\n    choice,legal:Object.freeze([...legal]),policy,observationHash:HASH(obs),\n\
+        \    // Not a private engine's result or live Champions legal-action oracle.\n    scope:'pinned_showdown_adapter'});\n\
+        }\n/** Public wrapper to feed private policy an explicit own-side request. */\nfunction makeController({plugin=null,selectionScores=null,dex=null}={})\
+        \ {\n  ensurePlugin(plugin);\n  return Object.freeze({\n    decide(ownRequest,publicFoe={},context=null)\
+        \ {\n      return propose({ownRequest,publicFoe,selectionScores,dex,plugin,context});\n    },\n  });\n}\n\
+        /** Minimal handoff: caller must supply explicit public observations for each side.\n * The policy doesn't\
+        \ receive battle access; caller owns the engine.\n */\nfunction stepWithControllers(battle,{p1,p2},publicFoeBySide)\
+        \ {\n  if (!battle||!Array.isArray(battle.sides)||battle.sides.length!==2||typeof battle.makeChoices!=='function')\n\
+        \    throw new UnsupportedState('BAD_BATTLE_ADAPTER');\n  if(typeof publicFoeBySide!=='function') throw\
+        \ new UnsupportedState('NO_PUBLIC_FOE_PROVIDER');\n  if (battle.ended) return {ended:true};\n  if(!p1||!p2||typeof\
+        \ p1.decide!=='function'||typeof p2.decide!=='function')\n    throw new UnsupportedState('CONTROLLER_INTERFACE_MISSING');\n\
+        \  const d1=p1.decide(battle.sides[0].activeRequest,publicFoeBySide(0));\n  const d2=p2.decide(battle.sides[1].activeRequest,publicFoeBySide(1));\n\
+        \  // Commit only after BOTH decisions are checked. If either policy fails, no mutation.\n  const before=battle.turn;\n\
+        \  battle.makeChoices(d1.choice,d2.choice);\n  return {bridgeVersion:BRIDGE_VERSION,before,after:battle.turn,\n\
+        \    phase:d1.phase,choices:[d1.choice,d2.choice],observationHashes:[d1.observationHash,d2.observationHash],\n\
+        \    ended:!!battle.ended};\n}\nmodule.exports={BRIDGE_VERSION,propose,makeController,stepWithControllers};\n\
+        R27_262_FILE_private_policy_bridge_cjs\ncat > test_bridge.cjs <<'R27_262_FILE_test_bridge_cjs'\n'use strict';\n\
+        const assert=require('node:assert/strict');\nconst {UnsupportedState}=require('./battle_api.cjs');\nconst\
+        \ {BRIDGE_VERSION,propose,makeController,stepWithControllers}=require('./private_policy_bridge.cjs');\n\
+        let tested=0;\nfunction test(name,fn){fn();tested++;console.log('R27_262_UNIT '+JSON.stringify({name,status:'PASS'}));}\n\
+        const mon=(n,active=false,fainted=false,reviving=false)=>({ident:n,condition:fainted?'0 fnt':'100/100',active,reviving,moves:['tackle'],item:'',baseAbility:''});\n\
+        function reqMove(){return {side:{pokemon:[mon('A',true),mon('B'),mon('C')]},active:[{moves:[{id:'tackle',pp:12,disabled:false},{id:'growl',pp:0,disabled:false}],trapped:false}]};}\n\
+        function reqSwitch(revival=false){return {side:{pokemon:[mon('B',true,false,revival),mon('A',false,true),mon('C')]},forceSwitch:[true]};}\n\
+        function reqPreview(){return {side:{pokemon:['A','B','C','D','E','F'].map(x=>mon(x))},teamPreview:true,maxChosenTeamSize:3};}\n\
+        const pickFirst={id:'private.mock',decide:(_o,choices)=>choices[0]};\nconst expectedError=(fn,code)=>assert.throws(fn,e=>e\
+        \ instanceof UnsupportedState && e.code===code);\ntest('version defined',()=>assert.match(BRIDGE_VERSION,/r27\\\
+        .261/));\ntest('valid plugin move',()=>{let d=propose({ownRequest:reqMove(),plugin:pickFirst});assert.equal(d.choice,'move\
+        \ 1');assert.deepEqual(d.legal,['move 1','switch 2','switch 3']);});\ntest('object-return policy supported',()=>assert.equal(propose({ownRequest:reqMove(),plugin:{decide:()=>({command:'switch\
+        \ 3'})}}).choice,'switch 3'));\ntest('illegal nonlegal action rejected',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>\
+        \ 'move 4'}}),'POLICY_ILLEGAL_ACTION'));\ntest('illegal preview action with valid scores rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:{scorePreview:()=>[100,80,50,90,70,0],decide:()=>\
+        \ 'team 999'}}),'POLICY_ILLEGAL_ACTION'));\ntest('preview missing scores cannot advance simulated engine',()=>{let\
+        \ commits=0;const battle={sides:[{activeRequest:reqPreview()},{activeRequest:reqPreview()}],turn:0,ended:false,makeChoices(){commits++;}};const\
+        \ invalid=makeController({plugin:{decide:()=> 'team 142'}});const valid=makeController({selectionScores:[100,50,25,75,20,10]});expectedError(()=>stepWithControllers(battle,{p1:invalid,p2:valid},()=>({species:null})),'PREVIEW_POLICY_UNAVAILABLE');assert.equal(commits,0);assert.equal(battle.turn,0);});\n\
+        test('non-string action rejected',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>42}}),'POLICY_ILLEGAL_ACTION'));\n\
+        test('missing plugin entry rejected',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{}}),'POLICY_INTERFACE_MISSING'));\n\
+        test('plugin exceptions fail closed',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>{throw\
+        \ Error('bad')}}}),'POLICY_RUNTIME_ERROR'));\ntest('async plugin fails closed',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>Promise.resolve('move\
+        \ 1')}}),'ASYNC_POLICY_NOT_SUPPORTED'));\ntest('missing preview scores rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:pickFirst}),'PREVIEW_POLICY_UNAVAILABLE'));\n\
+        test('explicit preview scores used',()=>assert.equal(propose({ownRequest:reqPreview(),selectionScores:[100,2,3,90,4,5],plugin:pickFirst}).choice,'team\
+        \ 146'));\ntest('plugin preview scoring used',()=>{const p={id:'p',scorePreview:()=>[100,2,3,90,4,5],decide:(_o,opts)=>opts[0]};assert.equal(propose({ownRequest:reqPreview(),plugin:p}).choice,'team\
+        \ 146')});\ntest('async preview rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:{scorePreview:()=>Promise.resolve([]),decide:()=>''}}),'ASYNC_PREVIEW_NOT_SUPPORTED'));\n\
+        test('bad preview score rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:{scorePreview:()=>[1,2],decide:()=>''}}),'INVALID_SELECTION_SCORES'));\n\
+        test('normal switch excludes fainted',()=>assert.deepEqual(propose({ownRequest:reqSwitch(),plugin:pickFirst}).legal,['switch\
+        \ 3']));\ntest('revival targets only fainted and slot 2',()=>{const d=propose({ownRequest:reqSwitch(true),plugin:pickFirst});assert.deepEqual(d.legal,['switch\
+        \ 2']);assert.equal(d.choice,'switch 2');});\ntest('wait commands empty',()=>assert.equal(propose({ownRequest:{wait:true},plugin:pickFirst}).choice,''));\n\
+        test('strict public foe projection',()=>{let snapshot;const plugin={decide:o=>{snapshot=o;return 'move 1'}};const\
+        \ own=reqMove();propose({ownRequest:own,publicFoe:{species:'Garchomp',item:'SECRET_TOKEN',hidden:['private']},plugin});assert.equal(snapshot.foe.species,'Garchomp');assert.ok(!JSON.stringify(snapshot).includes('SECRET_TOKEN'));});\n\
+        test('policy cannot mutate observation',()=>{const plugin={decide:o=>{assert.throws(()=>{o.own[0].ident='SECRET'},TypeError);return\
+        \ 'move 1'}};propose({ownRequest:reqMove(),plugin});});\ntest('policy cannot mutate legal',()=>{const plugin={decide:(_,legal)=>{assert.throws(()=>legal.push('move\
+        \ 99'),TypeError);return legal[0]}};propose({ownRequest:reqMove(),plugin});});\ntest('does not hand simulator\
+        \ dex to plugin',()=>{let keys;const dex={moves:{get:()=>{throw Error('should not call')}}};const plugin={decide:(o,l,c)=>{keys=Object.keys(c);return\
+        \ l[0]}};propose({ownRequest:reqMove(),plugin,dex,context:{traceId:'trace',secret:'PRIVATE'}});assert.deepEqual(keys,['traceId']);});\n\
+        test('deterministic observation hash',()=>{const a=propose({ownRequest:reqMove(),plugin:pickFirst});const\
+        \ b=propose({ownRequest:reqMove(),plugin:pickFirst});assert.equal(a.observationHash,b.observationHash)});\n\
+        test('secret changes preserve public hash',()=>{const a=propose({ownRequest:reqMove(),plugin:pickFirst,publicFoe:{species:'Garchomp',secret:'A'}});const\
+        \ b=propose({ownRequest:reqMove(),plugin:pickFirst,publicFoe:{species:'Garchomp',secret:'B'}});assert.equal(a.observationHash,b.observationHash);});\n\
+        test('controller wrapper returns proposal',()=>assert.equal(makeController({plugin:pickFirst}).decide(reqMove()).choice,'move\
+        \ 1'));\ntest('unknown phase fail closed',()=>expectedError(()=>propose({ownRequest:{side:{pokemon:[mon('A')]}}}),'UNKNOWN_PHASE'));\n\
+        test('joint step atomic on policy rejection',()=>{let mutation=0;let battle={sides:[{activeRequest:reqMove()},{activeRequest:reqMove()}],turn:1,makeChoices(){mutation++}};expectedError(()=>stepWithControllers(battle,{p1:makeController({plugin:pickFirst}),p2:makeController({plugin:{decide:()=>\
+        \ 'move 40'}})},()=>({species:'Magikarp'})),'POLICY_ILLEGAL_ACTION');assert.equal(mutation,0);});\ntest('joint\
+        \ step passes validated actions',()=>{let inputs;const battle={sides:[{activeRequest:reqMove()},{activeRequest:reqMove()}],turn:1,ended:false,makeChoices(...c){inputs=c;this.turn++}};const\
+        \ r=stepWithControllers(battle,{p1:makeController({plugin:pickFirst}),p2:makeController({plugin:pickFirst})},()=>({species:'Magikarp'}));assert.deepEqual(inputs,['move\
+        \ 1','move 1']);assert.equal(r.after,2);});\ntest('joint step rejects missing public provider',()=>expectedError(()=>stepWithControllers({sides:[{},{}],makeChoices(){}},{p1:{},p2:{}},null),'NO_PUBLIC_FOE_PROVIDER'));\n\
+        test('baseline wait uses no dex',()=>assert.equal(propose({ownRequest:{wait:true}}).choice,''));\nconsole.log('R27_262_UNIT_SUMMARY\
+        \ '+JSON.stringify({pass:tested,total:tested,bridge_version:BRIDGE_VERSION}));\nR27_262_FILE_test_bridge_cjs\n\
+        cat > test_bridge_pinned.cjs <<'R27_262_FILE_test_bridge_pinned_cjs'\n'use strict';\n/** Run only from root\
+        \ of npm-built, pinned Showdown. */\nconst assert=require('node:assert/strict');\nconst crypto=require('node:crypto');\n\
+        const {Battle,Dex}=require('./dist/sim');\nconst {UnsupportedState}=require('./battle_api.cjs');\nconst\
+        \ {propose,makeController,stepWithControllers}=require('./private_policy_bridge.cjs');\nconst FORMAT='[Gen\
+        \ 9 Champions] BSS Reg M-C';\nconst evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};\nconst mk=(species,moves,ability,item='')=>({species,moves,ability,item,nature:'Hardy',level:50,evs});\n\
+        function teams(){return [\n [mk('Charizard',['growl'],'Blaze'),mk('Blastoise',['watergun'],'Torrent'),mk('Venusaur',['vinewhip'],'Overgrow'),mk('Pikachu',['thunderbolt'],'Static'),mk('Snorlax',['tackle'],'Immunity'),mk('Alakazam',['psychic'],'Synchronize')],\n\
+        \ [mk('Annihilape',['finalgambit'],'Vital Spirit'),mk('Magikarp',['splash'],'Swift Swim'),mk('Eevee',['tackle'],'Run\
+        \ Away'),mk('Raichu',['thunderbolt'],'Static'),mk('Machamp',['karatechop'],'No Guard'),mk('Lapras',['surf'],'Water\
+        \ Absorb')]\n];}\nfunction battle(){let f=Dex.formats.get(FORMAT);assert.ok(f.exists&&f.mod==='champions');let\
+        \ t=teams();return new Battle({formatid:f.id,strictChoices:true,seed:[1,2,3,4],p1:{name:'p1',team:t[0]},p2:{name:'p2',team:t[1]}})}\n\
+        const privateMock={id:'example_plugin_not_original_ai',\n scorePreview: obs=>{assert.equal(obs.phase,'preview');return\
+        \ [100,80,50,90,70,0];},\n decide: (obs,legal)=>{ // Replace this function with original policy after source\
+        \ integration.\n   if(obs.phase==='preview')return legal[0];\n   if(obs.phase==='switch')return legal[0];\n\
+        \   if(obs.phase==='wait')return '';\n   return legal.find(x=>x==='move 1')||legal[0];\n }};\nconst ctl1=makeController({plugin:privateMock}),ctl2=makeController({selectionScores:[100,75,65,3,2,1],dex:Dex});\n\
+        const publicFoe=b=>i=>({species:b.sides[1-i].active?.[0]?.species?.name||null});\nconst cases=[];\nfunction\
+        \ test(name,fn){try{const evidence=fn();const row={name,status:'PASS',evidence};cases.push(row);console.log('R27_262_CASE\
+        \ '+JSON.stringify(row));}catch(e){const row={name,status:'FAIL',error:String(e?.stack||e)};cases.push(row);console.error('R27_262_CASE\
+        \ '+JSON.stringify(row));process.exitCode=1;}}\ntest('EXTERNAL_POLICY_SELECTS_6_TO_3',()=>{const b=battle();try{const\
+        \ r=stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));assert.deepEqual(r.choices,['team 142','team 123']);assert.deepEqual(b.p1.pokemon.map(p=>p.species.name),['Charizard','Pikachu','Blastoise']);return\
+        \ {choices:r.choices,own_selected:b.p1.pokemon.map(p=>p.species.name)};}finally{b.destroy()}});\ntest('EXTERNAL_POLICY_TURN_AND_FORCED_SWITCH',()=>{const\
+        \ b=battle();try{stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));const m=stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));assert.deepEqual(m.choices,['move\
+        \ 1','move 1']);assert.equal(b.requestState,'switch');const s=stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));assert.deepEqual(s.choices,['switch\
+        \ 2','switch 2']);assert.equal(b.p1.active[0].species.name,'Pikachu');return {move:m.choices,switch:s.choices,own_active:b.p1.active[0].species.name};}finally{b.destroy()}});\n\
+        test('INVALID_PRIVATE_POLICY_CANNOT_ADVANCE_BATTLE',()=>{const b=battle();try{const invalid=makeController({plugin:{id:'illegal-preview',scorePreview:()=>[100,80,50,90,70,0],decide:()=>\
+        \ 'team 999'}});const prevLog=b.log.length,prevTurn=b.turn;assert.throws(()=>stepWithControllers(b,{p1:invalid,p2:ctl2},publicFoe(b)),e=>e\
+        \ instanceof UnsupportedState&&e.code==='POLICY_ILLEGAL_ACTION');assert.equal(b.log.length,prevLog);assert.equal(b.turn,prevTurn);assert.equal(b.requestState,'teampreview');return\
+        \ {no_engine_commit:true};}finally{b.destroy()}});\ntest('MISSING_PREVIEW_SCORING_FAILS_CLOSED_WITHOUT_COMMIT',()=>{const\
+        \ b=battle();try{const missing=makeController({plugin:{id:'no-preview-scores',decide:()=> 'team 142'}});const\
+        \ oldLen=b.log.length,oldTurn=b.turn;assert.throws(()=>stepWithControllers(b,{p1:missing,p2:ctl2},publicFoe(b)),e=>e\
+        \ instanceof UnsupportedState&&e.code==='PREVIEW_POLICY_UNAVAILABLE');assert.equal(b.log.length,oldLen);assert.equal(b.turn,oldTurn);assert.equal(b.requestState,'teampreview');return\
+        \ {guard:'PREVIEW_POLICY_UNAVAILABLE',engine_commit:false};}finally{b.destroy()}});\ntest('INVALID_TURN_POLICY_CANNOT_ADVANCE_BATTLE',()=>{const\
+        \ b=battle();try{stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));assert.equal(b.requestState,'move');const\
+        \ bad=makeController({plugin:{id:'illegal-turn',decide:()=> 'switch 99'}});const oldLen=b.log.length,oldTurn=b.turn;assert.throws(()=>stepWithControllers(b,{p1:bad,p2:ctl2},publicFoe(b)),e=>e\
+        \ instanceof UnsupportedState&&e.code==='POLICY_ILLEGAL_ACTION');assert.equal(b.log.length,oldLen);assert.equal(b.turn,oldTurn);assert.equal(b.requestState,'move');return\
+        \ {guard:'POLICY_ILLEGAL_ACTION',engine_commit:false};}finally{b.destroy()}});\ntest('HIDDEN_ENEMY_DATA_INVARIANT',()=>{const\
+        \ b=battle();try{stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));const req=b.p1.activeRequest;const\
+        \ pub={species:b.p2.active[0].species.name};const orig=propose({ownRequest:req,publicFoe:pub,plugin:privateMock});const\
+        \ tainted=propose({ownRequest:req,publicFoe:{...pub,privateMove:'spore',privateItem:'Choice Scarf',bench:'secret'},plugin:privateMock});assert.equal(orig.choice,tainted.choice);assert.equal(orig.observationHash,tainted.observationHash);return\
+        \ {choice:orig.choice,observationHash:orig.observationHash};}finally{b.destroy()}});\ntest('EXTERNAL_POLICY_FIXED_SEED_REPLAY',()=>{const\
+        \ results=[];for(let i=0;i<2;i++){const b=battle();try{let actions=[];for(let j=0;j<10&&!b.ended;j++){actions.push(stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b)).choices)}const\
+        \ hash=crypto.createHash('sha256').update(b.log.filter(x=>/^\\|(move|switch|turn|faint|win)\\|/.test(x)).join('\\\
+        n')).digest('hex');results.push({actions,hash});}finally{b.destroy()}}assert.deepEqual(results[0],results[1]);return\
+        \ {steps:results[0].actions.length,digest:results[0].hash}});\nconsole.log('R27_262_SUMMARY '+JSON.stringify({pass:cases.filter(x=>x.status==='PASS').length,total:cases.length,scope:'plugin\
+        \ mock and public pinned Showdown; private original runtime not connected'}));\nconsole.log('CERTIFICATION_GATE\
+        \ Native33=0/33 Exact34=0/34 Acceptance=0/8 FORMAL=DENY; old-party Stage1.5 excluded');\nif(cases.some(x=>x.status==='FAIL'))process.exitCode=1;\n\
+        R27_262_FILE_test_bridge_pinned_cjs\nnode --check battle_api.cjs\nnode --check private_policy_bridge.cjs\n\
+        node --check test_bridge.cjs\nnode --check test_bridge_pinned.cjs\nnode test_bridge.cjs\nnode test_bridge_pinned.cjs\n\
+        echo 'CERTIFICATION_GATE Native33=0/33 Exact34=0/34 Acceptance=0/8 FORMAL=DENY; old-party 3500 matches excluded'\n"
+    - name: 'Public-client protocol projection: privacy + pinned switch/faint integration'
+      shell: bash
+      working-directory: pokemon-showdown
+      run: "set -euo pipefail\ncat > public_protocol_projection.cjs <<'R27_263_FILE_public_protocol_projection_cjs'\n\
+        'use strict';\n/**\n * R27.263 / PUBLIC_PROTOCOL_PROJECTION: obtain opponent visible species from\n * an\
+        \ explicit player-facing *public* event stream; never inspect opposing side,\n * team, ability, item, RNG,\
+        \ or engine internal battle state.\n *\n * WARNING: Caller must supply a genuine player-facing stream. Passing\
+        \ an\n * engine's internal log does not prove provenance. This module fails closed\n * on known private/side-update\
+        \ markers and never forwards raw lines to policy.\n */\nconst crypto = require('node:crypto');\nconst {UnsupportedState}\
+        \ = require('./battle_api.cjs');\nconst VERSION = 'r27.263.public-protocol.v1';\nconst sha256 = x => crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');\n\
+        const BLOCKED = new Set(['split', 'request', 'sideupdate', 'error', 'raw', 'html', 'uhtml', 'uhtmlchange',\
+        \ 'debug']);\nconst APPEAR = new Set(['switch', 'drag', 'replace', 'detailschange', 'poke']);\nconst CHANGE\
+        \ = new Set(['-formechange']);\nconst faintType = 'faint';\nconst SPECIES = /^[a-zA-Z0-9 .:'’%♀♂\\-]{1,80}$/;\n\
+        \nfunction validSide(id) {\n  if(id!=='p1' && id!=='p2') throw new UnsupportedState('INVALID_VIEWER_SIDE');\n\
+        \  return id;\n}\nfunction extractActor(token) {\n  const m = /^(p[12])a: (.+)$/.exec(token || '');\n  if\
+        \ (!m) return null;\n  return {side:m[1],nickname:m[2]};\n}\nfunction speciesFromDetails(details) {\n  const\
+        \ value=String(details||'').split(',')[0].trim();\n  if(!SPECIES.test(value)) throw new UnsupportedState('MALFORMED_PUBLIC_SPECIES');\n\
+        \  return value;\n}\nfunction interpret(lines, viewer) {\n  validSide(viewer);\n  if (!Array.isArray(lines)\
+        \ || lines.length>100000 || lines.some(x=>typeof x!=='string'||x.length>8192)) {\n    throw new UnsupportedState('INVALID_PUBLIC_STREAM');\n\
+        \  }\n  const foeId=viewer==='p1'?'p2':'p1';\n  let species=null, revealed=false, fainted=false, changeCount=0;\n\
+        \  for(const line of lines) {\n    if(!line.startsWith('|')) throw new UnsupportedState('NON_PROTOCOL_PUBLIC_EVENT');\n\
+        \    if(line.includes('\\n')||line.includes('\\r')) throw new UnsupportedState('MULTILINE_PUBLIC_EVENT');\n\
+        \    const fields=line.split('|');\n    const type=fields[1];\n    if(BLOCKED.has(type)) throw new UnsupportedState('PRIVATE_OR_UNTRUSTED_PROTOCOL_EVENT');\n\
+        \    if(!APPEAR.has(type) && !CHANGE.has(type) && type!==faintType) continue;\n    // Team preview |poke|p1|species\
+        \ is public, but is not evidence of ACTIVE species.\n    if(type==='poke') continue;\n    const actor=extractActor(fields[2]);\n\
+        \    if(!actor || actor.side!==foeId) continue;\n    if(type===faintType) {species=null;fainted=true;changeCount++;continue;}\n\
+        \    // Pokemon species comes from a public switch/forme field, never nickname.\n    const details=fields[3];\n\
+        \    if(!details)throw new UnsupportedState('MISSING_PUBLIC_SPECIES');\n    species=speciesFromDetails(details);\n\
+        \    revealed=true;fainted=false;changeCount++;\n  }\n  return Object.freeze({projectionVersion:VERSION,species,foeId,\n\
+        \    // Boolean values only: no raw event texts or unknown opponent attributes.\n    revealed,fainted,changeCount});\n\
+        }\nfunction publicProjection({viewer,events,source}) {\n  if(source!=='PUBLIC_CLIENT_PROTOCOL')throw new\
+        \ UnsupportedState('UNVERIFIED_PROTOCOL_SOURCE');\n  const r=interpret(events,viewer);\n  return Object.freeze({species:r.species});\n\
+        }\nfunction publicObservationDigest({viewer,events,source}) {\n  const foe=publicProjection({viewer,events,source});\n\
+        \  return sha256({viewer,foe});\n}\nfunction publicFoeBySideFromStreams(streams) {\n  if(!streams || typeof\
+        \ streams!=='object') throw new UnsupportedState('MISSING_PUBLIC_STREAMS');\n  // Explicit independent inputs\
+        \ for each perspective, no fallthrough to engine state.\n  const result=Object.freeze([\n    publicProjection({viewer:'p1',...streams.p1}),\n\
+        \    publicProjection({viewer:'p2',...streams.p2}),\n  ]);\n  return index => {\n    if(index!==0&&index!==1)throw\
+        \ new UnsupportedState('INVALID_PLAYER_INDEX');\n    return result[index];\n  };\n}\nmodule.exports={VERSION,publicProjection,publicObservationDigest,publicFoeBySideFromStreams,interpret};\n\
+        R27_263_FILE_public_protocol_projection_cjs\ncat > test_public_protocol.cjs <<'R27_263_FILE_test_public_protocol_cjs'\n\
+        'use strict';\nconst assert=require('node:assert/strict');\nconst {UnsupportedState}=require('./battle_api.cjs');\n\
+        const {propose}=require('./private_policy_bridge.cjs');\nconst {VERSION,publicProjection,publicObservationDigest,publicFoeBySideFromStreams,interpret}=require('./public_protocol_projection.cjs');\n\
+        let count=0;\nconst test=(name,fn)=>{try{fn();count++;console.log('R27_263_PUBLIC_CASE '+JSON.stringify({name,status:'PASS'}))}catch(e){console.error('R27_263_PUBLIC_CASE\
+        \ '+JSON.stringify({name,status:'FAIL',error:String(e.stack||e)}));process.exitCode=1}};\nconst input=(events,viewer='p1')=>({source:'PUBLIC_CLIENT_PROTOCOL',viewer,events});\n\
+        const fail=(fn,code)=>assert.throws(fn,e=>e instanceof UnsupportedState&&e.code===code);\nconst moveRequest=()=>({side:{pokemon:[{ident:'p1:\
+        \ A',details:'Charizard, L50',condition:'100/100',active:true,moves:['ember']},{ident:'p1: B',details:'Pikachu,\
+        \ L50',condition:'100/100',active:false,moves:['thunderbolt']}]},active:[{moves:[{id:'ember',pp:10,disabled:false}],trapped:false}]});\n\
+        const policy={id:'ext',decide:(_o,legal)=>legal[0]};\ntest('explicit version',()=>assert.match(VERSION,/r27\\\
+        .263/));\ntest('public foe p2 switch',()=>assert.deepEqual(publicProjection(input(['|turn|1','|switch|p2a:\
+        \ M|Gyarados, L50|100/100'])),{species:'Gyarados'}));\ntest('public foe p1 from p2 view',()=>assert.equal(publicProjection(input(['|switch|p1a:\
+        \ Z|Pikachu, L50|99/99'],'p2')).species,'Pikachu'));\ntest('nickname not treated as species',()=>assert.equal(publicProjection(input(['|switch|p2a:\
+        \ PRIVATE_NICKNAME|Garchomp, L50|100/100'])).species,'Garchomp'));\ntest('no opponent active in preview',()=>assert.equal(publicProjection(input(['|poke|p2|Garchomp,\
+        \ L50','|teampreview|3'])).species,null));\ntest('public form transition',()=>assert.equal(publicProjection(input(['|switch|p2a:\
+        \ Gyarados|Gyarados, L50|100/100','|-formechange|p2a: Gyarados|Gyarados-Mega'])).species,'Gyarados-Mega'));\n\
+        test('faint clears active target',()=>assert.deepEqual(publicProjection(input(['|switch|p2a: Gyarados|Gyarados,\
+        \ L50|100/100','|faint|p2a: Gyarados'])),{species:null}));\ntest('replacing after faint recognized',()=>assert.equal(publicProjection(input(['|switch|p2a:\
+        \ Gyara|Gyarados, L50|100/100','|faint|p2a: Gyara','|switch|p2a: Z|Magikarp, L50|100/100'])).species,'Magikarp'));\n\
+        test('ignore own switches',()=>assert.equal(publicProjection(input(['|switch|p1a: Own|Alakazam, L50|100/100'])).species,null));\n\
+        test('unknown public move is not exposed',()=>assert.deepEqual(publicProjection(input(['|move|p2a: Z|Spore|p1a:\
+        \ Own','|turn|2'])),{species:null}));\ntest('public species injection does not reveal item',()=>{const p=publicProjection(input(['|switch|p2a:\
+        \ Z|Gengar, L50|100/100','|-item|p2a: Z|Choice Specs','|-ability|p2a: Z|Cursed Body']));assert.deepEqual(Object.keys(p),['species']);assert.ok(!JSON.stringify(p).includes('Choice\
+        \ Specs'))});\ntest('reject unverified protocol source',()=>fail(()=>publicProjection({...input([]),source:'ENGINE_INTERNAL_LOG'}),'UNVERIFIED_PROTOCOL_SOURCE'));\n\
+        test('reject private split marker',()=>fail(()=>publicProjection(input(['|split|p1','|switch|p2a: Z|Gengar,\
+        \ L50|100/100'])),'PRIVATE_OR_UNTRUSTED_PROTOCOL_EVENT'));\ntest('reject sideupdate/request',()=>{for(const\
+        \ event of ['|request|{\"side\":{\"pokemon\":[]}}','|sideupdate|p1']) fail(()=>publicProjection(input([event])),'PRIVATE_OR_UNTRUSTED_PROTOCOL_EVENT')});\n\
+        test('reject multiline spoof',()=>fail(()=>publicProjection(input(['|turn|1\\n|switch|p2a: Z|Gengar, L50|100/100'])),'MULTILINE_PUBLIC_EVENT'));\n\
+        test('reject malicious malformed species',()=>fail(()=>publicProjection(input(['|switch|p2a: Z|SECRET_TOKEN/Item|100/100'])),'MALFORMED_PUBLIC_SPECIES'));\n\
+        test('reject omitted species for opponent',()=>fail(()=>publicProjection(input(['|switch|p2a: Z||100/100'])),'MISSING_PUBLIC_SPECIES'));\n\
+        test('wrong viewer rejected',()=>fail(()=>publicProjection(input([],'p3')),'INVALID_VIEWER_SIDE'));\ntest('reject\
+        \ invalid array type',()=>fail(()=>publicProjection(input('not an event array')),'INVALID_PUBLIC_STREAM'));\n\
+        test('not affected by own or nonpublic ignored move names',()=>{const a=publicObservationDigest(input(['|switch|p2a:\
+        \ Z|Gengar, L50|100/100']));const b=publicObservationDigest(input(['|switch|p2a: Z|Gengar, L50|100/100','|move|p1a:\
+        \ Own|Hyper Beam|p2a: Z','|-item|p1a: Own|Leftovers']));assert.equal(a,b)});\ntest('both perspectives are\
+        \ independently derived',()=>{const f=publicFoeBySideFromStreams({p1:{source:'PUBLIC_CLIENT_PROTOCOL',events:['|switch|p2a:\
+        \ Z|Gengar, L50|100/100']},p2:{source:'PUBLIC_CLIENT_PROTOCOL',events:['|switch|p1a: X|Pikachu, L50|100/100']}});assert.deepEqual(f(0),{species:'Gengar'});assert.deepEqual(f(1),{species:'Pikachu'});fail(()=>f(2),'INVALID_PLAYER_INDEX')});\n\
+        test('mock private adapter consumes only public projection',()=>{const pub=publicProjection(input(['|switch|p2a:\
+        \ Z|Gyarados, L50|100/100']));const a=propose({ownRequest:moveRequest(),publicFoe:pub,plugin:policy});const\
+        \ b=propose({ownRequest:moveRequest(),publicFoe:{species:pub.species,secret:'NO_ACCESS'},plugin:policy});assert.equal(a.observationHash,b.observationHash);assert.equal(a.choice,b.choice)});\n\
+        console.log('R27_263_PUBLIC_SUMMARY '+JSON.stringify({pass:count,total:22,source:'synthetic public protocol;\
+        \ not live game certification'}));\nif(count!==22)process.exitCode=1;\nR27_263_FILE_test_public_protocol_cjs\n\
+        cat > test_public_pinned.cjs <<'R27_263_FILE_test_public_pinned_cjs'\n'use strict';\n/* Executed ONLY under\
+        \ pinned, npm-built Showdown.\n * Simulator emits an internal record; this test allowlists PUBLIC event\
+        \ types\n * to form a synthetic player-facing stream. NOT certification of live client data.\n */\nconst\
+        \ assert=require('node:assert/strict');\nconst {Battle,Dex}=require('./dist/sim');\nconst {makeController,stepWithControllers}=require('./private_policy_bridge.cjs');\n\
+        const {publicProjection,publicFoeBySideFromStreams}=require('./public_protocol_projection.cjs');\nconst\
+        \ format=Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');\nassert.ok(format.exists && format.mod==='champions');\n\
+        const set=(species,moves,ability)=>({species,moves,ability,level:50,nature:'Hardy',evs:{hp:0,atk:0,def:0,spa:0,spd:0,spe:0}});\n\
+        const create=()=>new Battle({formatid:format.id,strictChoices:true,seed:[1,2,3,4],p1:{name:'One',team:[set('Charizard',['growl'],'Blaze'),set('Blastoise',['watergun'],'Torrent'),set('Venusaur',['vinewhip'],'Overgrow'),set('Pikachu',['thunderbolt'],'Static'),set('Snorlax',['tackle'],'Immunity'),set('Alakazam',['psychic'],'Synchronize')]},p2:{name:'Two',team:[set('Annihilape',['finalgambit'],'Vital\
+        \ Spirit'),set('Magikarp',['splash'],'Swift Swim'),set('Eevee',['tackle'],'Run Away'),set('Raichu',['thunderbolt'],'Static'),set('Machamp',['karatechop'],'No\
+        \ Guard'),set('Lapras',['surf'],'Water Absorb')]} });\nconst p1=makeController({plugin:{id:'mock-private-not-original',scorePreview:()=>[100,80,50,90,70,0],decide:(_,legal)=>legal[0]}});\n\
+        const p2=makeController({selectionScores:[100,75,65,3,2,1],dex:Dex});\nlet cases=0;\nfunction test(name,run){try{let\
+        \ evidence=run();cases++;console.log('R27_263_PINNED_CASE '+JSON.stringify({name,status:'PASS',evidence}));}catch(e){console.error('R27_263_PINNED_CASE\
+        \ '+JSON.stringify({name,status:'FAIL',error:String(e.stack||e)}));process.exitCode=1;}}\nconst kind=/^\\\
+        |(switch|drag|replace|detailschange|\\-formechange|faint)\\|/;\nfunction publicFixture(b){\n  const sanitized=b.log.filter(line=>kind.test(line));\n\
+        \  // Explicitly model a public-client subset; the full internal log is NOT passed.\n  return {p1:{source:'PUBLIC_CLIENT_PROTOCOL',events:sanitized},p2:{source:'PUBLIC_CLIENT_PROTOCOL',events:sanitized}};\n\
+        }\ntest('PINNED_SWITCH_PUBLIC_SPECIES',()=>{const b=create();try{\n const feed=()=>publicFoeBySideFromStreams(publicFixture(b));\n\
+        \ assert.equal(feed()(0).species,null);\n stepWithControllers(b,{p1,p2},feed());\n const f=feed();assert.deepEqual(f(0),{species:'Annihilape'});assert.deepEqual(f(1),{species:'Charizard'});\n\
+        \ return {p1_foe:f(0).species,p2_foe:f(1).species};\n}finally{b.destroy()}});\ntest('PINNED_FAINT_AND_REPLACEMENT_PUBLIC_SPECIES',()=>{const\
+        \ b=create();try{\n const feed=()=>publicFoeBySideFromStreams(publicFixture(b));\n stepWithControllers(b,{p1,p2},feed());\n\
+        \ stepWithControllers(b,{p1,p2},feed());\n assert.equal(b.requestState,'switch');\n assert.equal(feed()(0).species,null);assert.equal(feed()(1).species,null);\n\
+        \ stepWithControllers(b,{p1,p2},feed());\n assert.equal(feed()(0).species,'Magikarp');assert.equal(feed()(1).species,'Pikachu');\n\
+        \ return {p1_foe:feed()(0).species,p2_foe:feed()(1).species};\n}finally{b.destroy()}});\nconsole.log('R27_263_PINNED_SUMMARY\
+        \ '+JSON.stringify({pass:cases,total:2,source:'allowlisted Showdown log fixture; not actual public-client\
+        \ capture'}));\nif(cases!==2)process.exitCode=1;\nR27_263_FILE_test_public_pinned_cjs\nnode --check battle_api.cjs\n\
+        node --check private_policy_bridge.cjs\nnode --check test_bridge.cjs\nnode --check test_bridge_pinned.cjs\n\
+        node --check public_protocol_projection.cjs\nnode --check test_public_protocol.cjs\nnode --check test_public_pinned.cjs\n\
+        node test_public_protocol.cjs\nnode test_public_pinned.cjs\necho \"R27_263_PUBLIC_PROTOCOL_EXIT PASS\"\n"
