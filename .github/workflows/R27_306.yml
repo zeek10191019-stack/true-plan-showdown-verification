@@ -1,0 +1,360 @@
+name: R27.306 Pinned Two-Turn Policy Sensitivity and Forced Replacement
+'on':
+  workflow_dispatch: null
+permissions:
+  contents: read
+jobs:
+  public-joint-action-probe:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+    - name: Set pinned Node.js 22.18.0
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22.18.0
+    - name: Pinned public one-ply and bounded two-turn explicit hypothesis smoke
+      shell: bash
+      run: "set -euo pipefail\nmkdir -p research\ncat > research/joint_action_ranker.cjs <<'R27302_JOINT_ACTION_RANKER_CJS_EOF'\n'use strict';\n/** R27.299 research\
+        \ contract. No physics claims: a caller-supplied hypothetical\n * PUBLIC-STATE oracle generates outcomes for each (own, opponent, belief world).\n * This\
+        \ module NEVER constructs hidden sets or reads simulator battle internals.\n */\nconst VERSION='r27.299.joint-action-ranking.contract.v1';\nconst EPS=1e-9;\n\
+        function ensure(x,code){if(!x)throw Error('R27299_RANK_'+code);}\nfunction probSet(xs,label){\n ensure(Array.isArray(xs)&&xs.length>0&&xs.length<=64,label+'_LENGTH');\n\
+        \ let seen=new Set(),sum=0;\n xs.forEach(x=>{ensure(x&&typeof x.id==='string'&&x.id.length>0&&!seen.has(x.id),label+'_ID');seen.add(x.id);\n  ensure(typeof\
+        \ x.p==='number'&&Number.isFinite(x.p)&&x.p>=0&&x.p<=1,label+'_P');sum+=x.p;});\n ensure(Math.abs(sum-1)<=EPS,label+'_SUM');return xs;\n}\nfunction sanitizedPublicObservation(obs){\n\
+        \ ensure(obs&&typeof obs==='object'&&!Array.isArray(obs),'OBS');\n const allowed=new Set(['v','phase','turn','own','active','foe','forceSwitch','maxChosenTeamSize','publicHistory']);\n\
+        \ ensure(Object.keys(obs).every(k=>allowed.has(k)),'OBS_UNDECLARED_FIELD');\n const foe=obs.foe||{};\n ensure(typeof foe==='object'&&Object.keys(foe).every(k=>['species','condition','status','visibleMoves','publicTypes'].includes(k)),'FOE_PRIVATE_FIELD');\n\
+        \ const o=JSON.parse(JSON.stringify(obs));\n if(o.foe&&o.foe.visibleMoves){ensure(Array.isArray(o.foe.visibleMoves),'FOE_VISIBLE_MOVES');}\n return o;\n}\n\
+        function rankJointActions({observation,ownLegal,opponentActions,worlds,oracle,riskWeight=0,revisitWeight=0}={}){\n const publicObs=sanitizedPublicObservation(observation);\n\
+        \ ensure(Array.isArray(ownLegal)&&ownLegal.length>0&&ownLegal.length<=36&&ownLegal.every(x=>typeof x==='string'&&x.length>0),'LEGAL');\n ensure(new Set(ownLegal).size===ownLegal.length,'DUPLICATE_ACTION');\n\
+        \ ensure(typeof oracle==='function','ORACLE');\n ensure([riskWeight,revisitWeight].every(x=>Number.isFinite(x)&&x>=0&&x<=10),'PENALTY');\n probSet(opponentActions,'OPP');probSet(worlds,'WORLD');\n\
+        \ const rows=ownLegal.map((a,index)=>{\n  let mean=0,worst=1,revisit=0;\n  for(const world of worlds)for(const opp of opponentActions){\n   const branches=oracle({observation:publicObs,ownAction:a,opponentAction:opp.id,worldId:world.id});\n\
+        \   ensure(Array.isArray(branches)&&branches.length>0&&branches.length<=128,'BRANCHES');\n   let branchProb=0;\n   for(const b of branches){\n    ensure(b&&Number.isFinite(b.p)&&b.p>=0&&b.p<=1,'BRANCH_P');\n\
+        \    ensure(Number.isFinite(b.value)&&b.value>=0&&b.value<=1,'VALUE');\n    ensure(Number.isFinite(b.revisit)&&b.revisit>=0&&b.revisit<=1,'REVISIT');\n  \
+        \  const w=world.p*opp.p*b.p;mean+=w*b.value;revisit+=w*b.revisit;if(w>0)worst=Math.min(worst,b.value);branchProb+=b.p;\n   }\n   ensure(Math.abs(branchProb-1)<=EPS,'BRANCH_SUM');\n\
+        \  }\n  const score=mean-riskWeight*(1-worst)-revisitWeight*revisit;\n  return {action:a,mean:+mean.toFixed(8),worst:+worst.toFixed(8),revisit:+revisit.toFixed(8),score:+score.toFixed(8),index};\n\
+        \ });\n rows.sort((a,b)=>b.score-a.score||a.index-b.index);\n return Object.freeze({version:VERSION,ranked:rows.map(({index,...rest})=>Object.freeze(rest)),best:rows[0].action,mode:'HYPOTHETICAL_PUBLIC_ONLY_NOT_CERTIFIED'});\n\
+        }\nmodule.exports={VERSION,rankJointActions};\nR27302_JOINT_ACTION_RANKER_CJS_EOF\nprintf '%s  %s\\n' '86966ae94a6d480c27bbb7b908663435fce27999d956836e98a4652821d0754b'\
+        \ 'research/joint_action_ranker.cjs' | sha256sum -c -\ncat > research/public_joint_bridge.cjs <<'R27302_PUBLIC_JOINT_BRIDGE_CJS_EOF'\n'use strict';\n/** R27.302:\
+        \ public own request -> legal move subset -> hypothesis-only ranker.\n * This is an interface/security integration, NOT a real damage/turn oracle.\n * Switch\
+        \ actions and mega commands are intentionally excluded until fully validated.\n */\nconst {rankJointActions}=require('./joint_action_ranker.cjs');\nfunction\
+        \ fail(code){throw Error('R27302_'+code)}\nfunction availableMoves(req){\n if(!req||typeof req!=='object'||req.wait||req.forceSwitch)fail('UNSUPPORTED_REQUEST');\n\
+        \ if(!Array.isArray(req.active)||req.active.length!==1||!Array.isArray(req.active[0]?.moves))fail('ACTIVE_MOVE_REQUEST_REQUIRED');\n const moves=req.active[0].moves;\n\
+        \ if(moves.length<1||moves.length>4)fail('MOVE_LENGTH');\n const legal=[];\n for(let i=0;i<moves.length;i++){\n  const m=moves[i];\n  if(!m||typeof m.id!=='string'||!m.id||!Number.isInteger(m.pp)||m.pp<0||typeof\
+        \ m.disabled!=='boolean')fail('BAD_PUBLIC_MOVE');\n  if(!m.disabled&&m.pp>0)legal.push('move '+(i+1));\n }\n if(!legal.length)fail('NO_AVAILABLE_MOVE');\n\
+        \ return Object.freeze(legal);\n}\nfunction rankPublicMoves({ownRequest,publicFoe,turn=1,opponentActions,worlds,oracle,riskWeight=0,revisitWeight=0}={}){\n\
+        \ if(!publicFoe||typeof publicFoe.species!=='string'||!publicFoe.species)fail('NO_REVEALED_FOE');\n if(Object.keys(publicFoe).some(k=>!['species','condition','status','visibleMoves','publicTypes'].includes(k)))fail('PRIVATE_FOE_FIELD');\n\
+        \ const ownLegal=availableMoves(ownRequest);\n const observation={v:1,phase:'move',turn,foe:JSON.parse(JSON.stringify(publicFoe))};\n const ranked=rankJointActions({observation,ownLegal,opponentActions,worlds,oracle,riskWeight,revisitWeight});\n\
+        \ if(!ownLegal.includes(ranked.best))fail('NONLEGAL_CHOICE');\n return Object.freeze({choice:ranked.best,ranked:ranked.ranked,legal:ownLegal,scope:'RESEARCH_PUBLIC_REQUEST_ONLY_NO_PHYSICS'});\n\
+        }\nmodule.exports={availableMoves,rankPublicMoves};\nR27302_PUBLIC_JOINT_BRIDGE_CJS_EOF\nprintf '%s  %s\\n' '99d2f19da73fef8f0223d87bab233b146be342068fa038ecd8f507cadd4ff7ce'\
+        \ 'research/public_joint_bridge.cjs' | sha256sum -c -\ncat > research/test_r27302_unit.cjs <<'R27302_TEST_R27302_UNIT_CJS_EOF'\n'use strict';\nconst assert=require('node:assert/strict');\n\
+        const {availableMoves,rankPublicMoves}=require('./public_joint_bridge.cjs');\nlet n=0;const check=(name,f)=>{f();n++;console.log('R27302_UNIT '+JSON.stringify({name,status:'PASS'}))};\n\
+        const req={active:[{moves:[{id:'thunderbolt',pp:15,disabled:false},{id:'quickattack',pp:30,disabled:false}]}]};\nconst ctx={ownRequest:req,publicFoe:{species:'Golem'},opponentActions:[{id:'attack',p:.7},{id:'switch',p:.3}],worlds:[{id:'unrevealed',p:1}],oracle:({ownAction,opponentAction})=>[{p:1,value:ownAction==='move\
+        \ 2'?.55:opponentAction==='attack'?.1:.8,revisit:0}]};\ncheck('public legal moves',()=>assert.deepEqual([...availableMoves(req)],['move 1','move 2']));\n\
+        check('ranking from public request',()=>assert.equal(rankPublicMoves(ctx).choice,'move 2'));\ncheck('visible counterplay can change choice',()=>assert.equal(rankPublicMoves({...ctx,opponentActions:[{id:'attack',p:.1},{id:'switch',p:.9}]}).choice,'move\
+        \ 1'));\ncheck('disabled move excluded',()=>assert.deepEqual([...availableMoves({active:[{moves:[{id:'thunderbolt',pp:15,disabled:true},{id:'quickattack',pp:30,disabled:false}]}]})],['move\
+        \ 2']));\ncheck('zero PP move excluded',()=>assert.deepEqual([...availableMoves({active:[{moves:[{id:'thunderbolt',pp:0,disabled:false},{id:'quickattack',pp:30,disabled:false}]}]})],['move\
+        \ 2']));\ncheck('unknown switch not invented',()=>assert(rankPublicMoves(ctx).legal.every(x=>/^move [1-4]$/.test(x))));\ncheck('hidden opponent item fails\
+        \ closed',()=>assert.throws(()=>rankPublicMoves({...ctx,publicFoe:{species:'Golem',item:'Choice Band'}}),/PRIVATE_FOE_FIELD/));\ncheck('unsupported forced\
+        \ switch fails closed',()=>assert.throws(()=>availableMoves({...req,forceSwitch:true}),/UNSUPPORTED_REQUEST/));\ncheck('no available move fails closed',()=>assert.throws(()=>availableMoves({active:[{moves:[{id:'tackle',pp:0,disabled:false}]}]}),/NO_AVAILABLE_MOVE/));\n\
+        check('invalid PP fails closed',()=>assert.throws(()=>availableMoves({active:[{moves:[{id:'tackle',pp:-1,disabled:false}]}]}),/BAD_PUBLIC_MOVE/));\ncheck('invalid\
+        \ opponent belief fails closed',()=>assert.throws(()=>rankPublicMoves({...ctx,opponentActions:[{id:'attack',p:.5}]}),/OPP_SUM/));\ncheck('determinism',()=>assert.deepEqual(rankPublicMoves(ctx),rankPublicMoves(ctx)));\n\
+        console.log('R27302_UNIT_SUMMARY '+JSON.stringify({passed:n,total:12}));\nR27302_TEST_R27302_UNIT_CJS_EOF\nprintf '%s  %s\\n' '478a69138b1053900bd8fe3ea9a030b5075c23649c1b8b26c6f1cc30908b4503'\
+        \ 'research/test_r27302_unit.cjs' | sha256sum -c -\ncat > research/test_r27302_pinned.cjs <<'R27302_TEST_R27302_PINNED_CJS_EOF'\n'use strict';\n/** R27.302:\
+        \ inspect ONE authentic pinned Champions format PUBLIC request. */\nconst assert=require('node:assert/strict');\nconst {Battle,Dex}=require('./dist/sim');\n\
+        const {rankPublicMoves,availableMoves}=require('./public_joint_bridge.cjs');\nconst fmt=Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');\nassert(fmt.exists&&fmt.mod==='champions','R27302_PINNED_FORMAT_REQUIRED');\n\
+        const evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};\nconst mk=(species,moves,ability,item='')=>({species,moves,ability,item,nature:'Hardy',level:50,evs});\nconst\
+        \ own=[mk('Charizard',['flamethrower','scratch'],'Blaze'),mk('Blastoise',['surf','tackle'],'Torrent'),mk('Venusaur',['vinewhip','tackle'],'Overgrow'),mk('Pikachu',['thunderbolt','quickattack'],'Static'),mk('Snorlax',['tackle'],'Immunity'),mk('Alakazam',['psychic','recover'],'Synchronize')];\n\
+        const foe=[mk('Venusaur',['vinewhip'],'Overgrow'),mk('Magikarp',['splash'],'Swift Swim'),mk('Eevee',['tackle'],'Run Away'),mk('Garchomp',['tackle'],'Rough\
+        \ Skin'),mk('Machamp',['karatechop'],'No Guard'),mk('Lapras',['surf'],'Water Absorb')];\nconst b=new Battle({formatid:fmt.id,strictChoices:true,seed:[1,2,3,4],p1:{name:'Own',team:own},p2:{name:'Opponent',team:foe}});\n\
+        try{\n assert(b.sides[0].activeRequest,'R27302_REQUEST_MISSING');\n // Preview choices are deterministic research declarations, not learned selection.\n b.choose('p1','team\
+        \ 123');b.choose('p2','team 123');\n assert.equal(b.requestState,'move','R27302_MOVE_PHASE_EXPECTED');\n const req=b.sides[0].activeRequest;\n assert(req&&Array.isArray(req.active),'R27302_REAL_REQUEST_EXPECTED');\n\
+        \ const ownLegal=availableMoves(req);\n const foeSwitch=b.log.filter(x=>/^\\|switch\\|p2a: /.test(x)).at(-1);\n assert(foeSwitch,'R27302_NO_PUBLIC_FOE_SWITCH');\n\
+        \ const species=foeSwitch.match(/^\\|switch\\|p2a: ([^|]+)\\|/)[1];\n const result=rankPublicMoves({ownRequest:req,publicFoe:{species},turn:b.turn,\n  opponentActions:[{id:'possible-attack',p:.5},{id:'possible-switch',p:.5}],worlds:[{id:'illustrative-public',p:1}],\n\
+        \  oracle:({ownAction,opponentAction})=>[{p:1,value:(ownAction==='move 1'?(opponentAction==='possible-attack'?.65:.45):.3),revisit:0}]});\n assert(ownLegal.includes(result.choice),'R27302_NOT_IN_PUBLIC_MOVE_REQUEST');\n\
+        \ // Real simulator must accept the selected legal move, without reading private opponent set.\n b.choose('p1',result.choice);b.choose('p2','move 1');\n assert(b.turn>1,'R27302_PINNED_SIM_NOT_ADVANCED');\n\
+        \ console.log('R27302_PINNED_SMOKE '+JSON.stringify({status:'PASS',realFormat:fmt.name,publicFoe:species,publicLegal:ownLegal,illustrativeChoice:result.choice,turn:b.turn,scope:'public\
+        \ request + hypothetical branch values; not engine-based outcomes or strength proof'}));\n console.log('R27302_GATE '+JSON.stringify({production:'R27.266_UNMODIFIED',native33:'0/33',exact34:'0/34',acceptance:'0/8',FORMAL:'DENY',W_X:'CONSUMED_EXPOSED',championsRealCertified:false}));\n\
+        }finally{b.destroy()}\nR27302_TEST_R27302_PINNED_CJS_EOF\nprintf '%s  %s\\n' '33bdc32f70d7e8d3049e84c2d3c4915ddf24398a767d22f3512e0398c96e2820' 'research/test_r27302_pinned.cjs'\
+        \ | sha256sum -c -\n(cd research && node test_r27302_unit.cjs)\ncat > research/public_action_bridge.cjs <<'R27303_BRIDGE_EOF'\n'use strict';\n/** Public-own-request\
+        \ legal-action enumerator and joint action ranker.\n * Pinned Showdown research adapter; not Champions real-mechanics certification.\n * No direct enemy Battle/Side/Pokemon\
+        \ field access. No Tera/Z/Dynamax actions.\n */\nconst {rankJointActions}=require('./joint_action_ranker.cjs');\nfunction reject(code){throw Error('R27303_'+code)}\n\
+        function ownRoster(req){\n  const pokemon=req?.side?.pokemon;\n  if(!Array.isArray(pokemon)||pokemon.length<1||pokemon.length>6)reject('OWN_ROSTER_REQUIRED');\n\
+        \  pokemon.forEach((p,i)=>{\n    if(!p||typeof p!=='object'||!Number.isInteger(i)||typeof p.condition!=='string'||typeof p.active!=='boolean')reject('OWN_ENTRY_INVALID');\n\
+        \  });\n  return pokemon;\n}\nfunction healthy(p){return !p.condition.includes(' fnt')&&!/^\\s*0(?:\\/\\d+)?\\s*$/.test(p.condition)&&!/^\\s*0 fnt/.test(p.condition)}\n\
+        function switchChoices(req){\n  const roster=ownRoster(req);\n  return roster.flatMap((p,i)=>(!p.active&&healthy(p))?['switch '+(i+1)]:[]);\n}\nfunction legalPublicActions(req){\n\
+        \  if(!req||typeof req!=='object'||req.wait===true||req.teamPreview===true)reject('PHASE_UNSUPPORTED');\n  if(req.forceSwitch){\n    if(!Array.isArray(req.forceSwitch)||req.forceSwitch.length!==1||req.forceSwitch[0]!==true)reject('FORCE_FORMAT_UNSUPPORTED');\n\
+        \    const sw=switchChoices(req);if(!sw.length)reject('FORCED_NO_TARGET');return Object.freeze(sw);\n  }\n  if(!Array.isArray(req.active)||req.active.length!==1)reject('SINGLES_MOVE_ONLY');\n\
+        \  const act=req.active[0];\n  if(!act||!Array.isArray(act.moves)||act.moves.length<1||act.moves.length>4)reject('MOVE_ARRAY');\n  const legal=[];\n  for(let\
+        \ i=0;i<act.moves.length;i++){\n    const m=act.moves[i];\n    if(!m||typeof m.id!=='string'||!m.id)reject('MOVE_ID');\n    if(m.disabled!==undefined&&typeof\
+        \ m.disabled!=='boolean')reject('DISABLED_FORMAT');\n    if(m.pp!==undefined&&(!Number.isInteger(m.pp)||m.pp<0))reject('PP_FORMAT');\n    const special=['struggle','recharge'].includes(m.id);\n\
+        \    if(m.pp===undefined&&!special)reject('PP_UNKNOWN');\n    if(m.disabled===true||(!special&&m.pp===0))continue;\n    const choice='move '+(i+1);\n    legal.push(choice);\n\
+        \    // Mega is a separate voluntary command ONLY when the public active request explicitly permits it.\n    if(act.canMegaEvo===true)legal.push(choice+'\
+        \ mega');\n    if(act.canMegaEvoX===true)legal.push(choice+' megax');\n    if(act.canMegaEvoY===true)legal.push(choice+' megay');\n  }\n  if(act.trapped!==true&&act.maybeTrapped!==true)legal.push(...switchChoices(req));\n\
+        \  if(!legal.length)reject('NO_ACTION');\n  return Object.freeze(legal);\n}\nfunction publicPreviewChoice(req,indices){\n  if(!req||req.teamPreview!==true)reject('NOT_PREVIEW');\n\
+        \  const roster=ownRoster(req);\n  const n=req.maxChosenTeamSize;\n  if(!Number.isInteger(n)||n<1||n>roster.length)reject('PREVIEW_SIZE_REQUIRED');\n  if(!Array.isArray(indices)||indices.length!==n||new\
+        \ Set(indices).size!==n||indices.some(i=>!Number.isInteger(i)||i<1||i>roster.length))reject('PREVIEW_INDICES');\n  return 'team '+indices.join('');\n}\nfunction\
+        \ rankPublicActions({ownRequest,publicFoe,turn,opponentActions,worlds,oracle,riskWeight=0,revisitWeight=0}={}){\n  const legal=legalPublicActions(ownRequest);\n\
+        \  if(!publicFoe||typeof publicFoe.species!=='string'||!publicFoe.species)reject('PUBLIC_FOE_REQUIRED');\n  const req={v:1,phase:ownRequest.forceSwitch?'forceSwitch':'move',turn,foe:JSON.parse(JSON.stringify(publicFoe))};\n\
+        \  const ranked=rankJointActions({observation:req,ownLegal:legal,opponentActions,worlds,oracle,riskWeight,revisitWeight});\n  if(!legal.includes(ranked.best))reject('CHOICE_NOT_LEGAL');\n\
+        \  return Object.freeze({choice:ranked.best,legal,ranked:ranked.ranked,scope:'PINNED_SHOWDOWN_PUBLIC_REQUEST_HYPOTHETICAL_ORACLE'});\n}\nmodule.exports={legalPublicActions,publicPreviewChoice,rankPublicActions};\n\
+        R27303_BRIDGE_EOF\nprintf '%s  %s\\n' 'e53598c89511a3c3eab927adc8b4ccb243130e086ae197a5404d12fd2cdd72c9' 'research/public_action_bridge.cjs' | sha256sum -c\
+        \ -\ncat > research/test_r27303_unit.cjs <<'R27303_UNIT_EOF'\n'use strict';\nconst assert=require('node:assert/strict');\nconst {legalPublicActions,publicPreviewChoice,rankPublicActions}=require('./public_action_bridge.cjs');\n\
+        const roster=[\n  {active:true,condition:'100/100'},{active:false,condition:'120/120'},\n  {active:false,condition:'0 fnt'},{active:false,condition:'42/100'}\n\
+        ];\nconst request={active:[{moves:[{id:'flamethrower',pp:10,disabled:false},{id:'scratch',pp:30,disabled:false}]}],side:{pokemon:roster}};\nlet n=0;function\
+        \ test(name,f){f();n++;console.log('R27303_UNIT '+JSON.stringify({name,status:'PASS'}))}\ntest('move and optional switch',()=>assert.deepEqual(legalPublicActions(request),['move\
+        \ 1','move 2','switch 2','switch 4']));\ntest('fainted excluded',()=>assert(!legalPublicActions(request).includes('switch 3')));\ntest('trapped removes switches',()=>assert.deepEqual(legalPublicActions({...request,active:[{...request.active[0],trapped:true}]}),['move\
+        \ 1','move 2']));\ntest('maybe trapped fail closed on switch',()=>assert.deepEqual(legalPublicActions({...request,active:[{...request.active[0],maybeTrapped:true}]}),['move\
+        \ 1','move 2']));\ntest('PP zero excluded',()=>assert(!legalPublicActions({...request,active:[{moves:[{id:'flamethrower',pp:0,disabled:false},{id:'scratch',pp:30}]}]}).includes('move\
+        \ 1')));\ntest('Mega allowed only if signalled',()=>assert(legalPublicActions({...request,active:[{...request.active[0],canMegaEvo:true}]}).includes('move\
+        \ 1 mega')));\ntest('Mega disallowed without signal',()=>assert(!legalPublicActions(request).some(x=>x.includes('mega'))));\ntest('Mega X Y separately gated',()=>assert.deepEqual(legalPublicActions({...request,active:[{...request.active[0],canMegaEvoX:true}]}).filter(x=>x.includes('mega')),['move\
+        \ 1 megax','move 2 megax']));\ntest('forced switches only healthy bench',()=>assert.deepEqual(legalPublicActions({forceSwitch:[true],side:{pokemon:roster}}),['switch\
+        \ 2','switch 4']));\ntest('forced switch without target fails closed',()=>assert.throws(()=>legalPublicActions({forceSwitch:[true],side:{pokemon:[{active:true,condition:'0\
+        \ fnt'}]}}),/FORCED_NO_TARGET/));\ntest('single-only fail closed',()=>assert.throws(()=>legalPublicActions({...request,active:[request.active[0],request.active[0]]}),/SINGLES_MOVE_ONLY/));\n\
+        test('preview chosen three',()=>assert.equal(publicPreviewChoice({teamPreview:true,maxChosenTeamSize:3,side:{pokemon:roster}},[1,2,4]),'team 124'));\ntest('preview\
+        \ disallows duplicate',()=>assert.throws(()=>publicPreviewChoice({teamPreview:true,maxChosenTeamSize:3,side:{pokemon:roster}},[1,1,2]),/PREVIEW_INDICES/));\n\
+        test('preview disallows wrong size',()=>assert.throws(()=>publicPreviewChoice({teamPreview:true,maxChosenTeamSize:3,side:{pokemon:roster}},[1,2]),/PREVIEW_INDICES/));\n\
+        test('unknown preview size fails closed',()=>assert.throws(()=>publicPreviewChoice({teamPreview:true,side:{pokemon:roster}},[1,2,3]),/PREVIEW_SIZE_REQUIRED/));\n\
+        test('invalid unseen PP fails closed',()=>assert.throws(()=>legalPublicActions({...request,active:[{moves:[{id:'flamethrower'}]}]}),/PP_UNKNOWN/));\ntest('struggle\
+        \ legal special case',()=>assert(legalPublicActions({...request,active:[{moves:[{id:'struggle',disabled:false}]}]}).includes('move 1')));\ntest('invalid own\
+        \ roster fails closed',()=>assert.throws(()=>legalPublicActions({...request,side:{pokemon:[]}}),/OWN_ROSTER_REQUIRED/));\ntest('hypothetical joint ranker\
+        \ can rank switch',()=>{\n const s=rankPublicActions({ownRequest:request,publicFoe:{species:'Garchomp'},turn:2,\n opponentActions:[{id:'attack',p:.75},{id:'switch',p:.25}],worlds:[{id:'unknown',p:1}],\n\
+        \ oracle:({ownAction})=>[{p:1,value:ownAction==='switch 2'?.9:.1,revisit:0}]});\n assert.equal(s.choice,'switch 2');assert(s.legal.includes(s.choice));\n\
+        });\ntest('opponent hidden item rejected',()=>assert.throws(()=>rankPublicActions({ownRequest:request,publicFoe:{species:'Garchomp',item:'Choice Band'},turn:2,opponentActions:[{id:'attack',p:1}],worlds:[{id:'unseen',p:1}],oracle:()=>[{p:1,value:.5,revisit:0}]}),/FOE_PRIVATE_FIELD/));\n\
+        test('ranker rejects fabricated move action',()=>assert(!legalPublicActions(request).includes('move 9')));\nconsole.log('R27303_UNIT_SUMMARY '+JSON.stringify({passed:n,total:21}));\n\
+        R27303_UNIT_EOF\nprintf '%s  %s\\n' '14d6bcc1b3b2db48c1fe0eb49d2f31f5777bc310a71c0756a7b78f2a38fcb21f' 'research/test_r27303_unit.cjs' | sha256sum -c -\n\
+        cat > research/test_r27303_pinned.cjs <<'R27303_PINNED_EOF'\n'use strict';\n/** Fixed public Champions-Showdown test. Chooses only via own activeRequest.\
+        \ */\nconst assert=require('node:assert/strict');\nconst {Battle,Dex}=require('./dist/sim');\nconst {legalPublicActions,publicPreviewChoice,rankPublicActions}=require('./public_action_bridge.cjs');\n\
+        const fmt=Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');\nassert(fmt.exists&&fmt.mod==='champions','R27303_PINNED_FORMAT');\nconst evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};\n\
+        const mk=(species,moves,ability,item='')=>({species,moves,ability,item,nature:'Hardy',level:50,evs});\nconst own=[\n mk('Charizard',['flamethrower','scratch'],'Blaze','Charizardite\
+        \ X'),\n mk('Blastoise',['surf','tackle'],'Torrent'),\n mk('Venusaur',['vinewhip','tackle'],'Overgrow'),\n mk('Pikachu',['thunderbolt','quickattack'],'Static'),\n\
+        \ mk('Snorlax',['tackle'],'Immunity'),\n mk('Alakazam',['psychic','recover'],'Synchronize')\n];\nconst foe=[\n mk('Garchomp',['earthquake'],'Rough Skin'),\n\
+        \ mk('Magikarp',['splash'],'Swift Swim'),\n mk('Eevee',['tackle'],'Run Away'),\n mk('Venusaur',['vinewhip'],'Overgrow'),\n mk('Machamp',['karatechop'],'No\
+        \ Guard'),\n mk('Lapras',['surf'],'Water Absorb')\n];\nconst make=seed=>new Battle({formatid:fmt.id,strictChoices:true,seed:[seed,2,3,4],p1:{name:'Public\
+        \ Own',team:own},p2:{name:'Fixture Foe',team:foe}});\nconst log=[];\nfunction test(name,fn){fn();log.push(name);console.log('R27303_PINNED_CASE '+JSON.stringify({case:name,status:'PASS'}));}\n\
+        // 1: format-specific team preview and an intentionally non-default lead permutation.\n{\n const b=make(1);\n try {\n   const preview=b.sides[0].activeRequest;\n\
+        \   const cmd=publicPreviewChoice(preview,[1,2,3]);\n   assert.equal(cmd,'team 123');\n   b.choose('p1',cmd);b.choose('p2','team 123');\n   assert.equal(b.requestState,'move');\n\
+        \   const actions=legalPublicActions(b.sides[0].activeRequest);\n   test('PUBLIC_PREVIEW_AND_MOVES',()=>assert(actions.includes('move 1')));\n   test('PUBLIC_VOLUNTARY_SWITCH_LIST',()=>assert(actions.includes('switch\
+        \ 2')));\n   const r=rankPublicActions({ownRequest:b.sides[0].activeRequest,publicFoe:{species:'Garchomp'},turn:b.turn,\n    opponentActions:[{id:'attack',p:1}],worlds:[{id:'unseen',p:1}],oracle:({ownAction})=>[{p:1,value:ownAction==='switch\
+        \ 2'?.9:.1,revisit:0}]});\n   test('JOINT_RANKER_CHOSES_LEGAL_SWITCH',()=>assert.equal(r.choice,'switch 2'));\n   b.choose('p1',r.choice);b.choose('p2','move\
+        \ 1');\n   test('ACTUAL_SHOWDOWN_ACCEPTS_SWITCH',()=>assert.equal(b.sides[0].active[0].species.name,'Blastoise'));\n } finally {b.destroy()}\n}\n// 2: real\
+        \ megastone leads to an explicitly signaled voluntary move 1 mega choice.\n{\n const b=make(2);\n try {\n   b.choose('p1',publicPreviewChoice(b.sides[0].activeRequest,[1,2,3]));b.choose('p2','team\
+        \ 213');\n   assert.equal(b.requestState,'move');\n   const req=b.sides[0].activeRequest;\n   test('MEGA_FLAG_PRESENT',()=>assert.equal(req.active[0].canMegaEvo,true));\n\
+        \   const act=legalPublicActions(req);\n   test('MEGA_ACTION_FROM_PUBLIC_REQUEST',()=>assert(act.includes('move 1 mega')));\n   b.choose('p1','move 1 mega');b.choose('p2','move\
+        \ 1');\n   test('ACTUAL_SHOWDOWN_ACCEPTS_MEGA',()=>assert(b.log.some(x=>x.startsWith('|-mega|'))));\n }finally{b.destroy()}\n}\n// 3: Pikachu fainting to\
+        \ Garchomp's Earthquake yields a real force-switch request.\n{\n const b=make(3);\n try {\n   b.choose('p1',publicPreviewChoice(b.sides[0].activeRequest,[4,2,3]));b.choose('p2','team\
+        \ 123');\n   assert.equal(b.requestState,'move');\n   b.choose('p1','move 1');b.choose('p2','move 1');\n   test('ACTUAL_FORCED_SWITCH_REQUEST',()=>assert.equal(b.requestState,'switch'));\n\
+        \   const req=b.sides[0].activeRequest;\n   const acts=legalPublicActions(req);\n   test('FORCED_SWITCH_ONLY',()=>assert(acts.length>0&&acts.every(a=>/^switch\
+        \ [1-6]$/.test(a))));\n   const cmd=acts[0];\n   b.choose('p1',cmd);\n   test('SHOWDOWN_ACCEPTS_FORCED_SWITCH',()=>assert.equal(b.requestState,'move'));\n\
+        \ }finally{b.destroy()}\n}\nconsole.log('R27303_PINNED_SUMMARY '+JSON.stringify({passed:log.length,total:log.length,scopes:['preview','voluntary-switch','mega','forced-switch','joint-ranking'],format:fmt.name}));\n\
+        console.log('R27303_GATE '+JSON.stringify({productionPolicy:'R27.266_UNCHANGED',native33:'0/33',exact34:'0/34',acceptance:'0/8',FORMAL:'DENY',W_X:'CONSUMED',realChampionsCertified:false,physicsOracle:false,scope:'PUBLIC_PINNED_SHOWDOWN_LEGAL_CHOICES_ONLY'}));\n\
+        R27303_PINNED_EOF\nprintf '%s  %s\\n' 'a699b39b974d321ea86fbe9cf951e7ee93615bcd9fbe6e6d09b2296429daa4a0' 'research/test_r27303_pinned.cjs' | sha256sum -c\
+        \ -\nnode research/test_r27303_unit.cjs\ncat > research/pinned_oneply_oracle.cjs <<'R27304_ORACLE_EOF'\n'use strict';\n/** R27.304 synthetic, explicit-hypothesis,\
+        \ pinned Showdown one-ply oracle.\n * The only foe information consumed is the CALLER DECLARED hypothesis registry.\n * NEVER pass an actual observed Battle\
+        \ to this factory. Results are simulated\n * HP-tempo heuristics, NOT calibrated win probabilities or Champions certification.\n */\nfunction fail(code){throw\
+        \ Error('R27304_'+code)}\nfunction check(x,code){if(!x)fail(code)}\nfunction clone(x){return JSON.parse(JSON.stringify(x))}\nfunction positiveTeam(team){\n\
+        \ check(Array.isArray(team)&&team.length===6,'SIX_REQUIRED');\n for(const set of team){check(set&&typeof set.species==='string'&&set.species.length>0,'SET_SPECIES');\n\
+        \  check(Array.isArray(set.moves)&&set.moves.length>=1&&set.moves.length<=4,'SET_MOVES');}\n}\nfunction preview(s){check(typeof s==='string'&&/^team [1-6]{3}$/.test(s),'PREVIEW');\n\
+        \ check(new Set(s.slice(5)).size===3,'PREVIEW_DUP');return s}\nfunction scoreSide(side){\n check(side&&Array.isArray(side.pokemon),'SIM_SIDE');\n let total=0;for(const\
+        \ p of side.pokemon){check(Number.isFinite(p.hp)&&Number.isFinite(p.maxhp)&&p.maxhp>0,'SIM_HP');total+=Math.max(0,Math.min(1,p.hp/p.maxhp))}\n return total/side.pokemon.length;\n\
+        }\nfunction createPinnedOnePlyOracle({Battle,formatid,ownTeam,worldTeams,ownPreview='team 123',foePreview='team 123',seeds=[1001,1003,1007,1009]}={}){\n check(typeof\
+        \ Battle==='function','BATTLE_FACTORY');\n check(typeof formatid==='string'&&formatid.length>0,'FORMAT');\n positiveTeam(ownTeam);\n check(worldTeams&&typeof\
+        \ worldTeams==='object'&&!Array.isArray(worldTeams),'WORLDS');\n const keys=Object.keys(worldTeams);check(keys.length>=1&&keys.length<=16,'WORLD_COUNT');\n\
+        \ for(const k of keys){check(/^[a-z0-9_-]{1,48}$/i.test(k),'WORLD_ID');positiveTeam(worldTeams[k])}\n preview(ownPreview);preview(foePreview);\n check(Array.isArray(seeds)&&seeds.length>=1&&seeds.length<=16&&new\
+        \ Set(seeds).size===seeds.length&&seeds.every(x=>Number.isInteger(x)&&x>0&&x<65536),'SEEDS');\n const frozenOwn=clone(ownTeam),hypotheses=clone(worldTeams),frozenSeeds=[...seeds];\n\
+        \ const audit={branchCalls:0,simulatedBattles:0,syntheticWorlds:keys.length,seeds:[...frozenSeeds]};\n function oracle({ownAction,opponentAction,worldId}={}){\n\
+        \  check(typeof ownAction==='string'&&/^(?:move [1-4](?: mega| megax| megay)?|switch [1-6])$/.test(ownAction),'OWN_ACTION');\n  check(typeof opponentAction==='string'&&/^(?:move\
+        \ [1-4](?: mega| megax| megay)?|switch [1-6])$/.test(opponentAction),'OPP_ACTION');\n  check(Object.hasOwn(hypotheses,worldId),'UNKNOWN_WORLD');\n  audit.branchCalls++;\n\
+        \  return frozenSeeds.map(seed=>{\n   const b=new Battle({formatid,strictChoices:true,seed:[seed,2,3,4],p1:{name:'Explicit Own Hypothesis',team:clone(frozenOwn)},p2:{name:'Explicit\
+        \ Opponent Hypothesis',team:clone(hypotheses[worldId])}});\n   try{\n    check(b.requestState==='teampreview','PREVIEW_PHASE');\n    b.choose('p1',ownPreview);b.choose('p2',foePreview);\n\
+        \    check(b.requestState==='move','MOVE_PHASE');\n    // Simulator checks legality. Missing/invalid hypothesis moves fail closed.\n    b.choose('p1',ownAction);b.choose('p2',opponentAction);\n\
+        \    const own=scoreSide(b.sides[0]),foe=scoreSide(b.sides[1]);\n    const v=Math.max(0,Math.min(1,0.5+0.5*(own-foe)));\n    audit.simulatedBattles++;\n \
+        \   return {p:1/frozenSeeds.length,value:+v.toFixed(8),revisit:ownAction.startsWith('switch ')?1:0};\n   } finally{b.destroy()}\n  });\n }\n return Object.freeze({oracle,audit,scope:'PINNED_SYNTHETIC_EXPLICIT_WORLD_HP_TEMPO_NOT_REAL_CHAMPIONS'});\n\
+        }\nmodule.exports={createPinnedOnePlyOracle};\nR27304_ORACLE_EOF\nprintf '%s  %s\\n' 'b04b98b69b0b77cb055f09119c636717e062c3231d7d98d9f67525e5e794415e' 'research/pinned_oneply_oracle.cjs'\
+        \ | sha256sum -c -\ncat > research/test_r27304_unit.cjs <<'R27304_UNIT_EOF'\n'use strict';\nconst assert=require('node:assert/strict');\nconst {createPinnedOnePlyOracle}=require('./pinned_oneply_oracle.cjs');\n\
+        const team=(species='Pikachu')=>Array.from({length:6},(_,i)=>({species:species+i,moves:['tackle']}));\nlet constructed=0,destroyed=0;\nclass MockBattle{\n\
+        \ constructor(x){constructed++;this.options=x;this.requestState='teampreview';this.sides=[{pokemon:x.p1.team.map(()=>({hp:100,maxhp:100}))},{pokemon:x.p2.team.map(()=>({hp:100,maxhp:100}))}];}\n\
+        \ choose(side,cmd){if(cmd.startsWith('team')){if(side==='p2')this.requestState='move';return}\n  if(side==='p1')this.own=cmd;else if(side==='p2'){this.sides[1].pokemon[0].hp-=(this.own==='move\
+        \ 1'?60:10);this.sides[0].pokemon[0].hp-=30;}}\n destroy(){destroyed++}\n}\nconst expected = [\n ['reject missing Battle',()=>createPinnedOnePlyOracle({})],\n\
+        \ ['reject missing six',()=>createPinnedOnePlyOracle({Battle:MockBattle,formatid:'x',ownTeam:[],worldTeams:{h:team()}})],\n ['reject missing worlds',()=>createPinnedOnePlyOracle({Battle:MockBattle,formatid:'x',ownTeam:team(),worldTeams:{}})],\n\
+        \ ['reject invalid preview',()=>createPinnedOnePlyOracle({Battle:MockBattle,formatid:'x',ownTeam:team(),worldTeams:{h:team()},ownPreview:'team 111'})],\n\
+        \ ['reject bad seed',()=>createPinnedOnePlyOracle({Battle:MockBattle,formatid:'x',ownTeam:team(),worldTeams:{h:team()},seeds:[0]})],\n ['reject bad world\
+        \ id',()=>createPinnedOnePlyOracle({Battle:MockBattle,formatid:'x',ownTeam:team(),worldTeams:{'injection/..':team()}})]\n];\nlet count=0;\nfor(const [name,fn]\
+        \ of expected){assert.throws(fn,/R27304_/);count++;console.log('R27304_UNIT '+JSON.stringify({case:name,result:'PASS'}))}\nconst own=team(),world=team('Charizard');\n\
+        const obj=createPinnedOnePlyOracle({Battle:MockBattle,formatid:'fixed',ownTeam:own,worldTeams:{h:world},seeds:[7,8]});\nassert.equal(obj.scope.includes('SYNTHETIC'),true);count++;\n\
+        const a=obj.oracle({ownAction:'move 1',opponentAction:'move 1',worldId:'h'});\nconst b=obj.oracle({ownAction:'move 2',opponentAction:'move 1',worldId:'h'});\n\
+        assert.equal(a.length,2);assert(a[0].value>b[0].value);assert.equal(obj.audit.simulatedBattles,4);count++;\nassert(constructed===destroyed&&constructed===4);count++;\n\
+        assert.throws(()=>obj.oracle({ownAction:'hack',opponentAction:'move 1',worldId:'h'}),/R27304_OWN_ACTION/);count++;\nassert.throws(()=>obj.oracle({ownAction:'move\
+        \ 1',opponentAction:'move 1',worldId:'real-opponent'}),/R27304_UNKNOWN_WORLD/);count++;\n// Stored hypothesis is deep-copied: mutation of caller-owned arrays\
+        \ cannot alter simulations.\nworld[0].species='EXTERNAL_MUTATION';own[0].species='EXTERNAL_MUTATION';\nobj.oracle({ownAction:'move 1',opponentAction:'move\
+        \ 1',worldId:'h'});count++;\nassert.equal(obj.audit.simulatedBattles,6);count++;\nconsole.log('R27304_UNIT_SUMMARY '+JSON.stringify({passed:count,total:count}));\n\
+        R27304_UNIT_EOF\nprintf '%s  %s\\n' 'c9f9903b8d9e421cb0d1edcab291bc9776dd95be358948e3c9c4610a18c39ea3' 'research/test_r27304_unit.cjs' | sha256sum -c -\n\
+        cat > research/test_r27304_pinned.cjs <<'R27304_PINNED_EOF'\n'use strict';\n/** One-turn forward rollouts on NEW hypothetical Showdown Battles.\n * The observed\
+        \ battle only supplies p1.activeRequest. Its foe-side state is NEVER read.\n * Each hypothesized foe set is declared separately in worldTeams.\n */\nconst\
+        \ assert=require('node:assert/strict');\nconst {Battle,Dex}=require('./dist/sim');\nconst {legalPublicActions,rankPublicActions}=require('./public_action_bridge.cjs');\n\
+        const {createPinnedOnePlyOracle}=require('./pinned_oneply_oracle.cjs');\nconst fmt=Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');\nassert(fmt.exists&&fmt.mod==='champions');\n\
+        const evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};\nconst mk=(species,moves,ability,item='')=>({species,moves,ability,item,nature:'Hardy',level:50,evs});\nconst\
+        \ own=[\n mk('Pikachu',['thunderbolt','quickattack'],'Static'),\n mk('Charizard',['flamethrower','scratch'],'Blaze','Charizardite X'),\n mk('Venusaur',['vinewhip','tackle'],'Overgrow'),\n\
+        \ mk('Snorlax',['tackle'],'Immunity'),\n mk('Blastoise',['surf'],'Torrent'),\n mk('Alakazam',['psychic'],'Synchronize'),\n];\nconst makeFoe=(first='surf')=>[\n\
+        \ mk('Blastoise',[first,'tackle'],'Torrent'),\n mk('Magikarp',['splash'],'Swift Swim'),\n mk('Eevee',['tackle'],'Run Away'),\n mk('Venusaur',['vinewhip'],'Overgrow'),\n\
+        \ mk('Machamp',['karatechop'],'No Guard'),\n mk('Lapras',['surf'],'Water Absorb'),\n];\nconst worldTeams={water_attack:makeFoe('surf'),water_defense:makeFoe('waterpulse')};\n\
+        const seed=[91,2,3,4];\nconst real=new Battle({formatid:fmt.id,strictChoices:true,seed,p1:{name:'public own only',team:own},p2:{name:'isolated fixture adversary',team:makeFoe('surf')}});\n\
+        try {\n real.choose('p1','team 123');real.choose('p2','team 123');\n assert.equal(real.requestState,'move');\n const publicOwnRequest=real.sides[0].activeRequest;\n\
+        \ const legal=legalPublicActions(publicOwnRequest);\n assert(legal.includes('move 1')&&legal.includes('move 2')&&legal.includes('switch 2'));\n const sim=createPinnedOnePlyOracle({Battle,formatid:fmt.id,ownTeam:own,worldTeams,seeds:[11,13,17,19]});\n\
+        \ const ranked=rankPublicActions({ownRequest:publicOwnRequest,publicFoe:{species:'Blastoise'},turn:real.turn,\n  opponentActions:[{id:'move 1',p:1}],worlds:[{id:'water_attack',p:0.5},{id:'water_defense',p:0.5}],oracle:sim.oracle,\n\
+        \  riskWeight:0,revisitWeight:0.07});\n const first=ranked.ranked.find(x=>x.action==='move 1'),second=ranked.ranked.find(x=>x.action==='move 2');\n assert(first&&second&&Number.isFinite(first.mean)&&Number.isFinite(second.mean));\n\
+        \ assert(first.mean>second.mean,`thunderbolt must outscore quick attack on this 1-turn fixture: ${first.mean}/${second.mean}`);\n assert(ranked.legal.includes(ranked.choice));\n\
+        \ assert.equal(sim.audit.simulatedBattles,legal.length*2*4);\n assert.equal(sim.audit.branchCalls,legal.length*2);\n console.log('R27304_PINNED_REAL_PHYSICS\
+        \ '+JSON.stringify({status:'PASS',scope:sim.scope,format:fmt.name,publicFoe:'Blastoise',hypothesisWorlds:['water_attack','water_defense'],seedCount:4,legalCount:legal.length,meanThunderbolt:first.mean,meanQuickAttack:second.mean,chosenAction:ranked.choice,oracleBattles:sim.audit.simulatedBattles,metric:'NORMALIZED_HP_TEMPO_NOT_WIN_PROBABILITY'}));\n\
+        \ assert.throws(()=>rankPublicActions({ownRequest:publicOwnRequest,publicFoe:{species:'Blastoise',item:'SECRET'},turn:real.turn,\n  opponentActions:[{id:'move\
+        \ 1',p:1}],worlds:[{id:'water_attack',p:1}],oracle:sim.oracle}),/FOE_PRIVATE_FIELD/);\n console.log('R27304_PRIVATE_FIELD_REJECTION '+JSON.stringify({status:'PASS',field:'item'}));\n\
+        } finally {real.destroy()}\n// Mega action also runs in an independent synthetic battle, not by copying hidden state.\nconst megaOwn=[own[1],own[0],own[2],own[3],own[4],own[5]];\n\
+        const megaFoe=[mk('Venusaur',['vinewhip','tackle'],'Overgrow'),...makeFoe().slice(1)];\nconst megaBattle=new Battle({formatid:fmt.id,strictChoices:true,seed:[29,2,3,4],p1:{name:'own',team:megaOwn},p2:{name:'foe\
+        \ fixture',team:megaFoe}});\ntry{\n megaBattle.choose('p1','team 123');megaBattle.choose('p2','team 123');\n const legal=legalPublicActions(megaBattle.sides[0].activeRequest);\n\
+        \ assert(legal.includes('move 1 mega'));\n const sim=createPinnedOnePlyOracle({Battle,formatid:fmt.id,ownTeam:megaOwn,worldTeams:{venusaur_hypothesis:megaFoe},seeds:[31,37]});\n\
+        \ const branches=sim.oracle({ownAction:'move 1 mega',opponentAction:'move 1',worldId:'venusaur_hypothesis'});\n assert.equal(branches.length,2);assert(branches.every(b=>b.value>=0&&b.value<=1));\n\
+        \ console.log('R27304_PINNED_MEGA_BRANCH '+JSON.stringify({status:'PASS',legal:'move 1 mega',simulatedBattles:sim.audit.simulatedBattles,model:'explicit hypothetical\
+        \ Venusaur',physics:'PINNED_SHOWDOWN_ONLY'}));\n}finally{megaBattle.destroy()}\nconsole.log('R27304_GATE '+JSON.stringify({production:'R27.266_UNMODIFIED',native33:'0/33',exact34:'0/34',acceptance:'0/8',FORMAL:'DENY',W_X:'CONSUMED',realChampionsCertified:false,calibratedWinProbability:false,actualOpponentHiddenStateAccess:false,scope:'RESEARCH_PINNED_SIMULATED_ONE_PLY'}));\n\
+        console.log('R27_304_DONE fixed Showdown 1-turn branch oracle; no official release');\nR27304_PINNED_EOF\nprintf '%s  %s\\n' '51ae14b830355390614033c366b28df56e70fb53bf051c22eb73807ef7a19ddf'\
+        \ 'research/test_r27304_pinned.cjs' | sha256sum -c -\nnode research/test_r27304_unit.cjs\ncat > research/pinned_twoply_oracle.cjs <<'R27305_TWO_PLY_EOF'\n\
+        'use strict';\n/** R27.305 bounded two-turn public-hypothesis research simulator.\n * The caller must supply complete hypothetical p2 teams, not a live opponent\
+        \ object.\n * All internal battle state is from independently CREATED synthetic Showdown Battles.\n * hp-tempo is an uncalibrated utility, not a real Champions\
+        \ win probability.\n */\nconst {legalPublicActions}=require('./public_action_bridge.cjs');\nfunction error(s){throw Error('R27305_'+s)}\nfunction check(c,s){if(!c)error(s)}\n\
+        function clone(x){return JSON.parse(JSON.stringify(x))}\nfunction team(t){check(Array.isArray(t)&&t.length===6,'TEAM_6');for(const p of t)check(p&&typeof\
+        \ p.species==='string'&&p.species.length&&Array.isArray(p.moves)&&p.moves.length>0&&p.moves.length<=4,'TEAM_SET')}\nfunction preview(p){check(typeof p==='string'&&/^team\
+        \ [1-6]{3}$/.test(p)&&new Set(p.slice(5)).size===3,'PREVIEW')}\nfunction req(b,i){check(b.sides&&b.sides[i]&&b.sides[i].activeRequest,'REQUEST');return b.sides[i].activeRequest}\n\
+        function action(r){const xs=legalPublicActions(r);const mv=xs.find(a=>/^move [1-4]$/.test(a));return mv||xs.find(a=>/^switch [1-6]$/.test(a))||error('NO_RESOLVABLE_ACTION')}\n\
+        function hpFraction(side){check(side&&Array.isArray(side.pokemon)&&side.pokemon.length>0,'SIDE');let sum=0;\n for(const p of side.pokemon){check(p&&Number.isFinite(p.hp)&&Number.isFinite(p.maxhp)&&p.maxhp>0,'HP');sum+=Math.max(0,Math.min(1,p.hp/p.maxhp))}\n\
+        \ return sum/side.pokemon.length}\nfunction boundedUtility(b){const v=0.5+0.5*(hpFraction(b.sides[0])-hpFraction(b.sides[1]));return Math.max(0,Math.min(1,v))}\n\
+        function makeTwoPlyOracle({Battle,formatid,ownTeam,worldTeams,ownPreview='team 123',foePreview='team 123',seeds=[1031,1033]}={}){\n check(typeof Battle==='function','BATTLE');check(typeof\
+        \ formatid==='string'&&formatid.length>0,'FORMAT');team(ownTeam);\n check(worldTeams&&typeof worldTeams==='object'&&!Array.isArray(worldTeams),'WORLDS');const\
+        \ names=Object.keys(worldTeams);\n check(names.length>=1&&names.length<=8&&names.every(n=>/^[a-z0-9_-]{1,40}$/i.test(n)),'WORLD_IDS');\n for(const n of names)team(worldTeams[n]);preview(ownPreview);preview(foePreview);\n\
+        \ check(Array.isArray(seeds)&&seeds.length>=1&&seeds.length<=8&&new Set(seeds).size===seeds.length&&seeds.every(s=>Number.isInteger(s)&&s>0&&s<65536),'SEEDS');\n\
+        \ const fixedOwn=clone(ownTeam),fixedWorlds=clone(worldTeams),fixedSeeds=[...seeds];\n const audit={branchCalls:0,simulatedBattles:0,simulatedSecondTurns:0,forcedSwitchRecoveries:0,terminalAfterFirst:0,publicHypothesesOnly:true};\n\
+        \ function oracle({ownAction,opponentAction,worldId}={}){\n  check(typeof ownAction==='string'&&/^(?:move [1-4](?: mega| megax| megay)?|switch [1-6])$/.test(ownAction),'OWN_ACTION');\n\
+        \  check(typeof opponentAction==='string'&&/^(?:move [1-4](?: mega| megax| megay)?|switch [1-6])$/.test(opponentAction),'OPP_ACTION');\n  check(Object.hasOwn(fixedWorlds,worldId),'WORLD_UNKNOWN');audit.branchCalls++;\n\
+        \  return fixedSeeds.map(seed=>{\n   const b=new Battle({formatid,strictChoices:true,seed:[seed,2,3,4],p1:{name:'Synthetic Own',team:clone(fixedOwn)},p2:{name:'Explicit\
+        \ Hypothetical Foe',team:clone(fixedWorlds[worldId])}});\n   let second=false;\n   try{\n    check(b.requestState==='teampreview','PHASE_PREVIEW');b.choose('p1',ownPreview);b.choose('p2',foePreview);\n\
+        \    check(b.requestState==='move','PHASE_FIRST');\n    // Before feeding an action, validate it against that synthetic world's own request.\n    check(legalPublicActions(req(b,0)).includes(ownAction),'FIRST_OWN_ILLEGAL');\n\
+        \    check(legalPublicActions(req(b,1)).includes(opponentAction),'FIRST_FOE_ILLEGAL');\n    b.choose('p1',ownAction);b.choose('p2',opponentAction);\n    if(b.ended)audit.terminalAfterFirst++;\n\
+        \    else{\n     // Resolve any forced replacement before next voluntary turn.\n     for(let loops=0;loops<4&&b.requestState==='switch';loops++){\n      let\
+        \ changed=false;\n      for(const [i,id] of [[0,'p1'],[1,'p2']]){\n       const r=b.sides?.[i]?.activeRequest;\n       if(r?.forceSwitch){const sw=legalPublicActions(r).find(s=>s.startsWith('switch\
+        \ '));check(sw,'NO_FORCED_REPLACEMENT');b.choose(id,sw);audit.forcedSwitchRecoveries++;changed=true}\n      }\n      check(changed,'STUCK_FORCE_SWITCH');\n\
+        \     }\n     check(b.ended||b.requestState==='move','PHASE_SECOND');\n     if(!b.ended){\n      const nextOwn=action(req(b,0)),nextFoe=action(req(b,1));\n\
+        \      b.choose('p1',nextOwn);b.choose('p2',nextFoe);\n      second=true;audit.simulatedSecondTurns++;\n     }\n    }\n    const utility=boundedUtility(b);\n\
+        \    audit.simulatedBattles++;\n    return {p:1/fixedSeeds.length,value:+utility.toFixed(8),revisit:ownAction.startsWith('switch ')?1:0};\n   }finally{b.destroy()}\n\
+        \  });\n }\n return Object.freeze({oracle,audit,scope:'EXPLICIT_HYPOTHETICAL_TWO_TURN_HP_TEMPO_NOT_CALIBRATED_WIN_PROBABILITY'});\n}\nmodule.exports={makeTwoPlyOracle};\n\
+        R27305_TWO_PLY_EOF\nprintf '%s  %s\\n' '13c8ecc214901f7f78294b917593baed6fd433cf21a819696c6727f0b68f85d2' 'research/pinned_twoply_oracle.cjs' | sha256sum\
+        \ -c -\ncat > research/test_r27305_unit.cjs <<'R27305_UNIT_EOF'\n'use strict';\nconst a=require('node:assert/strict');const {makeTwoPlyOracle}=require('./pinned_twoply_oracle.cjs');\n\
+        const mk=()=>Array.from({length:6},(_,i)=>({species:'P'+i,moves:['tackle']}));\nlet made=0,destroyed=0;\nclass Fake{\n constructor(input){this.cfg=input;this.requestState='teampreview';this.ended=false;this.round=0;made++;this.sides=[{pokemon:input.p1.team.map(()=>({hp:100,maxhp:100})),activeRequest:null},{pokemon:input.p2.team.map(()=>({hp:100,maxhp:100})),activeRequest:null}]}\n\
+        \ choose(id,cmd){const side=id==='p1'?0:1; if(cmd.startsWith('team')){if(side===1){this.requestState='move';this.active()};return}\n  if(side===0)this.first=cmd;else\
+        \ {this.sides[1].pokemon[0].hp-=this.first==='move 1'?40:10;this.sides[0].pokemon[0].hp-=15;this.round++;this.active()}}\n active(){for(let i=0;i<2;i++)this.sides[i].activeRequest={active:[{moves:[{id:'tackle',pp:10,disabled:false}]}],side:{pokemon:this.sides[i].pokemon.map((p,j)=>({condition:p.hp+'/100',active:j===0}))}}}\n\
+        \ destroy(){destroyed++}\n}\nlet n=0;const t=mk(),f=mk();\nfor(const [id,create] of [\n ['missing Battle',()=>makeTwoPlyOracle({})],\n ['bad team',()=>makeTwoPlyOracle({Battle:Fake,formatid:'x',ownTeam:[],worldTeams:{h:f}})],\n\
+        \ ['bad world',()=>makeTwoPlyOracle({Battle:Fake,formatid:'x',ownTeam:t,worldTeams:{}})],\n ['bad seed',()=>makeTwoPlyOracle({Battle:Fake,formatid:'x',ownTeam:t,worldTeams:{h:f},seeds:[0]})],\n\
+        \ ['duplicate seed',()=>makeTwoPlyOracle({Battle:Fake,formatid:'x',ownTeam:t,worldTeams:{h:f},seeds:[5,5]})],\n ['invalid preview',()=>makeTwoPlyOracle({Battle:Fake,formatid:'x',ownTeam:t,worldTeams:{h:f},ownPreview:'team\
+        \ 111'})],\n ['path world id',()=>makeTwoPlyOracle({Battle:Fake,formatid:'x',ownTeam:t,worldTeams:{'../../../':f}})],\n]){a.throws(create,/R27305_/);n++}\n\
+        const o=makeTwoPlyOracle({Battle:Fake,formatid:'x',ownTeam:t,worldTeams:{h:f},seeds:[7,9]});\nlet b=o.oracle({ownAction:'move 1',opponentAction:'move 1',worldId:'h'});a.equal(b.length,2);n++;\n\
+        a.equal(o.audit.simulatedSecondTurns,2);n++;\na.equal(o.audit.simulatedBattles,2);n++;\na(b[0].value>=0&&b[0].value<=1);n++;\na.throws(()=>o.oracle({ownAction:'move\
+        \ 3',opponentAction:'move 1',worldId:'h'}),/R27305_FIRST_OWN_ILLEGAL/);n++;\na.throws(()=>o.oracle({ownAction:'move 1',opponentAction:'move 1',worldId:'unknown'}),/R27305_WORLD_UNKNOWN/);n++;\n\
+        a.equal(made,destroyed);n++;\nf[0].species='MUTATED';t[0].species='MUTATED';o.oracle({ownAction:'move 1',opponentAction:'move 1',worldId:'h'});a.equal(made,destroyed);n++;\n\
+        console.log('R27305_UNIT_SUMMARY '+JSON.stringify({passed:n,total:n}));\nR27305_UNIT_EOF\nprintf '%s  %s\\n' 'b08574ef3487edc52b3818ec660d24ac88cebafaa43738e6542a356b6c12ccae'\
+        \ 'research/test_r27305_unit.cjs' | sha256sum -c -\ncat > research/test_r27305_pinned.cjs <<'R27305_PINNED_EOF'\n'use strict';\n/** R27.305: research ONLY,\
+        \ fresh hypothetical matches. All opponent sets are explicit.\n * The observational battle is used ONLY to supply p1.activeRequest.\n * Two-turn oracle never\
+        \ receives observational battle, opponent side, item or move internals.\n */\nconst assert=require('node:assert/strict');\nconst {Battle,Dex}=require('./dist/sim');\n\
+        const {legalPublicActions,rankPublicActions}=require('./public_action_bridge.cjs');\nconst {makeTwoPlyOracle}=require('./pinned_twoply_oracle.cjs');\nconst\
+        \ fmt=Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');\nassert(fmt.exists&&fmt.mod==='champions');\nconst evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};\nconst\
+        \ mk=(species,moves,ability,item='')=>({species,moves,ability,item,nature:'Hardy',level:50,evs});\nconst own=[\n mk('Pikachu',['thunderbolt','quickattack'],'Static'),\n\
+        \ mk('Charizard',['flamethrower','scratch'],'Blaze','Charizardite X'),\n mk('Venusaur',['vinewhip','tackle'],'Overgrow'),\n mk('Snorlax',['tackle'],'Immunity'),\n\
+        \ mk('Blastoise',['surf'],'Torrent'),\n mk('Alakazam',['psychic'],'Synchronize'),\n];\nconst foe=(first)=>[\n mk('Blastoise',[first,'tackle'],'Torrent'),\n\
+        \ mk('Magikarp',['splash'],'Swift Swim'),\n mk('Eevee',['tackle'],'Run Away'),\n mk('Venusaur',['vinewhip'],'Overgrow'),\n mk('Machamp',['karatechop'],'No\
+        \ Guard'),\n mk('Lapras',['surf'],'Water Absorb'),\n];\nconst observed=new Battle({formatid:fmt.id,strictChoices:true,seed:[91,2,3,4],p1:{name:'own observer',team:own},p2:{name:'separate\
+        \ observed fixture not read',team:foe('surf')}});\nlet obs;\ntry{observed.choose('p1','team 123');observed.choose('p2','team 123');assert.equal(observed.requestState,'move');obs=JSON.parse(JSON.stringify(observed.sides[0].activeRequest));}finally{observed.destroy()}\n\
+        const legal=legalPublicActions(obs);assert(legal.includes('move 1')&&legal.includes('switch 2'));\nconst sim=makeTwoPlyOracle({Battle,formatid:fmt.id,ownTeam:own,worldTeams:{a:foe('surf'),b:foe('waterpulse')},seeds:[37,41]});\n\
+        const ranks=rankPublicActions({ownRequest:obs,publicFoe:{species:'Blastoise'},turn:1,\n opponentActions:[{id:'move 1',p:0.8},{id:'move 2',p:0.2}],worlds:[{id:'a',p:0.6},{id:'b',p:0.4}],oracle:sim.oracle,riskWeight:0,revisitWeight:0.04});\n\
+        assert(legal.includes(ranks.choice));\nassert(ranks.ranked.every(x=>Number.isFinite(x.mean)&&x.mean>=0&&x.mean<=1));\nconst expectedBattles=legal.length*2*2*2;\n\
+        assert.equal(sim.audit.simulatedBattles,expectedBattles);\nassert.equal(sim.audit.branchCalls,legal.length*2*2);\nassert(sim.audit.simulatedSecondTurns>0,'must\
+        \ actually execute a second voluntary turn');\nconsole.log('R27305_PINNED_TWO_PLY '+JSON.stringify({status:'PASS',format:fmt.name,scope:sim.scope,legal:legal.length,opponentPolicies:2,worlds:2,seeds:2,battles:sim.audit.simulatedBattles,actualSecondTurns:sim.audit.simulatedSecondTurns,forcedSwitchRecoveries:sim.audit.forcedSwitchRecoveries,terminalAfterFirst:sim.audit.terminalAfterFirst,choice:ranks.choice,mean:ranks.ranked[0].mean,utility:'HP_TEMPO_NOT_CALIBRATED_WIN_PROBABILITY'}));\n\
+        assert.throws(()=>rankPublicActions({ownRequest:obs,publicFoe:{species:'Blastoise',item:'secret'},turn:1,opponentActions:[{id:'move 1',p:1}],worlds:[{id:'a',p:1}],oracle:sim.oracle}),/FOE_PRIVATE_FIELD/);\n\
+        console.log('R27305_PRIVATE_FIELD_REJECTION '+JSON.stringify({status:'PASS',field:'item'}));\nconsole.log('R27305_GATE '+JSON.stringify({production:'R27.266_UNMODIFIED',native33:'0/33',exact34:'0/34',acceptance:'0/8',FORMAL:'DENY',W_X:'EXPOSED',realChampionsCertified:false,calibratedWinProbability:false,stage15CertifiedIncrement:0,scope:'RESEARCH_PINNED_EXPLICIT_TWO_TURN'}));\n\
+        console.log('R27_305_DONE pinned explicit two-turn hypothetical only; no Champions real certification');\nR27305_PINNED_EOF\nprintf '%s  %s\\n' 'd4dce14b0eb0a4c7f43a76d4494dfcc8bd6fa0dd352c6c8ad6cf13a531e3455e'\
+        \ 'research/test_r27305_pinned.cjs' | sha256sum -c -\nnode research/test_r27305_unit.cjs\ngit clone --quiet https://github.com/smogon/pokemon-showdown.git\
+        \ pinned-showdown\ncd pinned-showdown\ngit checkout --quiet --detach aa17ca0fac8bc5605df673bd8774c2d0e91efa43\ntest \"$(git rev-parse HEAD)\" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43\n\
+        npm ci --no-audit --no-fund\nnpm run build\ncp ../research/*.cjs .\nnode test_r27302_pinned.cjs\nnode test_r27303_pinned.cjs\nnode test_r27304_pinned.cjs\n\
+        node test_r27305_pinned.cjs\necho \"R27_305_DONE two-turn explicit-hypothesis research only; no Champions mechanics certification\"\n"
+    - name: R27.306 pinned second-turn policy sensitivity and actual forced switch continuation
+      shell: bash
+      run: "set -euo pipefail\nmkdir -p research\ncp research/pinned_twoply_oracle.cjs research/r27306_base_twoply.cjs\nprintf '%s  %s\\n' '13c8ecc214901f7f78294b917593baed6fd433cf21a819696c6727f0b68f85d2'\
+        \ 'research/r27306_base_twoply.cjs' | sha256sum -c -\ncat > research/pinned_twoply_oracle_r27306.cjs <<'R27306_PINNED_TWOPLY_ORACLE_R27306_CJS_SOURCE_EOF'\n\
+        'use strict';\n/** R27.305 bounded two-turn public-hypothesis research simulator.\n * The caller must supply complete hypothetical p2 teams, not a live opponent\
+        \ object.\n * All internal battle state is from independently CREATED synthetic Showdown Battles.\n * hp-tempo is an uncalibrated utility, not a real Champions\
+        \ win probability.\n */\nconst {legalPublicActions}=require('./public_action_bridge.cjs');\nfunction error(s){throw Error('R27305_'+s)}\nfunction check(c,s){if(!c)error(s)}\n\
+        function clone(x){return JSON.parse(JSON.stringify(x))}\nfunction team(t){check(Array.isArray(t)&&t.length===6,'TEAM_6');for(const p of t)check(p&&typeof\
+        \ p.species==='string'&&p.species.length&&Array.isArray(p.moves)&&p.moves.length>0&&p.moves.length<=4,'TEAM_SET')}\nfunction preview(p){check(typeof p==='string'&&/^team\
+        \ [1-6]{3}$/.test(p)&&new Set(p.slice(5)).size===3,'PREVIEW')}\nfunction req(b,i){check(b.sides&&b.sides[i]&&b.sides[i].activeRequest,'REQUEST');return b.sides[i].activeRequest}\n\
+        function action(r, policy='first_legal'){const xs=legalPublicActions(r);const move=xs.filter(a=>/^move [1-4]$/.test(a));if(policy==='last_legal')return move.at(-1)||xs.find(a=>/^switch\
+        \ [1-6]$/.test(a))||error('NO_RESOLVABLE_ACTION');return move[0]||xs.find(a=>/^switch [1-6]$/.test(a))||error('NO_RESOLVABLE_ACTION')}\nfunction hpFraction(side){check(side&&Array.isArray(side.pokemon)&&side.pokemon.length>0,'SIDE');let\
+        \ sum=0;\n for(const p of side.pokemon){check(p&&Number.isFinite(p.hp)&&Number.isFinite(p.maxhp)&&p.maxhp>0,'HP');sum+=Math.max(0,Math.min(1,p.hp/p.maxhp))}\n\
+        \ return sum/side.pokemon.length}\nfunction boundedUtility(b){const v=0.5+0.5*(hpFraction(b.sides[0])-hpFraction(b.sides[1]));return Math.max(0,Math.min(1,v))}\n\
+        function makeTwoPlyOracle({Battle,formatid,ownTeam,worldTeams,ownPreview='team 123',foePreview='team 123',seeds=[1031,1033],continuationPolicy='first_legal'}={}){\n\
+        \ check(typeof Battle==='function','BATTLE');check(typeof formatid==='string'&&formatid.length>0,'FORMAT');team(ownTeam);\n check(worldTeams&&typeof worldTeams==='object'&&!Array.isArray(worldTeams),'WORLDS');const\
+        \ names=Object.keys(worldTeams);\n check(names.length>=1&&names.length<=8&&names.every(n=>/^[a-z0-9_-]{1,40}$/i.test(n)),'WORLD_IDS');\n for(const n of names)team(worldTeams[n]);preview(ownPreview);preview(foePreview);\n\
+        \ check(['first_legal','last_legal'].includes(continuationPolicy),'CONTINUATION_POLICY');\n         check(Array.isArray(seeds)&&seeds.length>=1&&seeds.length<=8&&new\
+        \ Set(seeds).size===seeds.length&&seeds.every(s=>Number.isInteger(s)&&s>0&&s<65536),'SEEDS');\n const fixedOwn=clone(ownTeam),fixedWorlds=clone(worldTeams),fixedSeeds=[...seeds];\n\
+        \ const audit={branchCalls:0,simulatedBattles:0,simulatedSecondTurns:0,forcedSwitchRecoveries:0,terminalAfterFirst:0,alternativeSecondChoices:0,publicHypothesesOnly:true};\n\
+        \ function oracle({ownAction,opponentAction,worldId}={}){\n  check(typeof ownAction==='string'&&/^(?:move [1-4](?: mega| megax| megay)?|switch [1-6])$/.test(ownAction),'OWN_ACTION');\n\
+        \  check(typeof opponentAction==='string'&&/^(?:move [1-4](?: mega| megax| megay)?|switch [1-6])$/.test(opponentAction),'OPP_ACTION');\n  check(Object.hasOwn(fixedWorlds,worldId),'WORLD_UNKNOWN');audit.branchCalls++;\n\
+        \  return fixedSeeds.map(seed=>{\n   const b=new Battle({formatid,strictChoices:true,seed:[seed,2,3,4],p1:{name:'Synthetic Own',team:clone(fixedOwn)},p2:{name:'Explicit\
+        \ Hypothetical Foe',team:clone(fixedWorlds[worldId])}});\n   let second=false;\n   try{\n    check(b.requestState==='teampreview','PHASE_PREVIEW');b.choose('p1',ownPreview);b.choose('p2',foePreview);\n\
+        \    check(b.requestState==='move','PHASE_FIRST');\n    // Before feeding an action, validate it against that synthetic world's own request.\n    check(legalPublicActions(req(b,0)).includes(ownAction),'FIRST_OWN_ILLEGAL');\n\
+        \    check(legalPublicActions(req(b,1)).includes(opponentAction),'FIRST_FOE_ILLEGAL');\n    b.choose('p1',ownAction);b.choose('p2',opponentAction);\n    if(b.ended)audit.terminalAfterFirst++;\n\
+        \    else{\n     // Resolve any forced replacement before next voluntary turn.\n     for(let loops=0;loops<4&&b.requestState==='switch';loops++){\n      let\
+        \ changed=false;\n      for(const [i,id] of [[0,'p1'],[1,'p2']]){\n       const r=b.sides?.[i]?.activeRequest;\n       if(r?.forceSwitch){const sw=legalPublicActions(r).find(s=>s.startsWith('switch\
+        \ '));check(sw,'NO_FORCED_REPLACEMENT');b.choose(id,sw);audit.forcedSwitchRecoveries++;changed=true}\n      }\n      check(changed,'STUCK_FORCE_SWITCH');\n\
+        \     }\n     check(b.ended||b.requestState==='move','PHASE_SECOND');\n     if(!b.ended){\n      const ownRequest=req(b,0),foeRequest=req(b,1);\n        \
+        \      const nextOwn=action(ownRequest,continuationPolicy),nextFoe=action(foeRequest,continuationPolicy);\n              if(nextOwn!==action(ownRequest)||nextFoe!==action(foeRequest))audit.alternativeSecondChoices++;\n\
+        \      b.choose('p1',nextOwn);b.choose('p2',nextFoe);\n      second=true;audit.simulatedSecondTurns++;\n     }\n    }\n    const utility=boundedUtility(b);\n\
+        \    audit.simulatedBattles++;\n    return {p:1/fixedSeeds.length,value:+utility.toFixed(8),revisit:ownAction.startsWith('switch ')?1:0};\n   }finally{b.destroy()}\n\
+        \  });\n }\n return Object.freeze({oracle,audit,scope:'R27306_EXPLICIT_TWO_TURN_POLICY_SENSITIVITY_NOT_WIN_PROBABILITY'});\n}\nmodule.exports={makeTwoPlyOracle};\n\
+        R27306_PINNED_TWOPLY_ORACLE_R27306_CJS_SOURCE_EOF\nprintf '%s  %s\\n' 'cddd2efb977d8a9e0b37e93d2f1ff187bb59fafbb9181e124eb3586bbf7ed48b' 'research/pinned_twoply_oracle_r27306.cjs'\
+        \ | sha256sum -c -\nnode --check research/pinned_twoply_oracle_r27306.cjs\ncat > research/test_r27306_unit.cjs <<'R27306_TEST_R27306_UNIT_CJS_SOURCE_EOF'\n\
+        'use strict';\nconst a=require('node:assert/strict');\nconst {makeTwoPlyOracle:base}=require('./r27306_base_twoply.cjs');\nconst {makeTwoPlyOracle:variant}=require('./pinned_twoply_oracle_r27306.cjs');\n\
+        const team=()=>Array.from({length:6},(_,i)=>({species:'P'+i,moves:['tackle','scratch']}));\nlet made=0,destroyed=0;\nclass FakeBattle{\n constructor(x){this.input=x;this.requestState='teampreview';this.ended=false;this.n=0;made++;this.sides=[{pokemon:team().map(()=>({hp:100,maxhp:100})),activeRequest:null},{pokemon:team().map(()=>({hp:100,maxhp:100})),activeRequest:null}];}\n\
+        \ choose(id,choice){if(choice.startsWith('team')){if(id==='p2'){this.requestState='move';this.emit()}return;}\n if(id==='p1'){this.pending=choice;return;}\n\
+        \ this.n++;this.sides[1].pokemon[0].hp-=this.pending==='move 2'?30:10;\n this.sides[0].pokemon[0].hp-=choice==='move 2'?18:8;this.emit();}\n emit(){this.sides.forEach(s=>s.activeRequest={active:[{moves:[{id:'tackle',pp:5,disabled:false},{id:'scratch',pp:5,disabled:false}]}],side:{pokemon:s.pokemon.map((p,i)=>({active:i===0,condition:`${p.hp}/100`}))}})}\n\
+        \ destroy(){destroyed++}\n}\nconst common={Battle:FakeBattle,formatid:'synthetic',ownTeam:team(),worldTeams:{world:team()},seeds:[7,11]};\nlet n=0;\nfor(const\
+        \ bad of ['random','max','',null,1]){a.throws(()=>variant({...common,continuationPolicy:bad}),/R27305_CONTINUATION_POLICY/);n++}\nconst original=base(common),equiv=variant({...common,continuationPolicy:'first_legal'}),alt=variant({...common,continuationPolicy:'last_legal'});\n\
+        const args={ownAction:'move 1',opponentAction:'move 1',worldId:'world'};\nconst r0=original.oracle(args),r1=equiv.oracle(args),r2=alt.oracle(args);\na.deepEqual(r1,r0);n++;\n\
+        a.notDeepEqual(r2,r0);n++;\na.equal(original.audit.simulatedSecondTurns,2);n++;\na.equal(equiv.audit.alternativeSecondChoices,0);n++;\na.equal(alt.audit.alternativeSecondChoices,2);n++;\n\
+        a.equal(alt.audit.simulatedBattles,2);n++;\na.equal(made,destroyed);n++;\na.throws(()=>alt.oracle({...args,worldId:'secret'}),/R27305_WORLD_UNKNOWN/);n++;\n\
+        a.equal(made,destroyed);n++;\nconsole.log('R27306_UNIT_SUMMARY '+JSON.stringify({passed:n,total:n}));\nR27306_TEST_R27306_UNIT_CJS_SOURCE_EOF\nprintf '%s\
+        \  %s\\n' 'ca997f0436e68387fb93d5bba2ec845f46d609fe6071959883e1224b29318baa' 'research/test_r27306_unit.cjs' | sha256sum -c -\nnode --check research/test_r27306_unit.cjs\n\
+        cat > research/test_r27306_pinned.cjs <<'R27306_TEST_R27306_PINNED_CJS_SOURCE_EOF'\n'use strict';\n/** R27.306 public pinned Showdown independent hypothetical\
+        \ two-turn stress.\n * The observational side is used ONLY to supply its public request; no opponent internals.\n * Second-turn action heuristics are NOT\
+        \ tuned or shown as Champions win probabilities.\n */\nconst assert=require('node:assert/strict');\nconst {Battle,Dex}=require('./dist/sim');\nconst {legalPublicActions,rankPublicActions}=require('./public_action_bridge.cjs');\n\
+        const {makeTwoPlyOracle}=require('./pinned_twoply_oracle_r27306.cjs');\nconst fmt=Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');\nassert(fmt.exists &&\
+        \ fmt.mod==='champions','pinned Champions proxy format missing');\nconst evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};\nconst mk=(species,moves,ability,item='')=>({species,moves,ability,item,nature:'Hardy',level:50,evs});\n\
+        const own=[\n mk('Pikachu',['thunderbolt','quickattack'],'Static'),\n mk('Charizard',['flamethrower','scratch'],'Blaze','Charizardite X'),\n mk('Venusaur',['vinewhip','tackle'],'Overgrow'),\n\
+        \ mk('Snorlax',['tackle'],'Immunity'),\n mk('Blastoise',['surf'],'Torrent'),\n mk('Alakazam',['psychic'],'Synchronize'),\n];\nconst foe=first=>[\n mk('Blastoise',[first,'tackle'],'Torrent'),\n\
+        \ mk('Magikarp',['splash'],'Swift Swim'),\n mk('Eevee',['tackle'],'Run Away'),\n mk('Venusaur',['vinewhip'],'Overgrow'),\n mk('Machamp',['karatechop'],'No\
+        \ Guard'),\n mk('Lapras',['surf'],'Water Absorb'),\n];\nconst b=new Battle({formatid:fmt.id,strictChoices:true,seed:[91,2,3,4],p1:{name:'public observer own',team:own},p2:{name:'synthetic\
+        \ fixture hidden',team:foe('surf')}});\nlet observation;\ntry{\n b.choose('p1','team 123');b.choose('p2','team 123');\n assert.equal(b.requestState,'move');\n\
+        \ observation=JSON.parse(JSON.stringify(b.sides[0].activeRequest));\n}finally{b.destroy()}\nconst legal=legalPublicActions(observation);\nconst common={Battle,formatid:fmt.id,ownTeam:own,worldTeams:{water_attack:foe('surf'),water_pulse:foe('waterpulse')},seeds:[37,41]};\n\
+        const first=makeTwoPlyOracle({...common,continuationPolicy:'first_legal'});\nconst last=makeTwoPlyOracle({...common,continuationPolicy:'last_legal'});\nconst\
+        \ rank=(oracle)=>rankPublicActions({ownRequest:observation,publicFoe:{species:'Blastoise'},turn:1,\n opponentActions:[{id:'move 1',p:0.8},{id:'move 2',p:0.2}],\n\
+        \ worlds:[{id:'water_attack',p:0.6},{id:'water_pulse',p:0.4}],oracle,\n riskWeight:0,revisitWeight:0.04});\nconst resultFirst=rank(first.oracle),resultLast=rank(last.oracle);\n\
+        assert(legal.includes(resultFirst.choice)&&legal.includes(resultLast.choice));\nconst expected=legal.length*2*2*2;\nassert.equal(first.audit.simulatedBattles,expected);\n\
+        assert.equal(last.audit.simulatedBattles,expected);\nassert(first.audit.simulatedSecondTurns>0 && last.audit.simulatedSecondTurns>0);\nassert.equal(first.audit.alternativeSecondChoices,0);\n\
+        assert(last.audit.alternativeSecondChoices>0,'distinct second-turn policy never activated');\nconst deltas=resultFirst.ranked.map(x=>({action:x.action,first:x.mean,last:resultLast.ranked.find(y=>y.action===x.action).mean}));\n\
+        assert(deltas.every(x=>Number.isFinite(x.first)&&Number.isFinite(x.last)));\nconst maxDelta=Math.max(...deltas.map(x=>Math.abs(x.first-x.last)));\nassert(maxDelta>0.00000001,'second\
+        \ policy produced no measurable rollout sensitivity');\nconsole.log('R27306_PINNED_POLICY_SENSITIVITY '+JSON.stringify({status:'PASS',format:fmt.name,scope:'SYNTHETIC_TWO_TURN_SECOND_POLICY_SENSITIVITY',legalActions:legal.length,battlesFirst:first.audit.simulatedBattles,battlesAlternate:last.audit.simulatedBattles,alternateSecondChoices:last.audit.alternativeSecondChoices,firstChoice:resultFirst.choice,alternateChoice:resultLast.choice,maxMeanDifference:+maxDelta.toFixed(8),deltas,metric:'NORMALIZED_HP_TEMPO_NOT_WIN_PROBABILITY'}));\n\
+        // Previously R27.305's fixture did not trigger any forced replacement on the first turn.\n// Use an isolated explicitly-declared Magikarp hypothesis, causing\
+        \ a real Showdown forced switch.\nconst weakFoe=[\n mk('Magikarp',['splash'],'Swift Swim'),\n mk('Eevee',['tackle'],'Run Away'),\n mk('Venusaur',['vinewhip'],'Overgrow'),\n\
+        \ mk('Snorlax',['tackle'],'Immunity'),\n mk('Blastoise',['surf'],'Torrent'),\n mk('Machamp',['karatechop'],'No Guard'),\n];\nconst forced=makeTwoPlyOracle({Battle,formatid:fmt.id,ownTeam:own,worldTeams:{forced_magikarp:weakFoe},seeds:[43,47],continuationPolicy:'first_legal'});\n\
+        const bForced=forced.oracle({ownAction:'move 1',opponentAction:'move 1',worldId:'forced_magikarp'});\nassert.equal(bForced.length,2);\nassert(forced.audit.forcedSwitchRecoveries>=2,'no\
+        \ forced replacement was actually executed');\nassert.equal(forced.audit.simulatedSecondTurns,2,'did not resume the next voluntary turn');\nconsole.log('R27306_PINNED_FORCED_SWITCH\
+        \ '+JSON.stringify({status:'PASS',opponent:'EXPLICIT_MAGIKARP_HYPOTHESIS',branches:bForced.length,forcedSwitchRecoveries:forced.audit.forcedSwitchRecoveries,simulatedSecondTurns:forced.audit.simulatedSecondTurns,scope:'PINNED_SHOWDOWN_HYPOTHETICAL_NOT_REAL_CHAMPIONS'}));\n\
+        assert.throws(()=>rankPublicActions({ownRequest:observation,publicFoe:{species:'Blastoise',item:'private'},turn:1,opponentActions:[{id:'move 1',p:1}],worlds:[{id:'water_attack',p:1}],oracle:first.oracle}),/FOE_PRIVATE_FIELD/);\n\
+        console.log('R27306_GATE '+JSON.stringify({production:'R27.266_UNMODIFIED',native33:'0/33',exact34:'0/34',acceptance:'0/8',FORMAL:'DENY',W_X:'EXPOSED',championsLiveCertified:false,calibratedWinProbability:false,stage15CertifiedIncrement:0,claim:'PUBLIC_SHOWDOWN_HYPOTHETICAL_TWO_TURN_ONLY'}));\n\
+        console.log('R27_306_DONE pinned second-policy sensitivity and forced switch research only');\nR27306_TEST_R27306_PINNED_CJS_SOURCE_EOF\nprintf '%s  %s\\\
+        n' 'fa08731bd01a381edc0a80b86a822b089aecd953c7ecadca7f50d4880d3d7a8d' 'research/test_r27306_pinned.cjs' | sha256sum -c -\nnode --check research/test_r27306_pinned.cjs\n\
+        node research/test_r27306_unit.cjs\ncp research/pinned_twoply_oracle_r27306.cjs research/test_r27306_pinned.cjs pinned-showdown/\n(cd pinned-showdown && node\
+        \ test_r27306_pinned.cjs)\necho 'R27_306_DONE research-only; no Stage1.5 games and no production change'\n"
