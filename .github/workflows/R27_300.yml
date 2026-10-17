@@ -1,23 +1,4 @@
-# R27.300 Test NO-LOW-HP-RESET corrected delayed intervention on disclosed S/T-U/V only.
-# No new holdout, no private runtime, no policy promotion.
-# R27.299 EXPOSED S/T-U/V 2x2 low-HP ablation and new offline joint-action research contract.
-# No policy promotion, fresh holdout, real Champions mechanics claim, or hidden opponent access.
-# R27.298 retrospective delayed escalation on EXPOSED S/T and U/V; NO new independent result.
-# R27.297 EXPOSED U/V retrospective diagnostic only. No new sealed holdout and no production change.
-# R27.296 U/V first-use independent evaluation of immutable R27.295 research candidate.
-# U/V frozen R27.295, not modified; S/T exposed development. Public research only.
-# R27.274: 2x2 controlled intervention; original R27.272 baseline digest frozen.
-# Public pinned Showdown, no private AI, no release certificate.
-# R27.272: hotfix digest import and deterministic replay of loss cases.
-# R27.271: public heuristic challengers, asymmetric team roles; no private source.
-# R27.269 paired controlled tactical vs first-legal baseline benchmark.
-# Immutable Showdown pinned commit, manual dispatch only, public repo/free runner guard.
-# No checkout of contaminated verification repo, no private source, no secrets, no uploads.
-# R27.267 — Repair: omit checkout of contaminated public verification repository.
-# Source: the last R27.266 workflow, retaining embedded 104 local contracts and 4 pinned probes.
-# Uses only the immutable upstream Showdown public source; NO private AI files, no repository writes.
-# Checkout of zeek10191019-stack/true-plan-showdown-verification intentionally OMITTED.
-# This workflow NEVER checks out, fetches or publishes the private Battle AI body.
+# R27.300: audit-safe size hotfix; same original mock script verified with SHA-256; production unchanged.
 name: R27.300 Causal Correction Exposed Validation and Research Safety
 'on':
   workflow_dispatch:
@@ -37,570 +18,182 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p .r27_265_audit
-          cd .r27_265_audit
-          cat > battle_api.cjs <<'R27_265_SOURCE_0_EOF'
-          'use strict';
-          /**
-           * R27.259 portable and deliberately conservative single-battle contract.
-           * Not the original private Battle AI, not a Pokémon Champions physics oracle.
-           * Zero dependencies; operates only on the owning side's Showdown request and
-           * an explicit PUBLIC opponent observation. Unsupported states fail closed.
-           */
-          const crypto = require('node:crypto');
-          const VERSION = 'r27.259.portable.v2';
-          
-          class UnsupportedState extends Error {
-            constructor(code, details='') { super(`${code}${details ? ': '+details : ''}`); this.name='UnsupportedState'; this.code=code; }
-          }
-          const isFainted = p => /(?:^|\s)fnt(?:\s|$)/i.test(String(p.condition ?? ''));
-          const sanit = x => String(x ?? '');
-          const ownMon = m => ({
-            ident:sanit(m.ident),details:sanit(m.details),condition:sanit(m.condition),active:!!m.active,
-            moves:Array.isArray(m.moves)?m.moves.map(sanit):[],item:sanit(m.item),
-            baseAbility:sanit(m.baseAbility),reviving:!!m.reviving
-          });
-          function observe(ownRequest, explicitPublicFoe={}) {
-            if (ownRequest?.wait) return {v:VERSION,phase:'wait',own:[],active:null,foe:{species:null},forceSwitch:null,maxChosenTeamSize:null};
-            if (!ownRequest || typeof ownRequest!=='object' || !Array.isArray(ownRequest.side?.pokemon))
-              throw new UnsupportedState('NO_OWN_REQUEST');
-            const phase=ownRequest.teamPreview?'preview':Array.isArray(ownRequest.forceSwitch)?'switch':
-              Array.isArray(ownRequest.active)?'move':null;
-            if (!phase) throw new UnsupportedState('UNKNOWN_PHASE');
-            const o={v:VERSION,phase,own:ownRequest.side.pokemon.map(ownMon),
-              active:Array.isArray(ownRequest.active)?ownRequest.active.map(a=>a?({
-                moves:Array.isArray(a.moves)?a.moves.map(m=>({id:sanit(m.id),pp:Number.isFinite(m.pp)?m.pp:null,
-                  disabled:!!m.disabled})):[],
-                trapped:!!a.trapped,maybeTrapped:!!a.maybeTrapped,maybeDisabled:!!a.maybeDisabled,
-                canMegaEvo:!!a.canMegaEvo,canMegaEvoX:!!a.canMegaEvoX,canMegaEvoY:!!a.canMegaEvoY,
-                canTerastallize:!!a.canTerastallize,canDynamax:!!a.canDynamax
-              }):null):null,
-              foe:{species:typeof explicitPublicFoe?.species==='string'?explicitPublicFoe.species:null},
-              forceSwitch:Array.isArray(ownRequest.forceSwitch)?ownRequest.forceSwitch.map(Boolean):null,
-              maxChosenTeamSize:Number.isInteger(ownRequest.maxChosenTeamSize)?ownRequest.maxChosenTeamSize:null};
-            if (o.own.length>6) throw new UnsupportedState('TEAM_OVER_SIX');
-            return o;
-          }
-          function teamPreview(obs,selectionScores){
-            if(obs.phase!=='preview'||obs.maxChosenTeamSize!==3||obs.own.length!==6)
-              throw new UnsupportedState('NON_6V3_PREVIEW');
-            if(!Array.isArray(selectionScores)||selectionScores.length!==6||!selectionScores.every(Number.isFinite))
-              throw new UnsupportedState('INVALID_SELECTION_SCORES');
-            const ranking=[0,1,2,3,4,5].sort((a,b)=>selectionScores[b]-selectionScores[a]||a-b);
-            const indices=ranking.slice(0,3);
-            return {command:'team '+indices.map(i=>i+1).join(''),indices,source:'external_score_provider'};
-          }
-          function legalCandidates(obs,selectionScores){
-            if(obs.phase==='wait') return [{command:'',kind:'wait'}];
-            if(obs.phase==='preview') return [{...teamPreview(obs,selectionScores),kind:'preview'}];
-            if(!Array.isArray(obs.own)||obs.own.length===0)throw new UnsupportedState('NO_ROSTER');
-            if(obs.phase==='switch'){
-              if(obs.forceSwitch?.length!==1 || !obs.forceSwitch[0]) throw new UnsupportedState('ASYMMETRIC_SWITCH_WAIT');
-              const revivalActors=obs.own.filter(m=>m.reviving);
-              if(revivalActors.length>1 || (revivalActors.length===1 && !revivalActors[0].active))
-                throw new UnsupportedState('AMBIGUOUS_REVIVAL_REQUEST');
-              const reviving=revivalActors.length===1;
-              const output=obs.own.map((m,i)=>(reviving ? isFainted(m) : (!m.active && !isFainted(m)))?
-                {command:`switch ${i+1}`,kind:reviving?'revival_target':'switch',index:i}:null).filter(Boolean);
-              if(output.length===0)throw new UnsupportedState('NO_SWITCH_TARGET');
-              return output;
-            }
-            if(obs.phase!=='move')throw new UnsupportedState('UNKNOWN_PHASE');
-            if(!Array.isArray(obs.active)||obs.active.length!==1||!obs.active[0])throw new UnsupportedState('NOT_SINGLE_ACTIVE');
-            const a=obs.active[0];
-            const output=[];
-            a.moves.forEach((m,i)=>{
-              if(m.disabled || m.pp!==null && m.pp<=0)return;
-              output.push({command:`move ${i+1}`,kind:'move',index:i});
-              if(a.canMegaEvo)output.push({command:`move ${i+1} mega`,kind:'mega_move',index:i});
-              if(a.canMegaEvoX)output.push({command:`move ${i+1} megax`,kind:'mega_x_move',index:i});
-              if(a.canMegaEvoY)output.push({command:`move ${i+1} megay`,kind:'mega_y_move',index:i});
-            });
-            if(!a.trapped&&!a.maybeTrapped){
-              obs.own.forEach((m,i)=>{if(!m.active&&!isFainted(m))output.push({command:`switch ${i+1}`,kind:'switch',index:i});});
-            }
-            if(output.length===0)throw new UnsupportedState('NO_SAFE_ACTION_OR_STRUGGLE');
-            return output;
-          }
-          function selectDecision(obs,candidates,dex){
-            if(!Array.isArray(candidates)||!candidates.length)throw new UnsupportedState('EMPTY_CANDIDATES');
-            if(obs.phase!=='move')return {command:candidates[0].command,kind:candidates[0].kind,policy:'baseline_v1'};
-            const foe=obs.foe.species?dex?.species?.get(obs.foe.species):null;
-            const rated=candidates.map((c,seq)=>{
-              if(!['move','mega_move','mega_x_move','mega_y_move'].includes(c.kind))return {...c,score:-1e6,seq};
-              const moveId=obs.active[0].moves[c.index]?.id;
-              const m=dex?.moves?.get(moveId);
-              if(!m?.exists) return {...c,score:-1000,seq};
-              const typeEffect=foe?.exists?dex.getEffectiveness(m,foe):0;
-              const scale=Math.pow(2,typeEffect);
-              const damageProxy=(m.basePower||0)*scale+(m.priority||0)*5;
-              return {...c,score:damageProxy+(c.kind==='mega_move'?0.5:0),seq};
-            });
-            rated.sort((a,b)=>b.score-a.score||a.seq-b.seq);
-            return {command:rated[0].command,kind:rated[0].kind,policy:'baseline_v1',score:rated[0].score};
-          }
-          function decision(ownRequest,publicFoe,selectionScores,dex){
-            const obs=observe(ownRequest,publicFoe),candidateList=legalCandidates(obs,selectionScores);
-            const selected=selectDecision(obs,candidateList,dex);
-            if(!candidateList.some(c=>c.command===selected.command))throw new UnsupportedState('ILLEGAL_POLICY_ACTION');
-            return {v:VERSION,observation:obs,legal:candidateList.map(c=>c.command),choice:selected.command,
-              policy:selected.policy,scope:'conservative_showdown_request',
-              observationHash:crypto.createHash('sha256').update(JSON.stringify(obs)).digest('hex')};
-          }
-          /** Explicit two-side battle stepping. `publicFoe` is injected by caller, never taken from foe set. */
-          function step(battle,teamScores,publicFoeProvider){
-            if(battle.ended) return {ended:true};
-            if(!Array.isArray(teamScores)||teamScores.length!==2||typeof publicFoeProvider!=='function')
-              throw new UnsupportedState('BAD_STEP_INPUT');
-            const before=battle.turn,phase=battle.requestState;
-            const decisions=battle.sides.map((side,i)=>decision(side.activeRequest,
-              publicFoeProvider(i),teamScores[i],battle.dex));
-            battle.makeChoices(...decisions.map(d=>d.choice));
-            return {v:VERSION,phase,before,after:battle.turn,choices:decisions.map(d=>d.choice),
-              observationHashes:decisions.map(d=>d.observationHash),ended:battle.ended};
-          }
-          module.exports={VERSION,UnsupportedState,observe,isFainted,teamPreview,legalCandidates,selectDecision,decision,step};
-          R27_265_SOURCE_0_EOF
-          cat > private_policy_bridge.cjs <<'R27_265_SOURCE_1_EOF'
-          'use strict';
-          /* R27.261 optional PRIVATE policy adapter. NO private source in this public module.
-           * Adapts a private policy to R27.259/260 request-based simulator contract.
-           * It does not claim compatibility with unavailable private v0.76 runtime.
-           */
-          const crypto = require('node:crypto');
-          const { VERSION: CORE_VERSION, UnsupportedState, observe, legalCandidates, selectDecision } = require('./battle_api.cjs');
-          const BRIDGE_VERSION = 'r27.261.policy-bridge.v1';
-          const HASH = v => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');
-          function cloneFreeze(value) {
-            if (value === undefined) throw new UnsupportedState('UNDEFINED_POLICY_INPUT');
-            const copy = JSON.parse(JSON.stringify(value));
-            function freeze(o) {
-              if (o && typeof o === 'object') {
-                Object.values(o).forEach(freeze);
-                Object.freeze(o);
-              }
-              return o;
-            }
-            return freeze(copy);
-          }
-          function ensurePlugin(plugin) {
-            if (plugin === undefined || plugin === null) return null;
-            if (typeof plugin !== 'object' || typeof plugin.decide !== 'function') throw new UnsupportedState('POLICY_INTERFACE_MISSING');
-            return plugin;
-          }
-          function resolveScores(plugin,obs,explicitScores) {
-            if (obs.phase !== 'preview') return explicitScores;
-            if (explicitScores !== undefined && explicitScores !== null) return explicitScores;
-            if (typeof plugin?.scorePreview !== 'function') throw new UnsupportedState('PREVIEW_POLICY_UNAVAILABLE');
-            let scores;
-            try { scores = plugin.scorePreview(cloneFreeze(obs)); } catch(e) {throw new UnsupportedState('PREVIEW_POLICY_ERROR',String(e?.message||e));}
-            if (scores && typeof scores.then === 'function') throw new UnsupportedState('ASYNC_PREVIEW_NOT_SUPPORTED');
-            return scores;
-          }
-          /**
-           * Only the own side request + explicitly declared PUBLIC foe species may enter.
-           * Plugin sees serializable frozen {observation, legalActions, context}; neither
-           * dex nor battle nor opponent hidden team reaches the plugin.
-           * Invalid plugin decisions fail closed; never silently substitute a baseline.
-           */
-          function propose({ownRequest,publicFoe={},selectionScores=null,dex=null,plugin=null,context=null}) {
-            plugin = ensurePlugin(plugin);
-            const obs = observe(ownRequest, publicFoe);
-            if (obs.v !== CORE_VERSION) throw new UnsupportedState('CORE_VERSION_MISMATCH');
-            const scores = resolveScores(plugin,obs,selectionScores);
-            const candidates = legalCandidates(obs,scores);
-            const legal=candidates.map(c=>c.command);
-            if (new Set(legal).size!==legal.length)throw new UnsupportedState('DUPLICATE_LEGAL_CANDIDATES');
-            let choice,policy;
-            if (plugin) {
-              const safeContext={traceId:typeof context?.traceId==='string'?context.traceId:null};
-              // Explicitly no candidates' policy score, battle source, dex, or metadata.
-              let response;
-              try {response=plugin.decide(cloneFreeze(obs),cloneFreeze(legal),cloneFreeze(safeContext));}
-              catch(e){throw new UnsupportedState('POLICY_RUNTIME_ERROR',String(e?.message||e));}
-              if(response && typeof response.then==='function') throw new UnsupportedState('ASYNC_POLICY_NOT_SUPPORTED');
-              choice=typeof response==='string'?response:response?.command;
-              policy=typeof plugin.id==='string' && plugin.id.trim()?plugin.id:'external_private_policy';
-            } else {
-              const decision=selectDecision(obs,candidates,dex);
-              choice=decision.command;
-              policy=decision.policy;
-            }
-            if(typeof choice!=='string'||!legal.includes(choice)) throw new UnsupportedState('POLICY_ILLEGAL_ACTION');
-            return Object.freeze({bridgeVersion:BRIDGE_VERSION,coreVersion:CORE_VERSION,phase:obs.phase,
-              choice,legal:Object.freeze([...legal]),policy,observationHash:HASH(obs),
-              // Not a private engine's result or live Champions legal-action oracle.
-              scope:'pinned_showdown_adapter'});
-          }
-          /** Public wrapper to feed private policy an explicit own-side request. */
-          function makeController({plugin=null,selectionScores=null,dex=null}={}) {
-            ensurePlugin(plugin);
-            return Object.freeze({
-              decide(ownRequest,publicFoe={},context=null) {
-                return propose({ownRequest,publicFoe,selectionScores,dex,plugin,context});
-              },
-            });
-          }
-          /** Minimal handoff: caller must supply explicit public observations for each side.
-           * The policy doesn't receive battle access; caller owns the engine.
-           */
-          function stepWithControllers(battle,{p1,p2},publicFoeBySide) {
-            if (!battle||!Array.isArray(battle.sides)||battle.sides.length!==2||typeof battle.makeChoices!=='function')
-              throw new UnsupportedState('BAD_BATTLE_ADAPTER');
-            if(typeof publicFoeBySide!=='function') throw new UnsupportedState('NO_PUBLIC_FOE_PROVIDER');
-            if (battle.ended) return {ended:true};
-            if(!p1||!p2||typeof p1.decide!=='function'||typeof p2.decide!=='function')
-              throw new UnsupportedState('CONTROLLER_INTERFACE_MISSING');
-            const d1=p1.decide(battle.sides[0].activeRequest,publicFoeBySide(0));
-            const d2=p2.decide(battle.sides[1].activeRequest,publicFoeBySide(1));
-            // Commit only after BOTH decisions are checked. If either policy fails, no mutation.
-            const before=battle.turn;
-            battle.makeChoices(d1.choice,d2.choice);
-            return {bridgeVersion:BRIDGE_VERSION,before,after:battle.turn,
-              phase:d1.phase,choices:[d1.choice,d2.choice],observationHashes:[d1.observationHash,d2.observationHash],
-              ended:!!battle.ended};
-          }
-          module.exports={BRIDGE_VERSION,propose,makeController,stepWithControllers};
-          R27_265_SOURCE_1_EOF
-          cat > public_protocol_projection.cjs <<'R27_265_SOURCE_2_EOF'
-          'use strict';
-          /**
-           * R27.263 / PUBLIC_PROTOCOL_PROJECTION: obtain opponent visible species from
-           * an explicit player-facing *public* event stream; never inspect opposing side,
-           * team, ability, item, RNG, or engine internal battle state.
-           *
-           * WARNING: Caller must supply a genuine player-facing stream. Passing an
-           * engine's internal log does not prove provenance. This module fails closed
-           * on known private/side-update markers and never forwards raw lines to policy.
-           */
-          const crypto = require('node:crypto');
-          const {UnsupportedState} = require('./battle_api.cjs');
-          const VERSION = 'r27.263.public-protocol.v1';
-          const sha256 = x => crypto.createHash('sha256').update(JSON.stringify(x)).digest('hex');
-          const BLOCKED = new Set(['split', 'request', 'sideupdate', 'error', 'raw', 'html', 'uhtml', 'uhtmlchange', 'debug']);
-          const APPEAR = new Set(['switch', 'drag', 'replace', 'detailschange', 'poke']);
-          const CHANGE = new Set(['-formechange']);
-          const faintType = 'faint';
-          const SPECIES = /^[a-zA-Z0-9 .:'’%♀♂\-]{1,80}$/;
-          
-          function validSide(id) {
-            if(id!=='p1' && id!=='p2') throw new UnsupportedState('INVALID_VIEWER_SIDE');
-            return id;
-          }
-          function extractActor(token) {
-            const m = /^(p[12])a: (.+)$/.exec(token || '');
-            if (!m) return null;
-            return {side:m[1],nickname:m[2]};
-          }
-          function speciesFromDetails(details) {
-            const value=String(details||'').split(',')[0].trim();
-            if(!SPECIES.test(value)) throw new UnsupportedState('MALFORMED_PUBLIC_SPECIES');
-            return value;
-          }
-          function interpret(lines, viewer) {
-            validSide(viewer);
-            if (!Array.isArray(lines) || lines.length>100000 || lines.some(x=>typeof x!=='string'||x.length>8192)) {
-              throw new UnsupportedState('INVALID_PUBLIC_STREAM');
-            }
-            const foeId=viewer==='p1'?'p2':'p1';
-            let species=null, revealed=false, fainted=false, changeCount=0;
-            for(const line of lines) {
-              if(!line.startsWith('|')) throw new UnsupportedState('NON_PROTOCOL_PUBLIC_EVENT');
-              if(line.includes('\n')||line.includes('\r')) throw new UnsupportedState('MULTILINE_PUBLIC_EVENT');
-              const fields=line.split('|');
-              const type=fields[1];
-              if(BLOCKED.has(type)) throw new UnsupportedState('PRIVATE_OR_UNTRUSTED_PROTOCOL_EVENT');
-              if(!APPEAR.has(type) && !CHANGE.has(type) && type!==faintType) continue;
-              // Team preview |poke|p1|species is public, but is not evidence of ACTIVE species.
-              if(type==='poke') continue;
-              const actor=extractActor(fields[2]);
-              if(!actor || actor.side!==foeId) continue;
-              if(type===faintType) {species=null;fainted=true;changeCount++;continue;}
-              // Pokemon species comes from a public switch/forme field, never nickname.
-              const details=fields[3];
-              if(!details)throw new UnsupportedState('MISSING_PUBLIC_SPECIES');
-              species=speciesFromDetails(details);
-              revealed=true;fainted=false;changeCount++;
-            }
-            return Object.freeze({projectionVersion:VERSION,species,foeId,
-              // Boolean values only: no raw event texts or unknown opponent attributes.
-              revealed,fainted,changeCount});
-          }
-          function publicProjection({viewer,events,source}) {
-            if(source!=='PUBLIC_CLIENT_PROTOCOL')throw new UnsupportedState('UNVERIFIED_PROTOCOL_SOURCE');
-            const r=interpret(events,viewer);
-            return Object.freeze({species:r.species});
-          }
-          function publicObservationDigest({viewer,events,source}) {
-            const foe=publicProjection({viewer,events,source});
-            return sha256({viewer,foe});
-          }
-          function publicFoeBySideFromStreams(streams) {
-            if(!streams || typeof streams!=='object') throw new UnsupportedState('MISSING_PUBLIC_STREAMS');
-            // Explicit independent inputs for each perspective, no fallthrough to engine state.
-            const result=Object.freeze([
-              publicProjection({viewer:'p1',...streams.p1}),
-              publicProjection({viewer:'p2',...streams.p2}),
-            ]);
-            return index => {
-              if(index!==0&&index!==1)throw new UnsupportedState('INVALID_PLAYER_INDEX');
-              return result[index];
-            };
-          }
-          module.exports={VERSION,publicProjection,publicObservationDigest,publicFoeBySideFromStreams,interpret};
-          R27_265_SOURCE_2_EOF
-          cat > private_runtime_intake.cjs <<'R27_265_SOURCE_3_EOF'
-          'use strict';
-          /**
-           * R27.265 — hash-pinned, explicit-trust ingestion of a candidate CJS policy.
-           * No private code is included in this module.  A matching caller-provided hash
-           * proves byte identity only; it does NOT prove source provenance or quality.
-           * Do not call activate() on untrusted files: CommonJS requires arbitrary code.
-           */
-          const fs = require('node:fs');
-          const path = require('node:path');
-          const crypto = require('node:crypto');
-          const Module = require('node:module');
-          const {UnsupportedState} = require('./battle_api.cjs');
-          const {makeController} = require('./private_policy_bridge.cjs');
-          const VERSION = 'r27.265.runtime-intake.v1';
-          const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
-          const SHA_PATTERN = /^[a-f0-9]{64}$/;
-          const SOURCE_KINDS = new Set(['fixture', 'external_candidate']);
-          const requireFail = (reason) => { throw new UnsupportedState(reason); };
-          const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
-          function assertDeclaredManifest(manifest) {
-            if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) requireFail('MISSING_SOURCE_MANIFEST');
-            if (manifest.schema !== 'TRUE_PLAN_RUNTIME_INTAKE_V1') requireFail('INVALID_MANIFEST_SCHEMA');
-            if (!SOURCE_KINDS.has(manifest.source_kind)) requireFail('UNCLASSIFIED_RUNTIME_SOURCE');
-            if (typeof manifest.sha256 !== 'string' || !SHA_PATTERN.test(manifest.sha256)) requireFail('EXPECTED_SHA_REQUIRED');
-            if (typeof manifest.source_file !== 'string' || !/^[a-zA-Z0-9_.-]+\.cjs$/.test(manifest.source_file)) requireFail('INVALID_SOURCE_BASENAME');
-            if (!Number.isInteger(manifest.size_bytes) || manifest.size_bytes<1 || manifest.size_bytes>MAX_SOURCE_BYTES)
-              requireFail('INVALID_SOURCE_SIZE');
-            if (typeof manifest.decide_export !== 'string' || !/^[a-zA-Z_$][\w$]{0,63}$/.test(manifest.decide_export))
-              requireFail('INVALID_POLICY_EXPORT_NAME');
-            if (manifest.preview_export !== null && manifest.preview_export !== undefined &&
-                (typeof manifest.preview_export !== 'string' || !/^[a-zA-Z_$][\w$]{0,63}$/.test(manifest.preview_export)))
-              requireFail('INVALID_PREVIEW_EXPORT_NAME');
-          }
-          function inspect({privateRoot,manifest}) {
-            assertDeclaredManifest(manifest);
-            if (typeof privateRoot !== 'string' || !path.isAbsolute(privateRoot)) requireFail('ABSOLUTE_PRIVATE_ROOT_REQUIRED');
-            let rootStat, fileStat, realRoot, realFile, contents;
-            try {
-              rootStat=fs.lstatSync(privateRoot);
-              if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) requireFail('UNSAFE_PRIVATE_ROOT');
-              realRoot=fs.realpathSync(privateRoot);
-              const filename=path.join(privateRoot,manifest.source_file);
-              fileStat=fs.lstatSync(filename);
-              if (!fileStat.isFile() || fileStat.isSymbolicLink()) requireFail('UNSAFE_POLICY_FILE');
-              realFile=fs.realpathSync(filename);
-              if (path.dirname(realFile)!==realRoot) requireFail('SOURCE_OUTSIDE_PRIVATE_ROOT');
-              if (fileStat.size !== manifest.size_bytes || fileStat.size > MAX_SOURCE_BYTES) requireFail('SOURCE_SIZE_MISMATCH');
-              contents=fs.readFileSync(filename);
-            } catch(e) {
-              if(e instanceof UnsupportedState) throw e;
-              if(e?.code==='ENOENT' || e?.code==='ENOTDIR') requireFail('PRIVATE_RUNTIME_NOT_FOUND');
-              throw new UnsupportedState('RUNTIME_FILE_IO_FAILURE',String(e?.code||e?.message||e));
-            }
-            const actual=sha256(contents);
-            if(actual !== manifest.sha256) requireFail('SOURCE_SHA_MISMATCH');
-            return Object.freeze({intakeVersion:VERSION,sourceKind:manifest.source_kind,sha256:actual,
-              sizeBytes:contents.byteLength,sourceFile:manifest.source_file,realFile,
-              status:'PINNED_BYTES_ONLY_NOT_EXECUTED',
-              privateRuntimeCertified:false,
-              explanation:'Caller supplied hash verifies byte identity; original provenance not independently verified.'});
-          }
-          /** Explicit execution of trusted CommonJS source only after preflight. */
-          function activate({privateRoot,manifest,trustedCodeExecution=false}) {
-            const provenance=inspect({privateRoot,manifest});
-            if (trustedCodeExecution !== true) requireFail('EXPLICIT_TRUST_TO_EXECUTE_REQUIRED');
-            let moduleExports;
-            try {
-              // Compile EXACTLY the bytes rehashed at this boundary. Never verify a path
-              // then require potentially changed bytes from that path (TOCTOU).
-              const pinnedBytes=fs.readFileSync(provenance.realFile);
-              if(pinnedBytes.length!==provenance.sizeBytes || sha256(pinnedBytes)!==provenance.sha256)
-                requireFail('SOURCE_CHANGED_BEFORE_EXECUTION');
-              const loaded=new Module(provenance.realFile,module);
-              loaded.filename=provenance.realFile;
-              loaded.paths=Module._nodeModulePaths(path.dirname(provenance.realFile));
-              loaded._compile(pinnedBytes.toString('utf8'),provenance.realFile);
-              moduleExports=loaded.exports;
-            } catch(e) {
-              if(e instanceof UnsupportedState) throw e;
-              throw new UnsupportedState('CANDIDATE_MODULE_LOAD_FAILED',String(e?.message||e));
-            }
-            if(!moduleExports || !Object.prototype.hasOwnProperty.call(moduleExports,manifest.decide_export) ||
-               typeof moduleExports[manifest.decide_export]!=='function') requireFail('CANDIDATE_POLICY_EXPORT_MISSING');
-            if(manifest.preview_export && (!Object.prototype.hasOwnProperty.call(moduleExports,manifest.preview_export) ||
-               typeof moduleExports[manifest.preview_export]!=='function')) requireFail('CANDIDATE_PREVIEW_EXPORT_MISSING');
-            const plugin={id:`r27.265.${provenance.sourceKind}.${provenance.sha256.slice(0,12)}`,
-              decide:(observation,legal,context)=>moduleExports[manifest.decide_export](observation,legal,context)};
-            if(manifest.preview_export)plugin.scorePreview=(observation)=>moduleExports[manifest.preview_export](observation);
-            return Object.freeze({plugin:Object.freeze(plugin),controller:makeController({plugin}),
-              provenance:Object.freeze({...provenance,status:'HASH_PINNED_MODULE_EXECUTED',
-                privateRuntimeCertified:false})});
-          }
-          module.exports={VERSION,inspect,activate,MAX_SOURCE_BYTES};
-          R27_265_SOURCE_3_EOF
-          cat > test_bridge.cjs <<'R27_265_SOURCE_4_EOF'
-          'use strict';
-          const assert=require('node:assert/strict');
-          const {UnsupportedState}=require('./battle_api.cjs');
-          const {BRIDGE_VERSION,propose,makeController,stepWithControllers}=require('./private_policy_bridge.cjs');
-          let tested=0;
-          function test(name,fn){fn();tested++;console.log('R27_262_UNIT '+JSON.stringify({name,status:'PASS'}));}
-          const mon=(n,active=false,fainted=false,reviving=false)=>({ident:n,condition:fainted?'0 fnt':'100/100',active,reviving,moves:['tackle'],item:'',baseAbility:''});
-          function reqMove(){return {side:{pokemon:[mon('A',true),mon('B'),mon('C')]},active:[{moves:[{id:'tackle',pp:12,disabled:false},{id:'growl',pp:0,disabled:false}],trapped:false}]};}
-          function reqSwitch(revival=false){return {side:{pokemon:[mon('B',true,false,revival),mon('A',false,true),mon('C')]},forceSwitch:[true]};}
-          function reqPreview(){return {side:{pokemon:['A','B','C','D','E','F'].map(x=>mon(x))},teamPreview:true,maxChosenTeamSize:3};}
-          const pickFirst={id:'private.mock',decide:(_o,choices)=>choices[0]};
-          const expectedError=(fn,code)=>assert.throws(fn,e=>e instanceof UnsupportedState && e.code===code);
-          test('version defined',()=>assert.match(BRIDGE_VERSION,/r27\.261/));
-          test('valid plugin move',()=>{let d=propose({ownRequest:reqMove(),plugin:pickFirst});assert.equal(d.choice,'move 1');assert.deepEqual(d.legal,['move 1','switch 2','switch 3']);});
-          test('object-return policy supported',()=>assert.equal(propose({ownRequest:reqMove(),plugin:{decide:()=>({command:'switch 3'})}}).choice,'switch 3'));
-          test('illegal nonlegal action rejected',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=> 'move 4'}}),'POLICY_ILLEGAL_ACTION'));
-          test('illegal preview action with valid scores rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:{scorePreview:()=>[100,80,50,90,70,0],decide:()=> 'team 999'}}),'POLICY_ILLEGAL_ACTION'));
-          test('preview missing scores cannot advance simulated engine',()=>{let commits=0;const battle={sides:[{activeRequest:reqPreview()},{activeRequest:reqPreview()}],turn:0,ended:false,makeChoices(){commits++;}};const invalid=makeController({plugin:{decide:()=> 'team 142'}});const valid=makeController({selectionScores:[100,50,25,75,20,10]});expectedError(()=>stepWithControllers(battle,{p1:invalid,p2:valid},()=>({species:null})),'PREVIEW_POLICY_UNAVAILABLE');assert.equal(commits,0);assert.equal(battle.turn,0);});
-          test('non-string action rejected',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>42}}),'POLICY_ILLEGAL_ACTION'));
-          test('missing plugin entry rejected',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{}}),'POLICY_INTERFACE_MISSING'));
-          test('plugin exceptions fail closed',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>{throw Error('bad')}}}),'POLICY_RUNTIME_ERROR'));
-          test('async plugin fails closed',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>Promise.resolve('move 1')}}),'ASYNC_POLICY_NOT_SUPPORTED'));
-          test('missing preview scores rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:pickFirst}),'PREVIEW_POLICY_UNAVAILABLE'));
-          test('explicit preview scores used',()=>assert.equal(propose({ownRequest:reqPreview(),selectionScores:[100,2,3,90,4,5],plugin:pickFirst}).choice,'team 146'));
-          test('plugin preview scoring used',()=>{const p={id:'p',scorePreview:()=>[100,2,3,90,4,5],decide:(_o,opts)=>opts[0]};assert.equal(propose({ownRequest:reqPreview(),plugin:p}).choice,'team 146')});
-          test('async preview rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:{scorePreview:()=>Promise.resolve([]),decide:()=>''}}),'ASYNC_PREVIEW_NOT_SUPPORTED'));
-          test('bad preview score rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:{scorePreview:()=>[1,2],decide:()=>''}}),'INVALID_SELECTION_SCORES'));
-          test('normal switch excludes fainted',()=>assert.deepEqual(propose({ownRequest:reqSwitch(),plugin:pickFirst}).legal,['switch 3']));
-          test('revival targets only fainted and slot 2',()=>{const d=propose({ownRequest:reqSwitch(true),plugin:pickFirst});assert.deepEqual(d.legal,['switch 2']);assert.equal(d.choice,'switch 2');});
-          test('wait commands empty',()=>assert.equal(propose({ownRequest:{wait:true},plugin:pickFirst}).choice,''));
-          test('strict public foe projection',()=>{let snapshot;const plugin={decide:o=>{snapshot=o;return 'move 1'}};const own=reqMove();propose({ownRequest:own,publicFoe:{species:'Garchomp',item:'SECRET_TOKEN',hidden:['private']},plugin});assert.equal(snapshot.foe.species,'Garchomp');assert.ok(!JSON.stringify(snapshot).includes('SECRET_TOKEN'));});
-          test('policy cannot mutate observation',()=>{const plugin={decide:o=>{assert.throws(()=>{o.own[0].ident='SECRET'},TypeError);return 'move 1'}};propose({ownRequest:reqMove(),plugin});});
-          test('policy cannot mutate legal',()=>{const plugin={decide:(_,legal)=>{assert.throws(()=>legal.push('move 99'),TypeError);return legal[0]}};propose({ownRequest:reqMove(),plugin});});
-          test('does not hand simulator dex to plugin',()=>{let keys;const dex={moves:{get:()=>{throw Error('should not call')}}};const plugin={decide:(o,l,c)=>{keys=Object.keys(c);return l[0]}};propose({ownRequest:reqMove(),plugin,dex,context:{traceId:'trace',secret:'PRIVATE'}});assert.deepEqual(keys,['traceId']);});
-          test('deterministic observation hash',()=>{const a=propose({ownRequest:reqMove(),plugin:pickFirst});const b=propose({ownRequest:reqMove(),plugin:pickFirst});assert.equal(a.observationHash,b.observationHash)});
-          test('secret changes preserve public hash',()=>{const a=propose({ownRequest:reqMove(),plugin:pickFirst,publicFoe:{species:'Garchomp',secret:'A'}});const b=propose({ownRequest:reqMove(),plugin:pickFirst,publicFoe:{species:'Garchomp',secret:'B'}});assert.equal(a.observationHash,b.observationHash);});
-          test('controller wrapper returns proposal',()=>assert.equal(makeController({plugin:pickFirst}).decide(reqMove()).choice,'move 1'));
-          test('unknown phase fail closed',()=>expectedError(()=>propose({ownRequest:{side:{pokemon:[mon('A')]}}}),'UNKNOWN_PHASE'));
-          test('joint step atomic on policy rejection',()=>{let mutation=0;let battle={sides:[{activeRequest:reqMove()},{activeRequest:reqMove()}],turn:1,makeChoices(){mutation++}};expectedError(()=>stepWithControllers(battle,{p1:makeController({plugin:pickFirst}),p2:makeController({plugin:{decide:()=> 'move 40'}})},()=>({species:'Magikarp'})),'POLICY_ILLEGAL_ACTION');assert.equal(mutation,0);});
-          test('joint step passes validated actions',()=>{let inputs;const battle={sides:[{activeRequest:reqMove()},{activeRequest:reqMove()}],turn:1,ended:false,makeChoices(...c){inputs=c;this.turn++}};const r=stepWithControllers(battle,{p1:makeController({plugin:pickFirst}),p2:makeController({plugin:pickFirst})},()=>({species:'Magikarp'}));assert.deepEqual(inputs,['move 1','move 1']);assert.equal(r.after,2);});
-          test('joint step rejects missing public provider',()=>expectedError(()=>stepWithControllers({sides:[{},{}],makeChoices(){}},{p1:{},p2:{}},null),'NO_PUBLIC_FOE_PROVIDER'));
-          test('baseline wait uses no dex',()=>assert.equal(propose({ownRequest:{wait:true}}).choice,''));
-          console.log('R27_262_UNIT_SUMMARY '+JSON.stringify({pass:tested,total:tested,bridge_version:BRIDGE_VERSION}));
-          R27_265_SOURCE_4_EOF
-          cat > test_public_protocol.cjs <<'R27_265_SOURCE_5_EOF'
-          'use strict';
-          const assert=require('node:assert/strict');
-          const {UnsupportedState}=require('./battle_api.cjs');
-          const {propose}=require('./private_policy_bridge.cjs');
-          const {VERSION,publicProjection,publicObservationDigest,publicFoeBySideFromStreams,interpret}=require('./public_protocol_projection.cjs');
-          let count=0;
-          const test=(name,fn)=>{try{fn();count++;console.log('R27_263_PUBLIC_CASE '+JSON.stringify({name,status:'PASS'}))}catch(e){console.error('R27_263_PUBLIC_CASE '+JSON.stringify({name,status:'FAIL',error:String(e.stack||e)}));process.exitCode=1}};
-          const input=(events,viewer='p1')=>({source:'PUBLIC_CLIENT_PROTOCOL',viewer,events});
-          const fail=(fn,code)=>assert.throws(fn,e=>e instanceof UnsupportedState&&e.code===code);
-          const moveRequest=()=>({side:{pokemon:[{ident:'p1: A',details:'Charizard, L50',condition:'100/100',active:true,moves:['ember']},{ident:'p1: B',details:'Pikachu, L50',condition:'100/100',active:false,moves:['thunderbolt']}]},active:[{moves:[{id:'ember',pp:10,disabled:false}],trapped:false}]});
-          const policy={id:'ext',decide:(_o,legal)=>legal[0]};
-          test('explicit version',()=>assert.match(VERSION,/r27\.263/));
-          test('public foe p2 switch',()=>assert.deepEqual(publicProjection(input(['|turn|1','|switch|p2a: M|Gyarados, L50|100/100'])),{species:'Gyarados'}));
-          test('public foe p1 from p2 view',()=>assert.equal(publicProjection(input(['|switch|p1a: Z|Pikachu, L50|99/99'],'p2')).species,'Pikachu'));
-          test('nickname not treated as species',()=>assert.equal(publicProjection(input(['|switch|p2a: PRIVATE_NICKNAME|Garchomp, L50|100/100'])).species,'Garchomp'));
-          test('no opponent active in preview',()=>assert.equal(publicProjection(input(['|poke|p2|Garchomp, L50','|teampreview|3'])).species,null));
-          test('public form transition',()=>assert.equal(publicProjection(input(['|switch|p2a: Gyarados|Gyarados, L50|100/100','|-formechange|p2a: Gyarados|Gyarados-Mega'])).species,'Gyarados-Mega'));
-          test('faint clears active target',()=>assert.deepEqual(publicProjection(input(['|switch|p2a: Gyarados|Gyarados, L50|100/100','|faint|p2a: Gyarados'])),{species:null}));
-          test('replacing after faint recognized',()=>assert.equal(publicProjection(input(['|switch|p2a: Gyara|Gyarados, L50|100/100','|faint|p2a: Gyara','|switch|p2a: Z|Magikarp, L50|100/100'])).species,'Magikarp'));
-          test('ignore own switches',()=>assert.equal(publicProjection(input(['|switch|p1a: Own|Alakazam, L50|100/100'])).species,null));
-          test('unknown public move is not exposed',()=>assert.deepEqual(publicProjection(input(['|move|p2a: Z|Spore|p1a: Own','|turn|2'])),{species:null}));
-          test('public species injection does not reveal item',()=>{const p=publicProjection(input(['|switch|p2a: Z|Gengar, L50|100/100','|-item|p2a: Z|Choice Specs','|-ability|p2a: Z|Cursed Body']));assert.deepEqual(Object.keys(p),['species']);assert.ok(!JSON.stringify(p).includes('Choice Specs'))});
-          test('reject unverified protocol source',()=>fail(()=>publicProjection({...input([]),source:'ENGINE_INTERNAL_LOG'}),'UNVERIFIED_PROTOCOL_SOURCE'));
-          test('reject private split marker',()=>fail(()=>publicProjection(input(['|split|p1','|switch|p2a: Z|Gengar, L50|100/100'])),'PRIVATE_OR_UNTRUSTED_PROTOCOL_EVENT'));
-          test('reject sideupdate/request',()=>{for(const event of ['|request|{"side":{"pokemon":[]}}','|sideupdate|p1']) fail(()=>publicProjection(input([event])),'PRIVATE_OR_UNTRUSTED_PROTOCOL_EVENT')});
-          test('reject multiline spoof',()=>fail(()=>publicProjection(input(['|turn|1\n|switch|p2a: Z|Gengar, L50|100/100'])),'MULTILINE_PUBLIC_EVENT'));
-          test('reject malicious malformed species',()=>fail(()=>publicProjection(input(['|switch|p2a: Z|SECRET_TOKEN/Item|100/100'])),'MALFORMED_PUBLIC_SPECIES'));
-          test('reject omitted species for opponent',()=>fail(()=>publicProjection(input(['|switch|p2a: Z||100/100'])),'MISSING_PUBLIC_SPECIES'));
-          test('wrong viewer rejected',()=>fail(()=>publicProjection(input([],'p3')),'INVALID_VIEWER_SIDE'));
-          test('reject invalid array type',()=>fail(()=>publicProjection(input('not an event array')),'INVALID_PUBLIC_STREAM'));
-          test('not affected by own or nonpublic ignored move names',()=>{const a=publicObservationDigest(input(['|switch|p2a: Z|Gengar, L50|100/100']));const b=publicObservationDigest(input(['|switch|p2a: Z|Gengar, L50|100/100','|move|p1a: Own|Hyper Beam|p2a: Z','|-item|p1a: Own|Leftovers']));assert.equal(a,b)});
-          test('both perspectives are independently derived',()=>{const f=publicFoeBySideFromStreams({p1:{source:'PUBLIC_CLIENT_PROTOCOL',events:['|switch|p2a: Z|Gengar, L50|100/100']},p2:{source:'PUBLIC_CLIENT_PROTOCOL',events:['|switch|p1a: X|Pikachu, L50|100/100']}});assert.deepEqual(f(0),{species:'Gengar'});assert.deepEqual(f(1),{species:'Pikachu'});fail(()=>f(2),'INVALID_PLAYER_INDEX')});
-          test('mock private adapter consumes only public projection',()=>{const pub=publicProjection(input(['|switch|p2a: Z|Gyarados, L50|100/100']));const a=propose({ownRequest:moveRequest(),publicFoe:pub,plugin:policy});const b=propose({ownRequest:moveRequest(),publicFoe:{species:pub.species,secret:'NO_ACCESS'},plugin:policy});assert.equal(a.observationHash,b.observationHash);assert.equal(a.choice,b.choice)});
-          console.log('R27_263_PUBLIC_SUMMARY '+JSON.stringify({pass:count,total:22,source:'synthetic public protocol; not live game certification'}));
-          if(count!==22)process.exitCode=1;
-          R27_265_SOURCE_5_EOF
-          cat > test_private_runtime_intake.cjs <<'R27_265_SOURCE_6_EOF'
-          'use strict';
-          const assert=require('node:assert/strict');
-          const fs=require('node:fs'),path=require('node:path'),os=require('node:os'),crypto=require('node:crypto');
-          const {UnsupportedState}=require('./battle_api.cjs');
-          const {inspect,activate,VERSION}=require('./private_runtime_intake.cjs');
-          const {stepWithControllers}=require('./private_policy_bridge.cjs');
-          const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
-          const dir=fs.mkdtempSync(path.join(os.tmpdir(),'r27265-intake-'));
-          let count=0;
-          const test=(name,fn)=>{try{fn();count++;console.log('R27_265_UNIT '+JSON.stringify({name,status:'PASS'}))}catch(e){console.error('R27_265_UNIT '+JSON.stringify({name,status:'FAIL',error:String(e)}));throw e}};
-          const expect=(code,fn)=>assert.throws(fn,e=>e instanceof UnsupportedState&&e.code===code,code);
-          const src=`'use strict';\nmodule.exports={decide:(_obs,legal)=>legal[0],scorePreview:()=>[10,1,2,9,3,4]};\n`;
-          const bad=`'use strict';\nmodule.exports={choose:(_obs,legal)=>legal[0]};\n`;
-          fs.writeFileSync(path.join(dir,'trusted-fixture.cjs'),src);
-          fs.writeFileSync(path.join(dir,'missing-export.cjs'),bad);
-          const illegal=`'use strict';\nmodule.exports={decide:()=> 'move 999'};\n`;
-          fs.writeFileSync(path.join(dir,'illegal.cjs'),illegal);
-          const makeManifest=(name,content,kind='fixture')=>({schema:'TRUE_PLAN_RUNTIME_INTAKE_V1',source_kind:kind,
-            source_file:name,size_bytes:Buffer.byteLength(content),sha256:hash(content),decide_export:'decide',preview_export:'scorePreview'});
-          const m=makeManifest('trusted-fixture.cjs',src);
-          const preview={teamPreview:true,maxChosenTeamSize:3,side:{pokemon:['A','B','C','D','E','F'].map(x=>({ident:x,condition:'100/100',active:false,moves:['tackle']}))}};
-          const move={active:[{moves:[{id:'tackle',pp:8,disabled:false}]}],side:{pokemon:[{ident:'A',condition:'100/100',active:true,moves:['tackle']},{ident:'B',condition:'100/100',active:false,moves:['tackle']}]}};
-          try {
-            test('module version declared',()=>assert.equal(VERSION,'r27.265.runtime-intake.v1'));
-            test('trusted fixture verifies bytes without executing',()=>{const x=inspect({privateRoot:dir,manifest:m});assert.equal(x.sha256,m.sha256);assert.equal(x.status,'PINNED_BYTES_ONLY_NOT_EXECUTED');assert.equal(x.privateRuntimeCertified,false)});
-            test('execution requires opt in',()=>expect('EXPLICIT_TRUST_TO_EXECUTE_REQUIRED',()=>activate({privateRoot:dir,manifest:m})));
-            test('valid mock module activates after explicit trust',()=>{const x=activate({privateRoot:dir,manifest:m,trustedCodeExecution:true});assert.equal(x.provenance.status,'HASH_PINNED_MODULE_EXECUTED');assert.equal(x.provenance.privateRuntimeCertified,false)});
-            test('preview choice through injected plugin',()=>{const x=activate({privateRoot:dir,manifest:m,trustedCodeExecution:true});assert.equal(x.controller.decide(preview).choice,'team 146')});
-            test('turn choice through injected plugin',()=>{const x=activate({privateRoot:dir,manifest:m,trustedCodeExecution:true});assert.equal(x.controller.decide(move,{species:'Magikarp'}).choice,'move 1')});
-            test('candidate is never original private certified',()=>{const x=activate({privateRoot:dir,manifest:{...m,source_kind:'external_candidate'},trustedCodeExecution:true});assert.equal(x.provenance.privateRuntimeCertified,false);assert.equal(x.provenance.sourceKind,'external_candidate')});
-            test('missing private runtime fails closed',()=>expect('PRIVATE_RUNTIME_NOT_FOUND',()=>inspect({privateRoot:dir,manifest:{...m,source_file:'not-here.cjs'}})));
-            test('source hash mismatch rejects file',()=>expect('SOURCE_SHA_MISMATCH',()=>inspect({privateRoot:dir,manifest:{...m,sha256:'0'.repeat(64)}})));
-            test('source size mismatch rejects file',()=>expect('SOURCE_SIZE_MISMATCH',()=>inspect({privateRoot:dir,manifest:{...m,size_bytes:m.size_bytes+1}})));
-            test('source identity hash required',()=>expect('EXPECTED_SHA_REQUIRED',()=>inspect({privateRoot:dir,manifest:{...m,sha256:null}})));
-            test('reject source file path traversal',()=>expect('INVALID_SOURCE_BASENAME',()=>inspect({privateRoot:dir,manifest:{...m,source_file:'../tmp/secret.cjs'}})));
-            test('reject absolute file in manifest',()=>expect('INVALID_SOURCE_BASENAME',()=>inspect({privateRoot:dir,manifest:{...m,source_file:'/tmp/secret.cjs'}})));
-            test('reject source symlink',()=>{const ln=path.join(dir,'alias.cjs');fs.symlinkSync(path.join(dir,'trusted-fixture.cjs'),ln);expect('UNSAFE_POLICY_FILE',()=>inspect({privateRoot:dir,manifest:{...m,source_file:'alias.cjs'}}))});
-            test('reject unknown source provenance',()=>expect('UNCLASSIFIED_RUNTIME_SOURCE',()=>inspect({privateRoot:dir,manifest:{...m,source_kind:'CERTIFIED_REAL'}})));
-            test('reject false schema',()=>expect('INVALID_MANIFEST_SCHEMA',()=>inspect({privateRoot:dir,manifest:{...m,schema:'v0.76'}})));
-            test('reject unknown decide export',()=>{const x=makeManifest('missing-export.cjs',bad);expect('CANDIDATE_POLICY_EXPORT_MISSING',()=>activate({privateRoot:dir,manifest:x,trustedCodeExecution:true}))});
-            test('reject wrong preview export',()=>{const x={...m,preview_export:'notThere'};expect('CANDIDATE_PREVIEW_EXPORT_MISSING',()=>activate({privateRoot:dir,manifest:x,trustedCodeExecution:true}))});
-            test('manifest root must be absolute',()=>expect('ABSOLUTE_PRIVATE_ROOT_REQUIRED',()=>inspect({privateRoot:'.',manifest:m})));
-            test('module with no preview export is allowed only for turns',()=>{const x={...m,preview_export:null};const c=activate({privateRoot:dir,manifest:x,trustedCodeExecution:true}).controller;assert.equal(c.decide(move).choice,'move 1');expect('PREVIEW_POLICY_UNAVAILABLE',()=>c.decide(preview))});
-            test('trusted candidate completes joint move handoff to mock battle',()=>{
-              const x=activate({privateRoot:dir,manifest:m,trustedCodeExecution:true});
-              let commits=0,choices=null;
-              const battle={turn:3,ended:false,sides:[{activeRequest:move},{activeRequest:move}],
-                makeChoices(a,b){commits++;choices=[a,b];this.turn++}};
-              const result=stepWithControllers(battle,{p1:x.controller,p2:x.controller},()=>({species:'Magikarp'}));
-              assert.deepEqual(choices,['move 1','move 1']);assert.equal(commits,1);assert.equal(result.after,4);
-            });
-            test('illegal loaded candidate cannot commit joint turn',()=>{
-              const good=activate({privateRoot:dir,manifest:m,trustedCodeExecution:true});
-              const evil=activate({privateRoot:dir,
-                manifest:{...makeManifest('illegal.cjs',illegal),preview_export:null},trustedCodeExecution:true});
-              let commits=0;
-              const battle={turn:3,ended:false,sides:[{activeRequest:move},{activeRequest:move}],makeChoices(){commits++}};
-              expect('POLICY_ILLEGAL_ACTION',()=>stepWithControllers(battle,{p1:good.controller,p2:evil.controller},()=>({species:'Magikarp'})));
-              assert.equal(commits,0);assert.equal(battle.turn,3);
-            });
-            test('invalid source basename extension rejected',()=>expect('INVALID_SOURCE_BASENAME',()=>inspect({privateRoot:dir,manifest:{...m,source_file:'trusted-fixture.zip'}})));
-            test('runtime source is not present in publicly distributed module',()=>assert.equal(require('./private_runtime_intake.cjs').VERSION,'r27.265.runtime-intake.v1'));
-            console.log('R27_265_UNIT_SUMMARY '+JSON.stringify({pass:count,total:count,private_runtime_certified:false}));
-          } finally { fs.rmSync(dir,{recursive:true,force:true}); }
-          R27_265_SOURCE_6_EOF
-          node --version
-          test "$(node --version)" = "v22.18.0"
-          for f in *.cjs; do node --check "$f"; done
-          node test_bridge.cjs
-          node test_public_protocol.cjs
-          node test_private_runtime_intake.cjs
-          echo 'R27_265_CONTRACT_COMPLETE PASS 76/76 (PUBLIC MOCK ONLY)'
-          echo 'CERTIFICATION_GATE Native33=0/33 Exact34=0/34 Acceptance=0/8 FORMAL=DENY'
-          echo 'PRIVATE_RUNTIME_NOT_IN_REPOSITORY; NOT CERTIFIED'
+          # Rehydrate the exact public mock/adapter contract script; original SHA-256 verified below.
+          cat > "$RUNNER_TEMP/r27300_mock_contract.b64" <<'R27300_AUDIT_PAYLOAD_EOF'
+          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
+          my2pAAA=
+          R27300_AUDIT_PAYLOAD_EOF
+          base64 -d "$RUNNER_TEMP/r27300_mock_contract.b64" | gzip -d > "$RUNNER_TEMP/r27300_mock_contract.sh"
+          printf "%s  %s\n" "1a1ea2a35e5ca6cfc4440516db5cbce838076ffe4fff498d1e9a7d436a08c78b" "$RUNNER_TEMP/r27300_mock_contract.sh" | sha256sum --check --status
+          bash --noprofile --norc -e -o pipefail "$RUNNER_TEMP/r27300_mock_contract.sh"
       - name: Checkout immutable public Pokemon Showdown
         uses: actions/checkout@v4
         with:
