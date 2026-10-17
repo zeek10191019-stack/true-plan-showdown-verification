@@ -1,0 +1,289 @@
+# R27.254 incremental simulator regression. Manual run, public repo, standard free runner.
+# THIS DOES NOT CERTIFY REAL POKEMON CHAMPIONS mechanics or count towards Stage1.5.
+name: R27.254 Champions edge-case simulator regression
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  edge-regression:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout immutable Showdown source
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pokemon-showdown
+      - name: Setup pinned Node.js 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify immutable source and build
+        shell: bash
+        working-directory: pokemon-showdown
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(node -v)" = 'v22.18.0'
+          npm ci --no-audit --no-fund
+          npm run build
+          echo 'R27_254_PINNED_BUILD PASS'
+      - name: Run five source-simulator edge regressions
+        shell: bash
+        working-directory: pokemon-showdown
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          'use strict';
+          /**
+           * R27.254 incremental edge-case regressions, pinned Showdown Champions Mod only.
+           * Requires execution from the root of pinned, npm-built pokemon-showdown.
+           * This file tests simulator behaviour; it does NOT establish live Champions truth.
+           */
+          const assert = require('node:assert/strict');
+          const {Battle, Dex} = require('./dist/sim');
+          const PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const FORMAT = '[Gen 9 Champions] BSS Reg M-C';
+          const reports = [];
+          const ability = {
+            Gyarados: 'Intimidate', Pawmot: 'Volt Absorb', Basculegion: 'Adaptability',
+            Annihilape: 'Vital Spirit', Magikarp: 'Swift Swim', Banette: 'Insomnia',
+            Snorlax: 'Immunity', Pikachu: 'Static', Eevee: 'Run Away', Bulbasaur: 'Overgrow',
+            Ivysaur: 'Overgrow', Venusaur: 'Overgrow', Caterpie: 'Shield Dust',
+            Garchomp: 'Rough Skin', Greninja: 'Torrent',
+          };
+          const species = (name, moves, item = '') => ({
+            name, species: name, moves, item, ability: ability[name] || 'No Ability',
+            nature: 'Hardy', level: 50,
+            evs: {hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0},
+          });
+          const fillers = [
+            species('Pikachu', ['thunderbolt']),
+            species('Eevee', ['tackle']),
+            species('Bulbasaur', ['tackle']),
+          ];
+          const opponentFillers = [
+            species('Ivysaur', ['tackle']),
+            species('Venusaur', ['tackle']),
+            species('Caterpie', ['tackle']),
+          ];
+          function battleFor(p1, p2) {
+            assert.equal(p1.length, 3);
+            assert.equal(p2.length, 3);
+            const f = Dex.formats.get(FORMAT);
+            assert.ok(f.exists && f.mod === 'champions', 'missing pinned M-C Champions singles format');
+            const b = new Battle({
+              formatid: f.id, strictChoices: true, seed: [1, 2, 3, 4],
+              p1: {name: 'R27-p1', team: [...p1, ...fillers]},
+              p2: {name: 'R27-p2', team: [...p2, ...opponentFillers]},
+            });
+            assert.equal(b.requestState, 'teampreview');
+            b.makeChoices('team 123', 'team 123');
+            assert.equal(b.requestState, 'move');
+            assert.equal(b.gameType, 'singles');
+            return b;
+          }
+          function pick(b, player, name) {
+            const mon = b[player].pokemon.find(p => p.name === name);
+            assert.ok(mon, `missing ${player}/${name}`);
+            return mon;
+          }
+          function slot(mon) { return String(mon.position + 1); }
+          function turn(b, p1, p2) {
+            assert.equal(b.requestState, 'move', `move request before: ${p1} | ${p2}`);
+            b.makeChoices(p1, p2);
+          }
+          function resurrectionBattle() {
+            return battleFor([
+              species('Gyarados', ['dragondance'], 'Gyaradosite'),
+              species('Pawmot', ['revivalblessing']),
+              species('Basculegion', ['lastrespects']),
+            ], [
+              species('Annihilape', ['finalgambit']),
+              species('Magikarp', ['splash']),
+              species('Garchomp', ['splash', 'crunch']),
+            ]);
+          }
+          function firstFaintAndReplacement(b) {
+            turn(b, 'move 1 mega', 'move 1');
+            const gyara = pick(b, 'p1', 'Gyarados');
+            assert.ok(gyara.fainted && pick(b, 'p2', 'Annihilape').fainted);
+            assert.equal(gyara.species.name, 'Gyarados-Mega');
+            assert.equal(b.p1.totalFainted, 1);
+            assert.equal(b.requestState, 'switch');
+            b.makeChoices(`switch ${slot(pick(b, 'p1', 'Pawmot'))}`,
+              `switch ${slot(pick(b, 'p2', 'Magikarp'))}`);
+            assert.equal(b.p1.active[0].name, 'Pawmot');
+            assert.equal(b.requestState, 'move');
+            return gyara;
+          }
+          function selectFaintedAfterBlessing(b, target) {
+            turn(b, 'move 1', 'move 1');
+            assert.equal(b.requestState, 'switch', 'Revival Blessing must offer fainted target selection');
+            assert.equal(b.choose('p1', `switch ${slot(target)}`), true);
+            assert.equal(target.fainted, false);
+            assert.equal(b.p1.totalFainted, 1, 'reviving does not decrement historical faint count');
+          }
+          function noFaintedTarget() {
+            const b = battleFor([
+              species('Pawmot', ['revivalblessing', 'tackle']),
+              species('Gyarados', ['dragondance']),
+              species('Basculegion', ['lastrespects']),
+            ], [
+              species('Magikarp', ['splash']),
+              species('Garchomp', ['splash']),
+              species('Annihilape', ['splash']),
+            ]);
+            try {
+              assert.equal(b.p1.totalFainted, 0);
+              turn(b, 'move 1', 'move 1');
+              assert.equal(b.requestState, 'move', 'no fainted member should prevent revival selection prompt');
+              assert.equal(b.p1.totalFainted, 0);
+              assert.equal(b.p1.pokemon.filter(p => p.fainted).length, 0);
+              assert.equal(b.p1.active[0].name, 'Pawmot');
+              return {fainted: 0, revival_selection_requested: false, turn: b.turn};
+            } finally {b.destroy();}
+          }
+          function livingCannotBeSelected() {
+            const b = resurrectionBattle();
+            try {
+              const gyara = firstFaintAndReplacement(b);
+              turn(b, 'move 1', 'move 1');
+              assert.equal(b.requestState, 'switch');
+              const living = pick(b, 'p1', 'Basculegion');
+              assert.equal(living.fainted, false);
+              let rejected = false;
+              try {
+                rejected = b.choose('p1', `switch ${slot(living)}`) === false;
+              } catch (err) {
+                // strictChoices can throw on illegal selections in this pinned engine.
+                rejected = /choice|switch|faint|pass/i.test(String(err));
+              }
+              assert.equal(rejected, true, 'living target must be rejected');
+              assert.equal(living.fainted, false);
+              assert.equal(b.choose('p1', `switch ${slot(gyara)}`), true,
+                'valid fainted target must remain selectable after rejection');
+              assert.equal(gyara.fainted, false);
+              assert.equal(gyara.species.name, 'Gyarados-Mega');
+              return {living_selection_rejected: true, fainted_selection_accepted: true,
+                restored_form: gyara.species.name};
+            } finally {b.destroy();}
+          }
+          function lastRespectsBase50() {
+            const b = battleFor([
+              species('Basculegion', ['lastrespects']),
+              species('Pawmot', ['revivalblessing']),
+              species('Gyarados', ['dragondance']),
+            ], [
+              species('Magikarp', ['splash']),
+              species('Garchomp', ['splash']),
+              species('Annihilape', ['splash']),
+            ]);
+            try {
+              const move = b.dex.moves.get('lastrespects');
+              assert.equal(typeof move.basePowerCallback, 'function');
+              assert.equal(b.p1.totalFainted, 0);
+              const bp = move.basePowerCallback.call(b, b.p1.active[0], b.p2.active[0], move);
+              assert.equal(bp, 50, 'no faint => BP50');
+              return {historical_faints: 0, base_power: bp};
+            } finally {b.destroy();}
+          }
+          function repeatedFaintAfterRevival() {
+            const b = resurrectionBattle();
+            try {
+              const gyara = firstFaintAndReplacement(b);
+              selectFaintedAfterBlessing(b, gyara);
+              assert.equal(gyara.species.name, 'Gyarados-Mega');
+              turn(b, `switch ${slot(gyara)}`, 'move 1');
+              assert.equal(b.p1.active[0], gyara);
+              assert.equal(gyara.species.name, 'Gyarados-Mega');
+              turn(b, 'move 1', `switch ${slot(pick(b, 'p2', 'Garchomp'))}`);
+              assert.equal(b.p2.active[0].name, 'Garchomp');
+              gyara.hp = 1; // deterministic HP fixture; original move mechanics unmodified
+              turn(b, 'move 1', 'move 2'); // Dragon Dance vs Garchomp's Crunch
+              assert.ok(gyara.fainted, 'second faint should occur after revival');
+              assert.equal(b.p1.totalFainted, 2, 'second faint must accumulate, not collapse to one');
+              assert.equal(b.requestState, 'switch');
+              const basc = pick(b, 'p1', 'Basculegion');
+              b.makeChoices(`switch ${slot(basc)}`);
+              assert.equal(b.p1.active[0], basc);
+              const move = b.dex.moves.get('lastrespects');
+              const bp = move.basePowerCallback.call(b, basc, b.p2.active[0], move);
+              assert.equal(bp, 150, '2 historical faint events => BP150');
+              const prevHP = b.p2.active[0].hp;
+              turn(b, 'move 1', 'move 1'); // Last Respects vs Garchomp Splash (non-immune)
+              assert.ok(b.p2.active[0].hp < prevHP, 'Last Respects must deal damage to Garchomp');
+              return {historical_faints: b.p1.totalFainted, base_power: bp,
+                damage: prevHP - b.p2.active[0].hp, mega_form_before_second_faint: true};
+            } finally {b.destroy();}
+          }
+          function destinyBondCarriesUntilNextAction() {
+            const b = battleFor([
+              species('Banette', ['destinybond', 'shadowsneak'], 'Banettite'),
+              species('Garchomp', ['tackle']),
+              species('Pawmot', ['revivalblessing']),
+            ], [
+              species('Greninja', ['watershuriken', 'protect']),
+              species('Magikarp', ['splash']),
+              species('Annihilape', ['finalgambit']),
+            ]);
+            try {
+              const banette = pick(b, 'p1', 'Banette');
+              const greninja = pick(b, 'p2', 'Greninja');
+              banette.hp = 1;
+              turn(b, 'move 1 mega', 'move 2'); // Destiny Bond vs Protect
+              assert.equal(banette.fainted, false);
+              assert.equal(greninja.fainted, false);
+              assert.ok(banette.volatiles['destinybond'], 'Destiny Bond active at start of next turn');
+              const before = b.log.length;
+              turn(b, 'move 2', 'move 1'); // Water Shuriken before Shadow Sneak (both +1, Greninja faster)
+              assert.equal(banette.fainted, true, 'priority water shuriken should KO 1HP Banette');
+              assert.equal(greninja.fainted, true, 'DB should persist until Banette moves again');
+              const additionalLog = b.log.slice(before);
+              assert.ok(additionalLog.some(x => x.includes('move: Destiny Bond')), 'DB activation absent');
+              assert.equal(additionalLog.some(x => x.includes('|move|') && x.includes('|Shadow Sneak|')), false,
+                'Banette should faint before taking its next action');
+              return {next_turn_before_owner_action: true, attacker_fainted: true,
+                attack: 'Water Shuriken', user_next_action_taken: false};
+            } finally {b.destroy();}
+          }
+          const cases = [
+            ['REVIVAL_NO_FAINTED_MEMBER', noFaintedTarget],
+            ['REVIVAL_REJECT_LIVING_TARGET', livingCannotBeSelected],
+            ['LAST_RESPECTS_BP50_BASELINE', lastRespectsBase50],
+            ['REVIVAL_SECOND_FAINT_BP150', repeatedFaintAfterRevival],
+            ['DESTINY_BOND_NEXT_TURN_BEFORE_ACTION', destinyBondCarriesUntilNextAction],
+          ];
+          for (const [id, run] of cases) {
+            try {
+              const evidence = run();
+              const row = {id, status: 'PASS', evidence};
+              reports.push(row);
+              console.log('R27_254_CASE ' + JSON.stringify(row));
+            } catch (error) {
+              const row = {id, status: 'FAIL', error: String(error?.stack || error)};
+              reports.push(row);
+              console.error('R27_254_CASE ' + JSON.stringify(row));
+              process.exitCode = 1;
+            }
+          }
+          const summary = {
+            revision: 'R27.254', pin: PIN, format: FORMAT,
+            scope: 'Showdown pinned source simulator only; NOT actual Champions certification',
+            pass: reports.filter(row => row.status === 'PASS').length,
+            total: reports.length,
+            results: reports.map(row => ({id: row.id, status: row.status})),
+          };
+          console.log('R27_254_SUMMARY ' + JSON.stringify(summary));
+          console.log('CERTIFICATION_GATE Native33=0/33 Exact34=0/34 Acceptance=0/8 Stage1.5=560/3500 FORMAL=DENY');
+          if (summary.pass !== summary.total) process.exitCode = 1;
+          NODE
