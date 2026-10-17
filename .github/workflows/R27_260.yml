@@ -1,0 +1,400 @@
+# R27.260 - corrected Showdown party-slot dynamic indexing integration tests.
+# No private Battle AI code; simulator only. Public repo and manual launch only.
+name: R27.260 Portable BattleEngine Dynamic Revival Slot Regression
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  simulator-contract:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout pinned public Showdown
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          persist-credentials: false
+          fetch-depth: 1
+          path: pokemon-showdown
+      - name: Setup pinned Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify pinned source and build
+        shell: bash
+        working-directory: pokemon-showdown
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(node -v)" = 'v22.18.0'
+          npm ci --no-audit --no-fund
+          npm run build
+          echo 'R27_260_PINNED_BUILD PASS'
+      - name: Run 22 unit and 7 pinned simulator integration cases
+        shell: bash
+        working-directory: pokemon-showdown
+        run: |
+          set -euo pipefail
+          cat > battle_api.cjs <<'R27_260_API_EOF'
+          'use strict';
+          /**
+           * R27.259 portable and deliberately conservative single-battle contract.
+           * Not the original private Battle AI, not a Pokémon Champions physics oracle.
+           * Zero dependencies; operates only on the owning side's Showdown request and
+           * an explicit PUBLIC opponent observation. Unsupported states fail closed.
+           */
+          const crypto = require('node:crypto');
+          const VERSION = 'r27.259.portable.v2';
+          
+          class UnsupportedState extends Error {
+            constructor(code, details='') { super(`${code}${details ? ': '+details : ''}`); this.name='UnsupportedState'; this.code=code; }
+          }
+          const isFainted = p => /(?:^|\s)fnt(?:\s|$)/i.test(String(p.condition ?? ''));
+          const sanit = x => String(x ?? '');
+          const ownMon = m => ({
+            ident:sanit(m.ident),details:sanit(m.details),condition:sanit(m.condition),active:!!m.active,
+            moves:Array.isArray(m.moves)?m.moves.map(sanit):[],item:sanit(m.item),
+            baseAbility:sanit(m.baseAbility),reviving:!!m.reviving
+          });
+          function observe(ownRequest, explicitPublicFoe={}) {
+            if (ownRequest?.wait) return {v:VERSION,phase:'wait',own:[],active:null,foe:{species:null},forceSwitch:null,maxChosenTeamSize:null};
+            if (!ownRequest || typeof ownRequest!=='object' || !Array.isArray(ownRequest.side?.pokemon))
+              throw new UnsupportedState('NO_OWN_REQUEST');
+            const phase=ownRequest.teamPreview?'preview':Array.isArray(ownRequest.forceSwitch)?'switch':
+              Array.isArray(ownRequest.active)?'move':null;
+            if (!phase) throw new UnsupportedState('UNKNOWN_PHASE');
+            const o={v:VERSION,phase,own:ownRequest.side.pokemon.map(ownMon),
+              active:Array.isArray(ownRequest.active)?ownRequest.active.map(a=>a?({
+                moves:Array.isArray(a.moves)?a.moves.map(m=>({id:sanit(m.id),pp:Number.isFinite(m.pp)?m.pp:null,
+                  disabled:!!m.disabled})):[],
+                trapped:!!a.trapped,maybeTrapped:!!a.maybeTrapped,maybeDisabled:!!a.maybeDisabled,
+                canMegaEvo:!!a.canMegaEvo,canMegaEvoX:!!a.canMegaEvoX,canMegaEvoY:!!a.canMegaEvoY,
+                canTerastallize:!!a.canTerastallize,canDynamax:!!a.canDynamax
+              }):null):null,
+              foe:{species:typeof explicitPublicFoe?.species==='string'?explicitPublicFoe.species:null},
+              forceSwitch:Array.isArray(ownRequest.forceSwitch)?ownRequest.forceSwitch.map(Boolean):null,
+              maxChosenTeamSize:Number.isInteger(ownRequest.maxChosenTeamSize)?ownRequest.maxChosenTeamSize:null};
+            if (o.own.length>6) throw new UnsupportedState('TEAM_OVER_SIX');
+            return o;
+          }
+          function teamPreview(obs,selectionScores){
+            if(obs.phase!=='preview'||obs.maxChosenTeamSize!==3||obs.own.length!==6)
+              throw new UnsupportedState('NON_6V3_PREVIEW');
+            if(!Array.isArray(selectionScores)||selectionScores.length!==6||!selectionScores.every(Number.isFinite))
+              throw new UnsupportedState('INVALID_SELECTION_SCORES');
+            const ranking=[0,1,2,3,4,5].sort((a,b)=>selectionScores[b]-selectionScores[a]||a-b);
+            const indices=ranking.slice(0,3);
+            return {command:'team '+indices.map(i=>i+1).join(''),indices,source:'external_score_provider'};
+          }
+          function legalCandidates(obs,selectionScores){
+            if(obs.phase==='wait') return [{command:'',kind:'wait'}];
+            if(obs.phase==='preview') return [{...teamPreview(obs,selectionScores),kind:'preview'}];
+            if(!Array.isArray(obs.own)||obs.own.length===0)throw new UnsupportedState('NO_ROSTER');
+            if(obs.phase==='switch'){
+              if(obs.forceSwitch?.length!==1 || !obs.forceSwitch[0]) throw new UnsupportedState('ASYMMETRIC_SWITCH_WAIT');
+              const revivalActors=obs.own.filter(m=>m.reviving);
+              if(revivalActors.length>1 || (revivalActors.length===1 && !revivalActors[0].active))
+                throw new UnsupportedState('AMBIGUOUS_REVIVAL_REQUEST');
+              const reviving=revivalActors.length===1;
+              const output=obs.own.map((m,i)=>(reviving ? isFainted(m) : (!m.active && !isFainted(m)))?
+                {command:`switch ${i+1}`,kind:reviving?'revival_target':'switch',index:i}:null).filter(Boolean);
+              if(output.length===0)throw new UnsupportedState('NO_SWITCH_TARGET');
+              return output;
+            }
+            if(obs.phase!=='move')throw new UnsupportedState('UNKNOWN_PHASE');
+            if(!Array.isArray(obs.active)||obs.active.length!==1||!obs.active[0])throw new UnsupportedState('NOT_SINGLE_ACTIVE');
+            const a=obs.active[0];
+            const output=[];
+            a.moves.forEach((m,i)=>{
+              if(m.disabled || m.pp!==null && m.pp<=0)return;
+              output.push({command:`move ${i+1}`,kind:'move',index:i});
+              if(a.canMegaEvo)output.push({command:`move ${i+1} mega`,kind:'mega_move',index:i});
+              if(a.canMegaEvoX)output.push({command:`move ${i+1} megax`,kind:'mega_x_move',index:i});
+              if(a.canMegaEvoY)output.push({command:`move ${i+1} megay`,kind:'mega_y_move',index:i});
+            });
+            if(!a.trapped&&!a.maybeTrapped){
+              obs.own.forEach((m,i)=>{if(!m.active&&!isFainted(m))output.push({command:`switch ${i+1}`,kind:'switch',index:i});});
+            }
+            if(output.length===0)throw new UnsupportedState('NO_SAFE_ACTION_OR_STRUGGLE');
+            return output;
+          }
+          function selectDecision(obs,candidates,dex){
+            if(!Array.isArray(candidates)||!candidates.length)throw new UnsupportedState('EMPTY_CANDIDATES');
+            if(obs.phase!=='move')return {command:candidates[0].command,kind:candidates[0].kind,policy:'baseline_v1'};
+            const foe=obs.foe.species?dex?.species?.get(obs.foe.species):null;
+            const rated=candidates.map((c,seq)=>{
+              if(!['move','mega_move','mega_x_move','mega_y_move'].includes(c.kind))return {...c,score:-1e6,seq};
+              const moveId=obs.active[0].moves[c.index]?.id;
+              const m=dex?.moves?.get(moveId);
+              if(!m?.exists) return {...c,score:-1000,seq};
+              const typeEffect=foe?.exists?dex.getEffectiveness(m,foe):0;
+              const scale=Math.pow(2,typeEffect);
+              const damageProxy=(m.basePower||0)*scale+(m.priority||0)*5;
+              return {...c,score:damageProxy+(c.kind==='mega_move'?0.5:0),seq};
+            });
+            rated.sort((a,b)=>b.score-a.score||a.seq-b.seq);
+            return {command:rated[0].command,kind:rated[0].kind,policy:'baseline_v1',score:rated[0].score};
+          }
+          function decision(ownRequest,publicFoe,selectionScores,dex){
+            const obs=observe(ownRequest,publicFoe),candidateList=legalCandidates(obs,selectionScores);
+            const selected=selectDecision(obs,candidateList,dex);
+            if(!candidateList.some(c=>c.command===selected.command))throw new UnsupportedState('ILLEGAL_POLICY_ACTION');
+            return {v:VERSION,observation:obs,legal:candidateList.map(c=>c.command),choice:selected.command,
+              policy:selected.policy,scope:'conservative_showdown_request',
+              observationHash:crypto.createHash('sha256').update(JSON.stringify(obs)).digest('hex')};
+          }
+          /** Explicit two-side battle stepping. `publicFoe` is injected by caller, never taken from foe set. */
+          function step(battle,teamScores,publicFoeProvider){
+            if(battle.ended) return {ended:true};
+            if(!Array.isArray(teamScores)||teamScores.length!==2||typeof publicFoeProvider!=='function')
+              throw new UnsupportedState('BAD_STEP_INPUT');
+            const before=battle.turn,phase=battle.requestState;
+            const decisions=battle.sides.map((side,i)=>decision(side.activeRequest,
+              publicFoeProvider(i),teamScores[i],battle.dex));
+            battle.makeChoices(...decisions.map(d=>d.choice));
+            return {v:VERSION,phase,before,after:battle.turn,choices:decisions.map(d=>d.choice),
+              observationHashes:decisions.map(d=>d.observationHash),ended:battle.ended};
+          }
+          module.exports={VERSION,UnsupportedState,observe,isFainted,teamPreview,legalCandidates,selectDecision,decision,step};
+          R27_260_API_EOF
+          cat > test_contract.cjs <<'R27_260_UNIT_EOF'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const api=require('./battle_api.cjs');
+          const cases=[];
+          function test(name,func){cases.push([name,func]);}
+          function mon(n,active=false,condition='100/100',extra={}){return {ident:`p1: ${n}`,details:n,condition,active,moves:['tackle'],item:'',baseAbility:'noability',...extra};}
+          const own=[mon('A',true),mon('B'),mon('C'),mon('D'),mon('E'),mon('F')];
+          const moveRequest=(o={})=>({side:{pokemon:own},active:[{moves:[{id:'tackle',pp:10,disabled:false},{id:'growl',pp:0,disabled:false},{id:'watergun',pp:5,disabled:true}],...o}]});
+          const mockDex={species:{get:(x)=>({exists:true,name:x})},moves:{get:(x)=>({exists:true,basePower:{tackle:40,growl:0,watergun:40}[x]||0,priority:0})},getEffectiveness:()=>0};
+          const preview={side:{pokemon:own},teamPreview:true,maxChosenTeamSize:3};
+          test('VERSION',()=>assert.match(api.VERSION,/259/));
+          test('6v3 score ordering',()=>assert.equal(api.decision(preview,{species:null},[1,2,3,6,5,4],mockDex).choice,'team 456'));
+          test('6v3 tie deterministic',()=>assert.equal(api.decision(preview,{species:null},[1,1,1,1,1,1],mockDex).choice,'team 123'));
+          test('6v3 scores missing fail closed',()=>assert.throws(()=>api.decision(preview,{species:null},[],mockDex),/INVALID_SELECTION_SCORES/));
+          test('normal move pp and disabled',()=>assert.deepEqual(api.legalCandidates(api.observe(moveRequest({trapped:true}))).map(c=>c.command),['move 1']));
+          test('mega action is explicit',()=>assert.deepEqual(api.legalCandidates(api.observe(moveRequest({canMegaEvo:true,trapped:true}))).map(c=>c.command),['move 1','move 1 mega']));
+          test('live switch options exclude fainted and active',()=>{
+            const r={side:{pokemon:[mon('A',true),mon('B',false,'0 fnt'),mon('C')]},forceSwitch:[true]};
+            assert.deepEqual(api.legalCandidates(api.observe(r)).map(x=>x.command),['switch 3']);
+          });
+          test('revival targets fainted only',()=>{
+            const r={side:{pokemon:[mon('A',true,'100/100',{reviving:true}),mon('B',false,'0 fnt'),mon('C')]},forceSwitch:[true]};
+            assert.deepEqual(api.legalCandidates(api.observe(r)).map(x=>x.command),['switch 2']);
+          });
+          test('revival actor after slot 1 chooses only fainted targets',()=>{
+            // Regression of actual R27.258 GitHub failure: owner Pawmot is not roster[0].
+            const r={side:{pokemon:[mon('Gyarados',false,'0 fnt'),mon('Pawmot',true,'100/100',{reviving:true}),mon('Basculegion',false,'100/100')]},forceSwitch:[true]};
+            const obs=api.observe(r);
+            assert.deepEqual(api.legalCandidates(obs).map(x=>({command:x.command,kind:x.kind})),
+              [{command:'switch 1',kind:'revival_target'}]);
+            assert.equal(api.decision(r,{},[],mockDex).choice,'switch 1');
+          });
+          test('revival after actual party reorder selects fainted position 2',()=>{
+            // After switching Pawmot into slot 1, Showdown swaps Pawmot and fainted Gyarados in side.pokemon.
+            const r={side:{pokemon:[mon('Pawmot',true,'100/100',{reviving:true}),mon('Gyarados',false,'0 fnt'),mon('Basculegion',false,'100/100')]},forceSwitch:[true]};
+            const obs=api.observe(r);
+            assert.deepEqual(api.legalCandidates(obs).map(x=>({command:x.command,kind:x.kind})),
+              [{command:'switch 2',kind:'revival_target'}]);
+            assert.equal(api.decision(r,{},[],mockDex).choice,'switch 2');
+          });
+          test('multiple revival actors fail closed',()=>{
+            const r={side:{pokemon:[mon('A',true,'100/100',{reviving:true}),mon('B',true,'100/100',{reviving:true}),mon('C',false,'0 fnt')]},forceSwitch:[true]};
+            assert.throws(()=>api.decision(r,{},[],mockDex),/AMBIGUOUS_REVIVAL_REQUEST/);
+          });
+          test('revival without fainted must fail',()=>{
+            const r={side:{pokemon:[mon('A',true,'100/100',{reviving:true}),mon('B')]},forceSwitch:[true]};
+            assert.throws(()=>api.legalCandidates(api.observe(r)),/NO_SWITCH_TARGET/);
+          });
+          test('no free struggle fallback',()=>{
+            const r={side:{pokemon:[mon('A',true)]},active:[{moves:[{id:'tackle',pp:0,disabled:false}],trapped:true}]};
+            assert.throws(()=>api.decision(r,{species:'X'},[],mockDex),/NO_SAFE_ACTION_OR_STRUGGLE/);
+          });
+          test('wait returns empty command',()=>assert.equal(api.decision({wait:true},{species:null},[],mockDex).choice,''));
+          test('non-single active fails',()=>{
+            const r={side:{pokemon:own},active:[{moves:[]},{moves:[]}]};
+            assert.throws(()=>api.decision(r,{},[],mockDex),/NOT_SINGLE_ACTIVE/);
+          });
+          test('secret enemy fields discarded',()=>{
+            const x=api.observe(moveRequest(),{species:'Gengar',ability:'Cursed Body',item:'Focus Sash',moves:['spore'],bench:['Dragonite']});
+            assert.deepEqual(x.foe,{species:'Gengar'});assert.ok(!JSON.stringify(x).includes('Focus Sash'));
+          });
+          test('choice invariant to secret enemy fields',()=>{
+            const a=api.decision(moveRequest({trapped:true}),{species:'Gengar'},[],mockDex);
+            const b=api.decision(moveRequest({trapped:true}),{species:'Gengar',item:'test',moves:['danger']},[],mockDex);
+            assert.deepEqual({choice:a.choice,hash:a.observationHash},{choice:b.choice,hash:b.observationHash});
+          });
+          test('owner own information preserved',()=>{
+            const x=api.observe({side:{pokemon:[mon('A',true,'20/100',{item:'Sitrus Berry',baseAbility:'sturdy'})]},active:[{moves:[{id:'tackle',pp:4,disabled:false}]}]});
+            assert.equal(x.own[0].item,'Sitrus Berry');assert.equal(x.own[0].condition,'20/100');
+          });
+          test('unknown request must fail',()=>assert.throws(()=>api.observe({side:{pokemon:[]}}),/UNKNOWN_PHASE/));
+          test('trapped maybeTrapped conservative',()=>{
+            const x=api.legalCandidates(api.observe(moveRequest({maybeTrapped:true}))).map(y=>y.command);
+            assert.deepEqual(x,['move 1']);
+          });
+          test('same input deterministic hash',()=>{
+            const a=api.decision(moveRequest(),{species:'Eevee'},[],mockDex);
+            const b=api.decision(moveRequest(),{species:'Eevee'},[],mockDex);
+            assert.equal(a.observationHash,b.observationHash);assert.equal(a.choice,b.choice);
+          });
+          test('asymmetric switch fails instead of fake action',()=>{
+            const r={side:{pokemon:[mon('A',true),mon('B')]},forceSwitch:[false]};
+            assert.throws(()=>api.decision(r,{},[],mockDex),/ASYMMETRIC_SWITCH_WAIT/);
+          });
+          let pass=0;
+          for(const [name,f] of cases){try{f();pass++;console.log('R27_259_UNIT '+JSON.stringify({name,status:'PASS'}));}catch(e){console.error('R27_259_UNIT '+JSON.stringify({name,status:'FAIL',error:String(e.stack||e)}));process.exitCode=1;}}
+          console.log('R27_259_UNIT_SUMMARY '+JSON.stringify({pass,total:cases.length}));
+          if(pass!==cases.length)process.exitCode=1;
+          R27_260_UNIT_EOF
+          cat > test_pinned_integration.cjs <<'R27_260_INTEGRATION_EOF'
+          'use strict';
+          /** Run only in the pinned, built Showdown root with ./battle_api.cjs present. */
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const api = require('./battle_api.cjs');
+          const {Battle,Dex}=require('./dist/sim');
+          const FORMAT='[Gen 9 Champions] BSS Reg M-C';
+          const results=[];
+          const evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+          const mk=(species,moves,ability,item='')=>({species,moves,ability,item,nature:'Hardy',level:50,evs});
+          const teamA=()=>[
+           [mk('Charizard',['growl'],'Blaze'),mk('Blastoise',['watergun'],'Torrent'),mk('Venusaur',['vinewhip'],'Overgrow'),mk('Pikachu',['thunderbolt'],'Static'),mk('Snorlax',['tackle'],'Immunity'),mk('Alakazam',['psychic'],'Synchronize')],
+           [mk('Annihilape',['finalgambit'],'Vital Spirit'),mk('Magikarp',['splash'],'Swift Swim'),mk('Eevee',['tackle'],'Run Away'),mk('Raichu',['thunderbolt'],'Static'),mk('Machamp',['karatechop'],'No Guard'),mk('Lapras',['surf'],'Water Absorb')]
+          ];
+          const teamB=()=>[
+           [mk('Blastoise',['watergun'],'Torrent'),mk('Venusaur',['vinewhip'],'Overgrow'),mk('Charizard',['ember'],'Blaze'),mk('Jolteon',['thunderbolt'],'Volt Absorb'),mk('Lapras',['surf'],'Water Absorb'),mk('Snorlax',['tackle'],'Immunity')],
+           [mk('Machamp',['karatechop'],'No Guard'),mk('Pikachu',['thunderbolt'],'Static'),mk('Wartortle',['watergun'],'Torrent'),mk('Gengar',['shadowball'],'Cursed Body'),mk('Dragonite',['dragonclaw'],'Inner Focus'),mk('Raticate',['tackle'],'Run Away')]
+          ];
+          const scoreA=[[100,80,50,90,70,0],[100,75,65,3,2,1]];
+          const scoreB=[[80,70,60,55,50,20],[90,80,70,60,10,0]];
+          function battle(teams,seed){
+           const f=Dex.formats.get(FORMAT);assert.ok(f.exists && f.mod==='champions');
+           const b=new Battle({formatid:f.id,strictChoices:true,seed,p1:{name:'r258-a',team:teams[0]},p2:{name:'r258-b',team:teams[1]}});
+           assert.equal(b.requestState,'teampreview');assert.equal(b.gameType,'singles');return b;
+          }
+          function publicFoe(b){return i=>({species:b.sides[1-i].active?.[0]?.species?.name||null});}
+          function tick(b,scores){return api.step(b,scores,publicFoe(b));}
+          function test(name,fn){
+           try{const e=fn();results.push({name,status:'PASS',evidence:e});console.log('R27_260_CASE '+JSON.stringify({name,status:'PASS',evidence:e}));}
+           catch(err){const e=String(err?.stack||err);results.push({name,status:'FAIL',error:e});console.error('R27_260_CASE '+JSON.stringify({name,status:'FAIL',error:e}));process.exitCode=1;}
+          }
+          function mini(teams,scores,seed,maxSteps){
+           const b=battle(teams(),seed);try{
+            const phases=[];const decisions=[];for(let i=0;i<maxSteps&&!b.ended;i++){
+             const row=tick(b,scores);phases.push(row.phase);decisions.push(row.choices);
+            }
+            const selected=b.sides.map(s=>s.pokemon.map(p=>p.species.name));
+            const lines=b.log.filter(l=>/^\|(move|switch|faint|win|tie|turn|\-damage|\-heal|\-mega)\|/.test(l));
+            const digest=crypto.createHash('sha256').update(lines.join('\n')).digest('hex');
+            assert.equal(phases[0],'teampreview','battle.requestState emits teampreview before first step');
+            assert.ok(phases.includes('move'),'move-phase action should be evaluated');
+            return {selected,phases,decisions,turn:b.turn,ended:b.ended,digest};
+           }finally{b.destroy();}
+          }
+          test('PREVIEW_6_TO_3_AND_ORDER',()=>{
+           const b=battle(teamA(),[1,2,3,4]);try{
+            const r=tick(b,scoreA);
+            assert.deepEqual(r.choices,['team 142','team 123']);
+            assert.deepEqual(b.p1.pokemon.map(p=>p.species.name),['Charizard','Pikachu','Blastoise']);
+            return {choice:r.choices,first:b.p1.active[0].species.name,team_size:b.p1.pokemon.length};
+           }finally{b.destroy();}
+          });
+          test('BOTH_SIDES_FAINT_AND_SWITCH',()=>{
+           const b=battle(teamA(),[1,2,3,4]);try{
+            tick(b,scoreA);
+            const first=tick(b,scoreA);assert.deepEqual(first.choices,['move 1','move 1']);
+            assert.ok(b.p1.active[0].fainted&&b.p2.active[0].fainted);
+            const repl=tick(b,scoreA);assert.deepEqual(repl.choices,['switch 2','switch 2']);
+            assert.equal(b.p1.active[0].species.name,'Pikachu');
+            return {first:first.choices,replacement:repl.choices,active:b.p1.active[0].species.name};
+           }finally{b.destroy();}
+          });
+          test('TWO_DIFFERENT_ROSTERS_STEP',()=>{
+           const a=mini(teamA,scoreA,[1,2,3,4],11);
+           const b=mini(teamB,scoreB,[5,6,7,8],11);
+           assert.notDeepEqual(a.selected[0],b.selected[0]);
+           return {a_steps:a.phases.length,b_steps:b.phases.length,a_turn:a.turn,b_turn:b.turn};
+          });
+          test('DETERMINISTIC_BATTLE_REPLAY',()=>{
+           const a=mini(teamA,scoreA,[1,2,3,4],12),b=mini(teamA,scoreA,[1,2,3,4],12);
+           assert.equal(a.digest,b.digest);assert.deepEqual(a.decisions,b.decisions);
+           return {digest:a.digest,steps:a.decisions.length};
+          });
+          test('SHOWDOWN_SWITCH_REORDERS_PARTY_SLOTS',()=>{
+            const b=battle(teamA(),[1,2,3,4]);
+            try {
+              tick(b,scoreA);
+              tick(b,scoreA); // Final Gambit knocks out both leads.
+              const pre=b.p1.pokemon.map(p=>({name:p.species.name,position:p.position}));
+              const sw=tick(b,scoreA);
+              assert.equal(sw.choices[0],'switch 2');
+              const oldLead=b.p1.pokemon.find(p=>p.species.name==='Charizard');
+              assert.ok(oldLead.fainted);
+              assert.equal(oldLead.position,1);
+              assert.equal(b.p1.pokemon[0].species.name,'Pikachu');
+              assert.equal(b.p1.active[0].species.name,'Pikachu');
+              return {pre,post:b.p1.pokemon.map(p=>({name:p.species.name,position:p.position})),
+                old_lead_new_slot:oldLead.position+1};
+            } finally {b.destroy();}
+          });
+          test('REDACT_OPPONENT_SECRETS',()=>{
+           const b=battle(teamB(),[5,6,7,8]);try{
+            tick(b,scoreB);
+            const req=b.p1.activeRequest,pub={species:b.p2.active[0].species.name};
+            const one=api.decision(req,pub,scoreB[0],b.dex);
+            const two=api.decision(req,{...pub,item:'hidden_item',ability:'hidden_ability',unrevealedMoves:['spore'],bench:['secret']},scoreB[0],b.dex);
+            assert.deepEqual(one,two);return {same_choice:one.choice,hash:one.observationHash};
+           }finally{b.destroy();}
+          });
+          test('REVIVAL_SELECTION_VS_NORMAL_SWITCH',()=>{
+           const p1=[mk('Gyarados',['dragondance'],'Intimidate','Gyaradosite'),mk('Pawmot',['revivalblessing'],'Volt Absorb'),mk('Basculegion',['lastrespects'],'Adaptability'),mk('Pikachu',['tackle'],'Static'),mk('Eevee',['tackle'],'Run Away'),mk('Bulbasaur',['tackle'],'Overgrow')];
+           const p2=[mk('Annihilape',['finalgambit'],'Vital Spirit'),mk('Magikarp',['splash'],'Swift Swim'),mk('Snorlax',['tackle'],'Immunity'),mk('Ivysaur',['tackle'],'Overgrow'),mk('Venusaur',['tackle'],'Overgrow'),mk('Caterpie',['tackle'],'Shield Dust')];
+           const b=battle([p1,p2],[1,2,3,4]),scores=[[100,99,98,0,0,0],[100,99,98,0,0,0]];
+           try{
+            assert.deepEqual(tick(b,scores).choices,['team 123','team 123']);
+            const attack=tick(b,scores);assert.equal(attack.choices[0],'move 1 mega');
+            assert.ok(b.p1.pokemon[0].fainted&&b.p2.pokemon[0].fainted);
+            const sw=tick(b,scores);assert.deepEqual(sw.choices,['switch 2','switch 2']);
+            const revive=tick(b,scores);assert.equal(revive.choices[0],'move 1');
+            assert.equal(b.requestState,'switch');
+            const revivedTarget=b.p1.pokemon.find(p=>p.species.name==='Gyarados-Mega');
+            assert.ok(revivedTarget && revivedTarget.fainted, 'target must still be fainted before blessing selection');
+            // Showdown swaps side.pokemon positions on switch-in: Pawmot becomes slot 1;
+            // the fainted Gyarados becomes slot 2. No hardcoded original slot number.
+            const targetSlot=revivedTarget.position+1;
+            assert.equal(b.p1.active[0].species.name,'Pawmot');
+            assert.equal(b.p1.pokemon[targetSlot-1],revivedTarget);
+            assert.equal(b.p1.activeRequest.side.pokemon[targetSlot-1].condition.includes('fnt'),true);
+            const rev=api.decision(b.p1.activeRequest,{},scores[0],b.dex);
+            const legalDetails=api.legalCandidates(api.observe(b.p1.activeRequest));
+            assert.deepEqual(legalDetails.map(x=>({command:x.command,kind:x.kind})),
+              [{command:`switch ${targetSlot}`,kind:'revival_target'}]);
+            assert.deepEqual(rev.legal,[`switch ${targetSlot}`]);
+            assert.equal(rev.choice,`switch ${targetSlot}`);
+            const healed=tick(b,scores);
+            assert.equal(healed.choices[0],`switch ${targetSlot}`);
+            assert.equal(revivedTarget.fainted,false);
+            assert.ok(revivedTarget.hp>0,'Revival Blessing heals a fainted target');
+            assert.equal(revivedTarget.species.name,'Gyarados-Mega');
+            assert.equal(b.p1.active[0].species.name,'Pawmot', 'revival does not force active Pawmot out');
+            return {first_swap:sw.choices,revival_choice:healed.choices,
+              target_slot:targetSlot,revived_form:revivedTarget.species.name,
+              active_after_revival:b.p1.active[0].species.name};
+           }finally{b.destroy();}
+          });
+          const summary={revision:'R27.260',pin:'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',scope:'public pinned Showdown adapter only',pass:results.filter(x=>x.status==='PASS').length,total:results.length,results:results.map(x=>({name:x.name,status:x.status}))};
+          console.log('R27_260_SUMMARY '+JSON.stringify(summary));
+          console.log('CERTIFICATION_GATE Native33=0/33 Exact34=0/34 Acceptance=0/8 FORMAL=DENY; no legacy 3500 battle requirement');
+          if(summary.pass!==summary.total)process.exitCode=1;
+          R27_260_INTEGRATION_EOF
+          node --check battle_api.cjs
+          node --check test_contract.cjs
+          node --check test_pinned_integration.cjs
+          node test_contract.cjs
+          node test_pinned_integration.cjs
+          echo 'CERTIFICATION_GATE Native33=0/33 Exact34=0/34 Acceptance=0/8 FORMAL=DENY'
