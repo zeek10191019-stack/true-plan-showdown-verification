@@ -1,0 +1,178 @@
+name: R27.302 Public Joint-Action Interface Pinned Probe
+'on':
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-joint-action-probe:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Set pinned Node.js 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Build pinned public Showdown and verify safe joint-action interface
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p research
+          cat > research/joint_action_ranker.cjs <<'R27302_JOINT_ACTION_RANKER_CJS_EOF'
+          'use strict';
+          /** R27.299 research contract. No physics claims: a caller-supplied hypothetical
+           * PUBLIC-STATE oracle generates outcomes for each (own, opponent, belief world).
+           * This module NEVER constructs hidden sets or reads simulator battle internals.
+           */
+          const VERSION='r27.299.joint-action-ranking.contract.v1';
+          const EPS=1e-9;
+          function ensure(x,code){if(!x)throw Error('R27299_RANK_'+code);}
+          function probSet(xs,label){
+           ensure(Array.isArray(xs)&&xs.length>0&&xs.length<=64,label+'_LENGTH');
+           let seen=new Set(),sum=0;
+           xs.forEach(x=>{ensure(x&&typeof x.id==='string'&&x.id.length>0&&!seen.has(x.id),label+'_ID');seen.add(x.id);
+            ensure(typeof x.p==='number'&&Number.isFinite(x.p)&&x.p>=0&&x.p<=1,label+'_P');sum+=x.p;});
+           ensure(Math.abs(sum-1)<=EPS,label+'_SUM');return xs;
+          }
+          function sanitizedPublicObservation(obs){
+           ensure(obs&&typeof obs==='object'&&!Array.isArray(obs),'OBS');
+           const allowed=new Set(['v','phase','turn','own','active','foe','forceSwitch','maxChosenTeamSize','publicHistory']);
+           ensure(Object.keys(obs).every(k=>allowed.has(k)),'OBS_UNDECLARED_FIELD');
+           const foe=obs.foe||{};
+           ensure(typeof foe==='object'&&Object.keys(foe).every(k=>['species','condition','status','visibleMoves','publicTypes'].includes(k)),'FOE_PRIVATE_FIELD');
+           const o=JSON.parse(JSON.stringify(obs));
+           if(o.foe&&o.foe.visibleMoves){ensure(Array.isArray(o.foe.visibleMoves),'FOE_VISIBLE_MOVES');}
+           return o;
+          }
+          function rankJointActions({observation,ownLegal,opponentActions,worlds,oracle,riskWeight=0,revisitWeight=0}={}){
+           const publicObs=sanitizedPublicObservation(observation);
+           ensure(Array.isArray(ownLegal)&&ownLegal.length>0&&ownLegal.length<=36&&ownLegal.every(x=>typeof x==='string'&&x.length>0),'LEGAL');
+           ensure(new Set(ownLegal).size===ownLegal.length,'DUPLICATE_ACTION');
+           ensure(typeof oracle==='function','ORACLE');
+           ensure([riskWeight,revisitWeight].every(x=>Number.isFinite(x)&&x>=0&&x<=10),'PENALTY');
+           probSet(opponentActions,'OPP');probSet(worlds,'WORLD');
+           const rows=ownLegal.map((a,index)=>{
+            let mean=0,worst=1,revisit=0;
+            for(const world of worlds)for(const opp of opponentActions){
+             const branches=oracle({observation:publicObs,ownAction:a,opponentAction:opp.id,worldId:world.id});
+             ensure(Array.isArray(branches)&&branches.length>0&&branches.length<=128,'BRANCHES');
+             let branchProb=0;
+             for(const b of branches){
+              ensure(b&&Number.isFinite(b.p)&&b.p>=0&&b.p<=1,'BRANCH_P');
+              ensure(Number.isFinite(b.value)&&b.value>=0&&b.value<=1,'VALUE');
+              ensure(Number.isFinite(b.revisit)&&b.revisit>=0&&b.revisit<=1,'REVISIT');
+              const w=world.p*opp.p*b.p;mean+=w*b.value;revisit+=w*b.revisit;if(w>0)worst=Math.min(worst,b.value);branchProb+=b.p;
+             }
+             ensure(Math.abs(branchProb-1)<=EPS,'BRANCH_SUM');
+            }
+            const score=mean-riskWeight*(1-worst)-revisitWeight*revisit;
+            return {action:a,mean:+mean.toFixed(8),worst:+worst.toFixed(8),revisit:+revisit.toFixed(8),score:+score.toFixed(8),index};
+           });
+           rows.sort((a,b)=>b.score-a.score||a.index-b.index);
+           return Object.freeze({version:VERSION,ranked:rows.map(({index,...rest})=>Object.freeze(rest)),best:rows[0].action,mode:'HYPOTHETICAL_PUBLIC_ONLY_NOT_CERTIFIED'});
+          }
+          module.exports={VERSION,rankJointActions};
+          R27302_JOINT_ACTION_RANKER_CJS_EOF
+          printf '%s  %s\n' '86966ae94a6d480c27bbb7b908663435fce27999d956836e98a4652821d0754b' 'research/joint_action_ranker.cjs' | sha256sum -c -
+          cat > research/public_joint_bridge.cjs <<'R27302_PUBLIC_JOINT_BRIDGE_CJS_EOF'
+          'use strict';
+          /** R27.302: public own request -> legal move subset -> hypothesis-only ranker.
+           * This is an interface/security integration, NOT a real damage/turn oracle.
+           * Switch actions and mega commands are intentionally excluded until fully validated.
+           */
+          const {rankJointActions}=require('./joint_action_ranker.cjs');
+          function fail(code){throw Error('R27302_'+code)}
+          function availableMoves(req){
+           if(!req||typeof req!=='object'||req.wait||req.forceSwitch)fail('UNSUPPORTED_REQUEST');
+           if(!Array.isArray(req.active)||req.active.length!==1||!Array.isArray(req.active[0]?.moves))fail('ACTIVE_MOVE_REQUEST_REQUIRED');
+           const moves=req.active[0].moves;
+           if(moves.length<1||moves.length>4)fail('MOVE_LENGTH');
+           const legal=[];
+           for(let i=0;i<moves.length;i++){
+            const m=moves[i];
+            if(!m||typeof m.id!=='string'||!m.id||!Number.isInteger(m.pp)||m.pp<0||typeof m.disabled!=='boolean')fail('BAD_PUBLIC_MOVE');
+            if(!m.disabled&&m.pp>0)legal.push('move '+(i+1));
+           }
+           if(!legal.length)fail('NO_AVAILABLE_MOVE');
+           return Object.freeze(legal);
+          }
+          function rankPublicMoves({ownRequest,publicFoe,turn=1,opponentActions,worlds,oracle,riskWeight=0,revisitWeight=0}={}){
+           if(!publicFoe||typeof publicFoe.species!=='string'||!publicFoe.species)fail('NO_REVEALED_FOE');
+           if(Object.keys(publicFoe).some(k=>!['species','condition','status','visibleMoves','publicTypes'].includes(k)))fail('PRIVATE_FOE_FIELD');
+           const ownLegal=availableMoves(ownRequest);
+           const observation={v:1,phase:'move',turn,foe:JSON.parse(JSON.stringify(publicFoe))};
+           const ranked=rankJointActions({observation,ownLegal,opponentActions,worlds,oracle,riskWeight,revisitWeight});
+           if(!ownLegal.includes(ranked.best))fail('NONLEGAL_CHOICE');
+           return Object.freeze({choice:ranked.best,ranked:ranked.ranked,legal:ownLegal,scope:'RESEARCH_PUBLIC_REQUEST_ONLY_NO_PHYSICS'});
+          }
+          module.exports={availableMoves,rankPublicMoves};
+          R27302_PUBLIC_JOINT_BRIDGE_CJS_EOF
+          printf '%s  %s\n' '99d2f19da73fef8f0223d87bab233b146be342068fa038ecd8f507cadd4ff7ce' 'research/public_joint_bridge.cjs' | sha256sum -c -
+          cat > research/test_r27302_unit.cjs <<'R27302_TEST_R27302_UNIT_CJS_EOF'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const {availableMoves,rankPublicMoves}=require('./public_joint_bridge.cjs');
+          let n=0;const check=(name,f)=>{f();n++;console.log('R27302_UNIT '+JSON.stringify({name,status:'PASS'}))};
+          const req={active:[{moves:[{id:'thunderbolt',pp:15,disabled:false},{id:'quickattack',pp:30,disabled:false}]}]};
+          const ctx={ownRequest:req,publicFoe:{species:'Golem'},opponentActions:[{id:'attack',p:.7},{id:'switch',p:.3}],worlds:[{id:'unrevealed',p:1}],oracle:({ownAction,opponentAction})=>[{p:1,value:ownAction==='move 2'?.55:opponentAction==='attack'?.1:.8,revisit:0}]};
+          check('public legal moves',()=>assert.deepEqual([...availableMoves(req)],['move 1','move 2']));
+          check('ranking from public request',()=>assert.equal(rankPublicMoves(ctx).choice,'move 2'));
+          check('visible counterplay can change choice',()=>assert.equal(rankPublicMoves({...ctx,opponentActions:[{id:'attack',p:.1},{id:'switch',p:.9}]}).choice,'move 1'));
+          check('disabled move excluded',()=>assert.deepEqual([...availableMoves({active:[{moves:[{id:'thunderbolt',pp:15,disabled:true},{id:'quickattack',pp:30,disabled:false}]}]})],['move 2']));
+          check('zero PP move excluded',()=>assert.deepEqual([...availableMoves({active:[{moves:[{id:'thunderbolt',pp:0,disabled:false},{id:'quickattack',pp:30,disabled:false}]}]})],['move 2']));
+          check('unknown switch not invented',()=>assert(rankPublicMoves(ctx).legal.every(x=>/^move [1-4]$/.test(x))));
+          check('hidden opponent item fails closed',()=>assert.throws(()=>rankPublicMoves({...ctx,publicFoe:{species:'Golem',item:'Choice Band'}}),/PRIVATE_FOE_FIELD/));
+          check('unsupported forced switch fails closed',()=>assert.throws(()=>availableMoves({...req,forceSwitch:true}),/UNSUPPORTED_REQUEST/));
+          check('no available move fails closed',()=>assert.throws(()=>availableMoves({active:[{moves:[{id:'tackle',pp:0,disabled:false}]}]}),/NO_AVAILABLE_MOVE/));
+          check('invalid PP fails closed',()=>assert.throws(()=>availableMoves({active:[{moves:[{id:'tackle',pp:-1,disabled:false}]}]}),/BAD_PUBLIC_MOVE/));
+          check('invalid opponent belief fails closed',()=>assert.throws(()=>rankPublicMoves({...ctx,opponentActions:[{id:'attack',p:.5}]}),/OPP_SUM/));
+          check('determinism',()=>assert.deepEqual(rankPublicMoves(ctx),rankPublicMoves(ctx)));
+          console.log('R27302_UNIT_SUMMARY '+JSON.stringify({passed:n,total:12}));
+          R27302_TEST_R27302_UNIT_CJS_EOF
+          printf '%s  %s\n' '478a69138b1053900bd8fe3ea9a030b5075c23649c1b8b26c6f1cc30908b4503' 'research/test_r27302_unit.cjs' | sha256sum -c -
+          cat > research/test_r27302_pinned.cjs <<'R27302_TEST_R27302_PINNED_CJS_EOF'
+          'use strict';
+          /** R27.302: inspect ONE authentic pinned Champions format PUBLIC request. */
+          const assert=require('node:assert/strict');
+          const {Battle,Dex}=require('./dist/sim');
+          const {rankPublicMoves,availableMoves}=require('./public_joint_bridge.cjs');
+          const fmt=Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');
+          assert(fmt.exists&&fmt.mod==='champions','R27302_PINNED_FORMAT_REQUIRED');
+          const evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+          const mk=(species,moves,ability,item='')=>({species,moves,ability,item,nature:'Hardy',level:50,evs});
+          const own=[mk('Charizard',['flamethrower','scratch'],'Blaze'),mk('Blastoise',['surf','tackle'],'Torrent'),mk('Venusaur',['vinewhip','tackle'],'Overgrow'),mk('Pikachu',['thunderbolt','quickattack'],'Static'),mk('Snorlax',['tackle'],'Immunity'),mk('Alakazam',['psychic','recover'],'Synchronize')];
+          const foe=[mk('Venusaur',['vinewhip'],'Overgrow'),mk('Magikarp',['splash'],'Swift Swim'),mk('Eevee',['tackle'],'Run Away'),mk('Garchomp',['tackle'],'Rough Skin'),mk('Machamp',['karatechop'],'No Guard'),mk('Lapras',['surf'],'Water Absorb')];
+          const b=new Battle({formatid:fmt.id,strictChoices:true,seed:[1,2,3,4],p1:{name:'Own',team:own},p2:{name:'Opponent',team:foe}});
+          try{
+           assert(b.sides[0].activeRequest,'R27302_REQUEST_MISSING');
+           // Preview choices are deterministic research declarations, not learned selection.
+           b.choose('p1','team 123');b.choose('p2','team 123');
+           assert.equal(b.requestState,'move','R27302_MOVE_PHASE_EXPECTED');
+           const req=b.sides[0].activeRequest;
+           assert(req&&Array.isArray(req.active),'R27302_REAL_REQUEST_EXPECTED');
+           const ownLegal=availableMoves(req);
+           const foeSwitch=b.log.filter(x=>/^\|switch\|p2a: /.test(x)).at(-1);
+           assert(foeSwitch,'R27302_NO_PUBLIC_FOE_SWITCH');
+           const species=foeSwitch.match(/^\|switch\|p2a: ([^|]+)\|/)[1];
+           const result=rankPublicMoves({ownRequest:req,publicFoe:{species},turn:b.turn,
+            opponentActions:[{id:'possible-attack',p:.5},{id:'possible-switch',p:.5}],worlds:[{id:'illustrative-public',p:1}],
+            oracle:({ownAction,opponentAction})=>[{p:1,value:(ownAction==='move 1'?(opponentAction==='possible-attack'?.65:.45):.3),revisit:0}]});
+           assert(ownLegal.includes(result.choice),'R27302_NOT_IN_PUBLIC_MOVE_REQUEST');
+           // Real simulator must accept the selected legal move, without reading private opponent set.
+           b.choose('p1',result.choice);b.choose('p2','move 1');
+           assert(b.turn>1,'R27302_PINNED_SIM_NOT_ADVANCED');
+           console.log('R27302_PINNED_SMOKE '+JSON.stringify({status:'PASS',realFormat:fmt.name,publicFoe:species,publicLegal:ownLegal,illustrativeChoice:result.choice,turn:b.turn,scope:'public request + hypothetical branch values; not engine-based outcomes or strength proof'}));
+           console.log('R27302_GATE '+JSON.stringify({production:'R27.266_UNMODIFIED',native33:'0/33',exact34:'0/34',acceptance:'0/8',FORMAL:'DENY',W_X:'CONSUMED_EXPOSED',championsRealCertified:false}));
+          }finally{b.destroy()}
+          R27302_TEST_R27302_PINNED_CJS_EOF
+          printf '%s  %s\n' '33bdc32f70d7e8d3049e84c2d3c4915ddf24398a767d22f3512e0398c96e2820' 'research/test_r27302_pinned.cjs' | sha256sum -c -
+          (cd research && node test_r27302_unit.cjs)
+          git clone --quiet https://github.com/smogon/pokemon-showdown.git pinned-showdown
+          cd pinned-showdown
+          git checkout --quiet --detach aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          npm ci --no-audit --no-fund
+          npm run build
+          cp ../research/*.cjs .
+          node test_r27302_pinned.cjs
+          echo "R27_302_DONE contract only; no competitive strength or Champions live certification"
