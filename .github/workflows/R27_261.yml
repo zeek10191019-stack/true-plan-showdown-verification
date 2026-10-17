@@ -1,0 +1,351 @@
+# R27.261: public pinned Showdown integration with optional policy bridge.
+# Uses only a mock plugin; NO proprietary engine, code or battle logs published.
+name: R27.261 Private Policy Bridge Contract Smoke
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bridge-probes:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout pinned public Showdown
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pokemon-showdown
+      - name: Set Node.js version
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify pinned source and compile
+        shell: bash
+        working-directory: pokemon-showdown
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(node -v)" = 'v22.18.0'
+          npm ci --no-audit --no-fund
+          npm run build
+          echo 'R27_261_PINNED_BUILD PASS'
+      - name: Verify policy bridge and pinned simulator
+        working-directory: pokemon-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > battle_api.cjs <<'R27_261_FILE_battle_api_cjs'
+          'use strict';
+          /**
+           * R27.259 portable and deliberately conservative single-battle contract.
+           * Not the original private Battle AI, not a Pokémon Champions physics oracle.
+           * Zero dependencies; operates only on the owning side's Showdown request and
+           * an explicit PUBLIC opponent observation. Unsupported states fail closed.
+           */
+          const crypto = require('node:crypto');
+          const VERSION = 'r27.259.portable.v2';
+          
+          class UnsupportedState extends Error {
+            constructor(code, details='') { super(`${code}${details ? ': '+details : ''}`); this.name='UnsupportedState'; this.code=code; }
+          }
+          const isFainted = p => /(?:^|\s)fnt(?:\s|$)/i.test(String(p.condition ?? ''));
+          const sanit = x => String(x ?? '');
+          const ownMon = m => ({
+            ident:sanit(m.ident),details:sanit(m.details),condition:sanit(m.condition),active:!!m.active,
+            moves:Array.isArray(m.moves)?m.moves.map(sanit):[],item:sanit(m.item),
+            baseAbility:sanit(m.baseAbility),reviving:!!m.reviving
+          });
+          function observe(ownRequest, explicitPublicFoe={}) {
+            if (ownRequest?.wait) return {v:VERSION,phase:'wait',own:[],active:null,foe:{species:null},forceSwitch:null,maxChosenTeamSize:null};
+            if (!ownRequest || typeof ownRequest!=='object' || !Array.isArray(ownRequest.side?.pokemon))
+              throw new UnsupportedState('NO_OWN_REQUEST');
+            const phase=ownRequest.teamPreview?'preview':Array.isArray(ownRequest.forceSwitch)?'switch':
+              Array.isArray(ownRequest.active)?'move':null;
+            if (!phase) throw new UnsupportedState('UNKNOWN_PHASE');
+            const o={v:VERSION,phase,own:ownRequest.side.pokemon.map(ownMon),
+              active:Array.isArray(ownRequest.active)?ownRequest.active.map(a=>a?({
+                moves:Array.isArray(a.moves)?a.moves.map(m=>({id:sanit(m.id),pp:Number.isFinite(m.pp)?m.pp:null,
+                  disabled:!!m.disabled})):[],
+                trapped:!!a.trapped,maybeTrapped:!!a.maybeTrapped,maybeDisabled:!!a.maybeDisabled,
+                canMegaEvo:!!a.canMegaEvo,canMegaEvoX:!!a.canMegaEvoX,canMegaEvoY:!!a.canMegaEvoY,
+                canTerastallize:!!a.canTerastallize,canDynamax:!!a.canDynamax
+              }):null):null,
+              foe:{species:typeof explicitPublicFoe?.species==='string'?explicitPublicFoe.species:null},
+              forceSwitch:Array.isArray(ownRequest.forceSwitch)?ownRequest.forceSwitch.map(Boolean):null,
+              maxChosenTeamSize:Number.isInteger(ownRequest.maxChosenTeamSize)?ownRequest.maxChosenTeamSize:null};
+            if (o.own.length>6) throw new UnsupportedState('TEAM_OVER_SIX');
+            return o;
+          }
+          function teamPreview(obs,selectionScores){
+            if(obs.phase!=='preview'||obs.maxChosenTeamSize!==3||obs.own.length!==6)
+              throw new UnsupportedState('NON_6V3_PREVIEW');
+            if(!Array.isArray(selectionScores)||selectionScores.length!==6||!selectionScores.every(Number.isFinite))
+              throw new UnsupportedState('INVALID_SELECTION_SCORES');
+            const ranking=[0,1,2,3,4,5].sort((a,b)=>selectionScores[b]-selectionScores[a]||a-b);
+            const indices=ranking.slice(0,3);
+            return {command:'team '+indices.map(i=>i+1).join(''),indices,source:'external_score_provider'};
+          }
+          function legalCandidates(obs,selectionScores){
+            if(obs.phase==='wait') return [{command:'',kind:'wait'}];
+            if(obs.phase==='preview') return [{...teamPreview(obs,selectionScores),kind:'preview'}];
+            if(!Array.isArray(obs.own)||obs.own.length===0)throw new UnsupportedState('NO_ROSTER');
+            if(obs.phase==='switch'){
+              if(obs.forceSwitch?.length!==1 || !obs.forceSwitch[0]) throw new UnsupportedState('ASYMMETRIC_SWITCH_WAIT');
+              const revivalActors=obs.own.filter(m=>m.reviving);
+              if(revivalActors.length>1 || (revivalActors.length===1 && !revivalActors[0].active))
+                throw new UnsupportedState('AMBIGUOUS_REVIVAL_REQUEST');
+              const reviving=revivalActors.length===1;
+              const output=obs.own.map((m,i)=>(reviving ? isFainted(m) : (!m.active && !isFainted(m)))?
+                {command:`switch ${i+1}`,kind:reviving?'revival_target':'switch',index:i}:null).filter(Boolean);
+              if(output.length===0)throw new UnsupportedState('NO_SWITCH_TARGET');
+              return output;
+            }
+            if(obs.phase!=='move')throw new UnsupportedState('UNKNOWN_PHASE');
+            if(!Array.isArray(obs.active)||obs.active.length!==1||!obs.active[0])throw new UnsupportedState('NOT_SINGLE_ACTIVE');
+            const a=obs.active[0];
+            const output=[];
+            a.moves.forEach((m,i)=>{
+              if(m.disabled || m.pp!==null && m.pp<=0)return;
+              output.push({command:`move ${i+1}`,kind:'move',index:i});
+              if(a.canMegaEvo)output.push({command:`move ${i+1} mega`,kind:'mega_move',index:i});
+              if(a.canMegaEvoX)output.push({command:`move ${i+1} megax`,kind:'mega_x_move',index:i});
+              if(a.canMegaEvoY)output.push({command:`move ${i+1} megay`,kind:'mega_y_move',index:i});
+            });
+            if(!a.trapped&&!a.maybeTrapped){
+              obs.own.forEach((m,i)=>{if(!m.active&&!isFainted(m))output.push({command:`switch ${i+1}`,kind:'switch',index:i});});
+            }
+            if(output.length===0)throw new UnsupportedState('NO_SAFE_ACTION_OR_STRUGGLE');
+            return output;
+          }
+          function selectDecision(obs,candidates,dex){
+            if(!Array.isArray(candidates)||!candidates.length)throw new UnsupportedState('EMPTY_CANDIDATES');
+            if(obs.phase!=='move')return {command:candidates[0].command,kind:candidates[0].kind,policy:'baseline_v1'};
+            const foe=obs.foe.species?dex?.species?.get(obs.foe.species):null;
+            const rated=candidates.map((c,seq)=>{
+              if(!['move','mega_move','mega_x_move','mega_y_move'].includes(c.kind))return {...c,score:-1e6,seq};
+              const moveId=obs.active[0].moves[c.index]?.id;
+              const m=dex?.moves?.get(moveId);
+              if(!m?.exists) return {...c,score:-1000,seq};
+              const typeEffect=foe?.exists?dex.getEffectiveness(m,foe):0;
+              const scale=Math.pow(2,typeEffect);
+              const damageProxy=(m.basePower||0)*scale+(m.priority||0)*5;
+              return {...c,score:damageProxy+(c.kind==='mega_move'?0.5:0),seq};
+            });
+            rated.sort((a,b)=>b.score-a.score||a.seq-b.seq);
+            return {command:rated[0].command,kind:rated[0].kind,policy:'baseline_v1',score:rated[0].score};
+          }
+          function decision(ownRequest,publicFoe,selectionScores,dex){
+            const obs=observe(ownRequest,publicFoe),candidateList=legalCandidates(obs,selectionScores);
+            const selected=selectDecision(obs,candidateList,dex);
+            if(!candidateList.some(c=>c.command===selected.command))throw new UnsupportedState('ILLEGAL_POLICY_ACTION');
+            return {v:VERSION,observation:obs,legal:candidateList.map(c=>c.command),choice:selected.command,
+              policy:selected.policy,scope:'conservative_showdown_request',
+              observationHash:crypto.createHash('sha256').update(JSON.stringify(obs)).digest('hex')};
+          }
+          /** Explicit two-side battle stepping. `publicFoe` is injected by caller, never taken from foe set. */
+          function step(battle,teamScores,publicFoeProvider){
+            if(battle.ended) return {ended:true};
+            if(!Array.isArray(teamScores)||teamScores.length!==2||typeof publicFoeProvider!=='function')
+              throw new UnsupportedState('BAD_STEP_INPUT');
+            const before=battle.turn,phase=battle.requestState;
+            const decisions=battle.sides.map((side,i)=>decision(side.activeRequest,
+              publicFoeProvider(i),teamScores[i],battle.dex));
+            battle.makeChoices(...decisions.map(d=>d.choice));
+            return {v:VERSION,phase,before,after:battle.turn,choices:decisions.map(d=>d.choice),
+              observationHashes:decisions.map(d=>d.observationHash),ended:battle.ended};
+          }
+          module.exports={VERSION,UnsupportedState,observe,isFainted,teamPreview,legalCandidates,selectDecision,decision,step};
+          R27_261_FILE_battle_api_cjs
+          cat > private_policy_bridge.cjs <<'R27_261_FILE_private_policy_bridge_cjs'
+          'use strict';
+          /* R27.261 optional PRIVATE policy adapter. NO private source in this public module.
+           * Adapts a private policy to R27.259/260 request-based simulator contract.
+           * It does not claim compatibility with unavailable private v0.76 runtime.
+           */
+          const crypto = require('node:crypto');
+          const { VERSION: CORE_VERSION, UnsupportedState, observe, legalCandidates, selectDecision } = require('./battle_api.cjs');
+          const BRIDGE_VERSION = 'r27.261.policy-bridge.v1';
+          const HASH = v => crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');
+          function cloneFreeze(value) {
+            if (value === undefined) throw new UnsupportedState('UNDEFINED_POLICY_INPUT');
+            const copy = JSON.parse(JSON.stringify(value));
+            function freeze(o) {
+              if (o && typeof o === 'object') {
+                Object.values(o).forEach(freeze);
+                Object.freeze(o);
+              }
+              return o;
+            }
+            return freeze(copy);
+          }
+          function ensurePlugin(plugin) {
+            if (plugin === undefined || plugin === null) return null;
+            if (typeof plugin !== 'object' || typeof plugin.decide !== 'function') throw new UnsupportedState('POLICY_INTERFACE_MISSING');
+            return plugin;
+          }
+          function resolveScores(plugin,obs,explicitScores) {
+            if (obs.phase !== 'preview') return explicitScores;
+            if (explicitScores !== undefined && explicitScores !== null) return explicitScores;
+            if (typeof plugin?.scorePreview !== 'function') throw new UnsupportedState('PREVIEW_POLICY_UNAVAILABLE');
+            let scores;
+            try { scores = plugin.scorePreview(cloneFreeze(obs)); } catch(e) {throw new UnsupportedState('PREVIEW_POLICY_ERROR',String(e?.message||e));}
+            if (scores && typeof scores.then === 'function') throw new UnsupportedState('ASYNC_PREVIEW_NOT_SUPPORTED');
+            return scores;
+          }
+          /**
+           * Only the own side request + explicitly declared PUBLIC foe species may enter.
+           * Plugin sees serializable frozen {observation, legalActions, context}; neither
+           * dex nor battle nor opponent hidden team reaches the plugin.
+           * Invalid plugin decisions fail closed; never silently substitute a baseline.
+           */
+          function propose({ownRequest,publicFoe={},selectionScores=null,dex=null,plugin=null,context=null}) {
+            plugin = ensurePlugin(plugin);
+            const obs = observe(ownRequest, publicFoe);
+            if (obs.v !== CORE_VERSION) throw new UnsupportedState('CORE_VERSION_MISMATCH');
+            const scores = resolveScores(plugin,obs,selectionScores);
+            const candidates = legalCandidates(obs,scores);
+            const legal=candidates.map(c=>c.command);
+            if (new Set(legal).size!==legal.length)throw new UnsupportedState('DUPLICATE_LEGAL_CANDIDATES');
+            let choice,policy;
+            if (plugin) {
+              const safeContext={traceId:typeof context?.traceId==='string'?context.traceId:null};
+              // Explicitly no candidates' policy score, battle source, dex, or metadata.
+              let response;
+              try {response=plugin.decide(cloneFreeze(obs),cloneFreeze(legal),cloneFreeze(safeContext));}
+              catch(e){throw new UnsupportedState('POLICY_RUNTIME_ERROR',String(e?.message||e));}
+              if(response && typeof response.then==='function') throw new UnsupportedState('ASYNC_POLICY_NOT_SUPPORTED');
+              choice=typeof response==='string'?response:response?.command;
+              policy=typeof plugin.id==='string' && plugin.id.trim()?plugin.id:'external_private_policy';
+            } else {
+              const decision=selectDecision(obs,candidates,dex);
+              choice=decision.command;
+              policy=decision.policy;
+            }
+            if(typeof choice!=='string'||!legal.includes(choice)) throw new UnsupportedState('POLICY_ILLEGAL_ACTION');
+            return Object.freeze({bridgeVersion:BRIDGE_VERSION,coreVersion:CORE_VERSION,phase:obs.phase,
+              choice,legal:Object.freeze([...legal]),policy,observationHash:HASH(obs),
+              // Not a private engine's result or live Champions legal-action oracle.
+              scope:'pinned_showdown_adapter'});
+          }
+          /** Public wrapper to feed private policy an explicit own-side request. */
+          function makeController({plugin=null,selectionScores=null,dex=null}={}) {
+            ensurePlugin(plugin);
+            return Object.freeze({
+              decide(ownRequest,publicFoe={},context=null) {
+                return propose({ownRequest,publicFoe,selectionScores,dex,plugin,context});
+              },
+            });
+          }
+          /** Minimal handoff: caller must supply explicit public observations for each side.
+           * The policy doesn't receive battle access; caller owns the engine.
+           */
+          function stepWithControllers(battle,{p1,p2},publicFoeBySide) {
+            if (!battle||!Array.isArray(battle.sides)||battle.sides.length!==2||typeof battle.makeChoices!=='function')
+              throw new UnsupportedState('BAD_BATTLE_ADAPTER');
+            if(typeof publicFoeBySide!=='function') throw new UnsupportedState('NO_PUBLIC_FOE_PROVIDER');
+            if (battle.ended) return {ended:true};
+            if(!p1||!p2||typeof p1.decide!=='function'||typeof p2.decide!=='function')
+              throw new UnsupportedState('CONTROLLER_INTERFACE_MISSING');
+            const d1=p1.decide(battle.sides[0].activeRequest,publicFoeBySide(0));
+            const d2=p2.decide(battle.sides[1].activeRequest,publicFoeBySide(1));
+            // Commit only after BOTH decisions are checked. If either policy fails, no mutation.
+            const before=battle.turn;
+            battle.makeChoices(d1.choice,d2.choice);
+            return {bridgeVersion:BRIDGE_VERSION,before,after:battle.turn,
+              phase:d1.phase,choices:[d1.choice,d2.choice],observationHashes:[d1.observationHash,d2.observationHash],
+              ended:!!battle.ended};
+          }
+          module.exports={BRIDGE_VERSION,propose,makeController,stepWithControllers};
+          R27_261_FILE_private_policy_bridge_cjs
+          cat > test_bridge.cjs <<'R27_261_FILE_test_bridge_cjs'
+          'use strict';
+          const assert=require('node:assert/strict');
+          const {UnsupportedState}=require('./battle_api.cjs');
+          const {BRIDGE_VERSION,propose,makeController,stepWithControllers}=require('./private_policy_bridge.cjs');
+          let tested=0;
+          function test(name,fn){fn();tested++;console.log('R27_261_UNIT '+JSON.stringify({name,status:'PASS'}));}
+          const mon=(n,active=false,fainted=false,reviving=false)=>({ident:n,condition:fainted?'0 fnt':'100/100',active,reviving,moves:['tackle'],item:'',baseAbility:''});
+          function reqMove(){return {side:{pokemon:[mon('A',true),mon('B'),mon('C')]},active:[{moves:[{id:'tackle',pp:12,disabled:false},{id:'growl',pp:0,disabled:false}],trapped:false}]};}
+          function reqSwitch(revival=false){return {side:{pokemon:[mon('B',true,false,revival),mon('A',false,true),mon('C')]},forceSwitch:[true]};}
+          function reqPreview(){return {side:{pokemon:['A','B','C','D','E','F'].map(x=>mon(x))},teamPreview:true,maxChosenTeamSize:3};}
+          const pickFirst={id:'private.mock',decide:(_o,choices)=>choices[0]};
+          const expectedError=(fn,code)=>assert.throws(fn,e=>e instanceof UnsupportedState && e.code===code);
+          test('version defined',()=>assert.match(BRIDGE_VERSION,/r27\.261/));
+          test('valid plugin move',()=>{let d=propose({ownRequest:reqMove(),plugin:pickFirst});assert.equal(d.choice,'move 1');assert.deepEqual(d.legal,['move 1','switch 2','switch 3']);});
+          test('object-return policy supported',()=>assert.equal(propose({ownRequest:reqMove(),plugin:{decide:()=>({command:'switch 3'})}}).choice,'switch 3'));
+          test('illegal nonlegal action rejected',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=> 'move 4'}}),'POLICY_ILLEGAL_ACTION'));
+          test('non-string action rejected',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>42}}),'POLICY_ILLEGAL_ACTION'));
+          test('missing plugin entry rejected',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{}}),'POLICY_INTERFACE_MISSING'));
+          test('plugin exceptions fail closed',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>{throw Error('bad')}}}),'POLICY_RUNTIME_ERROR'));
+          test('async plugin fails closed',()=>expectedError(()=>propose({ownRequest:reqMove(),plugin:{decide:()=>Promise.resolve('move 1')}}),'ASYNC_POLICY_NOT_SUPPORTED'));
+          test('missing preview scores rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:pickFirst}),'PREVIEW_POLICY_UNAVAILABLE'));
+          test('explicit preview scores used',()=>assert.equal(propose({ownRequest:reqPreview(),selectionScores:[100,2,3,90,4,5],plugin:pickFirst}).choice,'team 146'));
+          test('plugin preview scoring used',()=>{const p={id:'p',scorePreview:()=>[100,2,3,90,4,5],decide:(_o,opts)=>opts[0]};assert.equal(propose({ownRequest:reqPreview(),plugin:p}).choice,'team 146')});
+          test('async preview rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:{scorePreview:()=>Promise.resolve([]),decide:()=>''}}),'ASYNC_PREVIEW_NOT_SUPPORTED'));
+          test('bad preview score rejected',()=>expectedError(()=>propose({ownRequest:reqPreview(),plugin:{scorePreview:()=>[1,2],decide:()=>''}}),'INVALID_SELECTION_SCORES'));
+          test('normal switch excludes fainted',()=>assert.deepEqual(propose({ownRequest:reqSwitch(),plugin:pickFirst}).legal,['switch 3']));
+          test('revival targets only fainted and slot 2',()=>{const d=propose({ownRequest:reqSwitch(true),plugin:pickFirst});assert.deepEqual(d.legal,['switch 2']);assert.equal(d.choice,'switch 2');});
+          test('wait commands empty',()=>assert.equal(propose({ownRequest:{wait:true},plugin:pickFirst}).choice,''));
+          test('strict public foe projection',()=>{let snapshot;const plugin={decide:o=>{snapshot=o;return 'move 1'}};const own=reqMove();propose({ownRequest:own,publicFoe:{species:'Garchomp',item:'SECRET_TOKEN',hidden:['private']},plugin});assert.equal(snapshot.foe.species,'Garchomp');assert.ok(!JSON.stringify(snapshot).includes('SECRET_TOKEN'));});
+          test('policy cannot mutate observation',()=>{const plugin={decide:o=>{assert.throws(()=>{o.own[0].ident='SECRET'},TypeError);return 'move 1'}};propose({ownRequest:reqMove(),plugin});});
+          test('policy cannot mutate legal',()=>{const plugin={decide:(_,legal)=>{assert.throws(()=>legal.push('move 99'),TypeError);return legal[0]}};propose({ownRequest:reqMove(),plugin});});
+          test('does not hand simulator dex to plugin',()=>{let keys;const dex={moves:{get:()=>{throw Error('should not call')}}};const plugin={decide:(o,l,c)=>{keys=Object.keys(c);return l[0]}};propose({ownRequest:reqMove(),plugin,dex,context:{traceId:'trace',secret:'PRIVATE'}});assert.deepEqual(keys,['traceId']);});
+          test('deterministic observation hash',()=>{const a=propose({ownRequest:reqMove(),plugin:pickFirst});const b=propose({ownRequest:reqMove(),plugin:pickFirst});assert.equal(a.observationHash,b.observationHash)});
+          test('secret changes preserve public hash',()=>{const a=propose({ownRequest:reqMove(),plugin:pickFirst,publicFoe:{species:'Garchomp',secret:'A'}});const b=propose({ownRequest:reqMove(),plugin:pickFirst,publicFoe:{species:'Garchomp',secret:'B'}});assert.equal(a.observationHash,b.observationHash);});
+          test('controller wrapper returns proposal',()=>assert.equal(makeController({plugin:pickFirst}).decide(reqMove()).choice,'move 1'));
+          test('unknown phase fail closed',()=>expectedError(()=>propose({ownRequest:{side:{pokemon:[mon('A')]}}}),'UNKNOWN_PHASE'));
+          test('joint step atomic on policy rejection',()=>{let mutation=0;let battle={sides:[{activeRequest:reqMove()},{activeRequest:reqMove()}],turn:1,makeChoices(){mutation++}};expectedError(()=>stepWithControllers(battle,{p1:makeController({plugin:pickFirst}),p2:makeController({plugin:{decide:()=> 'move 40'}})},()=>({species:'Magikarp'})),'POLICY_ILLEGAL_ACTION');assert.equal(mutation,0);});
+          test('joint step passes validated actions',()=>{let inputs;const battle={sides:[{activeRequest:reqMove()},{activeRequest:reqMove()}],turn:1,ended:false,makeChoices(...c){inputs=c;this.turn++}};const r=stepWithControllers(battle,{p1:makeController({plugin:pickFirst}),p2:makeController({plugin:pickFirst})},()=>({species:'Magikarp'}));assert.deepEqual(inputs,['move 1','move 1']);assert.equal(r.after,2);});
+          test('joint step rejects missing public provider',()=>expectedError(()=>stepWithControllers({sides:[{},{}],makeChoices(){}},{p1:{},p2:{}},null),'NO_PUBLIC_FOE_PROVIDER'));
+          test('baseline wait uses no dex',()=>assert.equal(propose({ownRequest:{wait:true}}).choice,''));
+          console.log('R27_261_UNIT_SUMMARY '+JSON.stringify({pass:tested,total:tested,bridge_version:BRIDGE_VERSION}));
+          R27_261_FILE_test_bridge_cjs
+          cat > test_bridge_pinned.cjs <<'R27_261_FILE_test_bridge_pinned_cjs'
+          'use strict';
+          /** Run only from root of npm-built, pinned Showdown. */
+          const assert=require('node:assert/strict');
+          const crypto=require('node:crypto');
+          const {Battle,Dex}=require('./dist/sim');
+          const {UnsupportedState}=require('./battle_api.cjs');
+          const {propose,makeController,stepWithControllers}=require('./private_policy_bridge.cjs');
+          const FORMAT='[Gen 9 Champions] BSS Reg M-C';
+          const evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+          const mk=(species,moves,ability,item='')=>({species,moves,ability,item,nature:'Hardy',level:50,evs});
+          function teams(){return [
+           [mk('Charizard',['growl'],'Blaze'),mk('Blastoise',['watergun'],'Torrent'),mk('Venusaur',['vinewhip'],'Overgrow'),mk('Pikachu',['thunderbolt'],'Static'),mk('Snorlax',['tackle'],'Immunity'),mk('Alakazam',['psychic'],'Synchronize')],
+           [mk('Annihilape',['finalgambit'],'Vital Spirit'),mk('Magikarp',['splash'],'Swift Swim'),mk('Eevee',['tackle'],'Run Away'),mk('Raichu',['thunderbolt'],'Static'),mk('Machamp',['karatechop'],'No Guard'),mk('Lapras',['surf'],'Water Absorb')]
+          ];}
+          function battle(){let f=Dex.formats.get(FORMAT);assert.ok(f.exists&&f.mod==='champions');let t=teams();return new Battle({formatid:f.id,strictChoices:true,seed:[1,2,3,4],p1:{name:'p1',team:t[0]},p2:{name:'p2',team:t[1]}})}
+          const privateMock={id:'example_plugin_not_original_ai',
+           scorePreview: obs=>{assert.equal(obs.phase,'preview');return [100,80,50,90,70,0];},
+           decide: (obs,legal)=>{ // Replace this function with original policy after source integration.
+             if(obs.phase==='preview')return legal[0];
+             if(obs.phase==='switch')return legal[0];
+             if(obs.phase==='wait')return '';
+             return legal.find(x=>x==='move 1')||legal[0];
+           }};
+          const ctl1=makeController({plugin:privateMock}),ctl2=makeController({selectionScores:[100,75,65,3,2,1],dex:Dex});
+          const publicFoe=b=>i=>({species:b.sides[1-i].active?.[0]?.species?.name||null});
+          const cases=[];
+          function test(name,fn){try{const evidence=fn();const row={name,status:'PASS',evidence};cases.push(row);console.log('R27_261_CASE '+JSON.stringify(row));}catch(e){const row={name,status:'FAIL',error:String(e?.stack||e)};cases.push(row);console.error('R27_261_CASE '+JSON.stringify(row));process.exitCode=1;}}
+          test('EXTERNAL_POLICY_SELECTS_6_TO_3',()=>{const b=battle();try{const r=stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));assert.deepEqual(r.choices,['team 142','team 123']);assert.deepEqual(b.p1.pokemon.map(p=>p.species.name),['Charizard','Pikachu','Blastoise']);return {choices:r.choices,own_selected:b.p1.pokemon.map(p=>p.species.name)};}finally{b.destroy()}});
+          test('EXTERNAL_POLICY_TURN_AND_FORCED_SWITCH',()=>{const b=battle();try{stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));const m=stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));assert.deepEqual(m.choices,['move 1','move 1']);assert.equal(b.requestState,'switch');const s=stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));assert.deepEqual(s.choices,['switch 2','switch 2']);assert.equal(b.p1.active[0].species.name,'Pikachu');return {move:m.choices,switch:s.choices,own_active:b.p1.active[0].species.name};}finally{b.destroy()}});
+          test('INVALID_PRIVATE_POLICY_CANNOT_ADVANCE_BATTLE',()=>{const b=battle();try{const invalid=makeController({plugin:{id:'illegal',decide:()=> 'team 999'}});const prevLog=b.log.length,prevTurn=b.turn;assert.throws(()=>stepWithControllers(b,{p1:invalid,p2:ctl2},publicFoe(b)),e=>e instanceof UnsupportedState&&e.code==='POLICY_ILLEGAL_ACTION');assert.equal(b.log.length,prevLog);assert.equal(b.turn,prevTurn);assert.equal(b.requestState,'teampreview');return {no_engine_commit:true};}finally{b.destroy()}});
+          test('HIDDEN_ENEMY_DATA_INVARIANT',()=>{const b=battle();try{stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b));const req=b.p1.activeRequest;const pub={species:b.p2.active[0].species.name};const orig=propose({ownRequest:req,publicFoe:pub,plugin:privateMock});const tainted=propose({ownRequest:req,publicFoe:{...pub,privateMove:'spore',privateItem:'Choice Scarf',bench:'secret'},plugin:privateMock});assert.equal(orig.choice,tainted.choice);assert.equal(orig.observationHash,tainted.observationHash);return {choice:orig.choice,observationHash:orig.observationHash};}finally{b.destroy()}});
+          test('EXTERNAL_POLICY_FIXED_SEED_REPLAY',()=>{const results=[];for(let i=0;i<2;i++){const b=battle();try{let actions=[];for(let j=0;j<10&&!b.ended;j++){actions.push(stepWithControllers(b,{p1:ctl1,p2:ctl2},publicFoe(b)).choices)}const hash=crypto.createHash('sha256').update(b.log.filter(x=>/^\|(move|switch|turn|faint|win)\|/.test(x)).join('\n')).digest('hex');results.push({actions,hash});}finally{b.destroy()}}assert.deepEqual(results[0],results[1]);return {steps:results[0].actions.length,digest:results[0].hash}});
+          console.log('R27_261_SUMMARY '+JSON.stringify({pass:cases.filter(x=>x.status==='PASS').length,total:cases.length,scope:'plugin mock and public pinned Showdown; private original runtime not connected'}));
+          console.log('CERTIFICATION_GATE Native33=0/33 Exact34=0/34 Acceptance=0/8 FORMAL=DENY; old-party Stage1.5 excluded');
+          if(cases.some(x=>x.status==='FAIL'))process.exitCode=1;
+          R27_261_FILE_test_bridge_pinned_cjs
+          node --check battle_api.cjs
+          node --check private_policy_bridge.cjs
+          node --check test_bridge.cjs
+          node --check test_bridge_pinned.cjs
+          node test_bridge.cjs
+          node test_bridge_pinned.cjs
+          echo 'CERTIFICATION_GATE Native33=0/33 Exact34=0/34 Acceptance=0/8 FORMAL=DENY; original private runtime NOT integrated'
