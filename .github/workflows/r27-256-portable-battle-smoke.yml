@@ -1,0 +1,345 @@
+# R27.256: Public, manually triggered simulator adapter proof. No private Battle AI code.
+# Showdown-only integration; NOT official Champions physics or old-party Stage1.5.
+name: R27.256 Generic Team Select Switch and Turn Policy Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-smoke:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Get immutable pinned Showdown
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pokemon-showdown
+      - name: Setup runtime Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Verify pinned source and build
+        shell: bash
+        working-directory: pokemon-showdown
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(node -v)" = 'v22.18.0'
+          npm ci --no-audit --no-fund
+          npm run build
+          echo 'R27_256_PINNED_BUILD PASS'
+      - name: Portable adapter contracts and five simulator probes
+        shell: bash
+        working-directory: pokemon-showdown
+        run: |
+          set -euo pipefail
+          cat > R27_256_ENGINE_PROBES.cjs <<'NODE'
+          'use strict';
+          // R27.256 portable smoke-contract for pinned Pokemon Showdown Champions singles.
+          // Independent fixture: NO archived six, NO formal Champions physics certification.
+          const assert = require('node:assert/strict');
+          const crypto = require('node:crypto');
+          const PIN = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43';
+          const FORMAT = '[Gen 9 Champions] BSS Reg M-C';
+          
+          function chooseThree(request, selectionScores) {
+            if (!request?.teamPreview || request.maxChosenTeamSize !== 3) throw new Error('Not a 3-mon team preview');
+            if (!Array.isArray(request.side?.pokemon) || request.side.pokemon.length !== 6) throw new Error('Require six roster entries');
+            if (!Array.isArray(selectionScores) || selectionScores.length !== 6 ||
+                !selectionScores.every(Number.isFinite)) throw new Error('Require six finite scores supplied by selection policy');
+            const ordered = [...Array(6).keys()].sort((a, b) => selectionScores[b] - selectionScores[a] || a - b);
+            return 'team ' + ordered.slice(0, 3).map(i => String(i + 1)).join('');
+          }
+          
+          function safeObservation(request, opponentPublic) {
+            assert.ok(request && request.side && Array.isArray(request.side.pokemon), 'own request required');
+            const safeEnemy = opponentPublic && typeof opponentPublic.species === 'string'
+              ? {species: opponentPublic.species} : {species: null};
+            // Intentionally exclude opponent ability, item, unrevealed moves, private team/bench.
+            const own = request.side.pokemon.map(p => ({
+              ident: String(p.ident || ''), active: !!p.active,
+              condition: String(p.condition || ''),
+              moves: Array.isArray(p.moves) ? [...p.moves] : [],
+              item: String(p.item || ''), baseAbility: String(p.baseAbility || ''),
+            }));
+            const active = Array.isArray(request.active) ? request.active.map(a => a ? ({
+              moves: (a.moves || []).map(m => ({id: m.id, pp: m.pp, disabled: !!m.disabled})),
+              trapped: !!a.trapped, maybeTrapped: !!a.maybeTrapped,
+              canMegaEvo: !!a.canMegaEvo,
+            }) : null) : null;
+            return {phase:request.teamPreview?'teampreview':request.forceSwitch?'switch':request.wait?'wait':'move',
+              teamPreview: !!request.teamPreview, maxChosenTeamSize: request.maxChosenTeamSize || null,
+              forceSwitch: Array.isArray(request.forceSwitch) ? [...request.forceSwitch] : null,
+              own, active, foe:safeEnemy};
+          }
+          
+          function enumerateLegal(obs, scores) {
+            if (obs.phase === 'wait') return [''];
+            if (obs.phase === 'teampreview') {
+              return [chooseThree({teamPreview:true,maxChosenTeamSize:obs.maxChosenTeamSize,
+                side:{pokemon:obs.own}}, scores)];
+            }
+            if (obs.phase === 'switch') {
+              // The replacement choices come from our own authoritative request only.
+              const opts = obs.own.map((p,i) => (!p.active && !/\bfnt\b/i.test(p.condition)) ? `switch ${i+1}` : null)
+                .filter(Boolean);
+              if (!opts.length) throw new Error('No forced switch target in request');
+              return opts;
+            }
+            if (obs.phase !== 'move') throw new Error(`Unsupported phase: ${obs.phase}`);
+            const active = obs.active?.[0];
+            if (!active) throw new Error('No active move request');
+            const result=[];
+            for(let i=0;i<active.moves.length;i++) {
+              const m=active.moves[i];
+              if (!m || m.disabled || (typeof m.pp === 'number' && m.pp<=0)) continue;
+              result.push(`move ${i+1}`);
+              if (active.canMegaEvo) result.push(`move ${i+1} mega`);
+            }
+            if (!active.trapped && !active.maybeTrapped) {
+              for(let i=0;i<obs.own.length;i++){
+                if (obs.own[i].active || /\bfnt\b/i.test(obs.own[i].condition)) continue;
+                result.push(`switch ${i+1}`);
+              }
+            }
+            if (!result.length) result.push('move 1'); // Struggle fallback, simulator validates legality.
+            return result;
+          }
+          
+          function chooseAction(obs, legal, dex) {
+            if (!legal.length) throw new Error('No legal action candidates');
+            if (obs.phase !== 'move') return legal[0];
+            const foeSpecies=obs.foe.species ? dex.species.get(obs.foe.species) : null;
+            function score(choice){
+              if (!choice.startsWith('move ')) return -100000;
+              const n=Number(/^move (\d+)/.exec(choice)?.[1]);
+              const moveid=obs.active?.[0]?.moves[n-1]?.id;
+              const move=moveid ? dex.moves.get(moveid) : null;
+              if (!move || !move.exists) return -1000;
+              const eff=(foeSpecies && foeSpecies.exists) ? dex.getEffectiveness(move,foeSpecies) : 0;
+              const multiplier=Math.pow(2,eff);
+              // Baseline only: no damage roll, opponents' private info, probability or search.
+              return (move.basePower || 0)*multiplier + (move.priority || 0)*5 +
+                (choice.endsWith(' mega') ? 1 : 0);
+            }
+            return [...legal].sort((a,b)=>score(b)-score(a) || a.localeCompare(b))[0];
+          }
+          
+          function chooseFromRequest(request, opponentPublic, selectionScores, dex) {
+            if (request?.wait || !request) return '';
+            const obs=safeObservation(request,opponentPublic);
+            return chooseAction(obs,enumerateLegal(obs,selectionScores),dex);
+          }
+          
+          function mockRequest() {
+            return {side:{pokemon:[
+              {ident:'p1: A',condition:'100/100',active:true,moves:['tackle']},
+              {ident:'p1: B',condition:'0 fnt',active:false,moves:['tackle']},
+              {ident:'p1: C',condition:'100/100',active:false,moves:['tackle']},
+            ]},active:[{moves:[{id:'tackle',pp:0,disabled:false},{id:'thunderbolt',pp:10,disabled:false},
+              {id:'growl',pp:30,disabled:true}],trapped:false,maybeTrapped:false,canMegaEvo:false}]};
+          }
+          function unitTests(){
+            const names=['a','b','c','d','e','f'].map(x=>({ident:x,moves:[],active:false,condition:'100/100'}));
+            const preview={teamPreview:true,maxChosenTeamSize:3,side:{pokemon:names}};
+            assert.equal(chooseThree(preview,[10,4,1,12,8,0]),'team 415');
+            assert.throws(()=>chooseThree(preview,[1,2,3]),/six finite/);
+            const own=mockRequest();
+            const o=safeObservation(own,{species:'Magikarp',unrevealedMoves:['hyperbeam'],item:'Choice Scarf',ability:'Swift Swim'});
+            assert.equal(o.foe.species,'Magikarp');
+            assert.equal(JSON.stringify(o).includes('hyperbeam'),false);
+            assert.equal(JSON.stringify(o).includes('Choice Scarf'),false);
+            assert.deepEqual(enumerateLegal(o),['move 2','switch 3']);
+            const forced=safeObservation({side:own.side,forceSwitch:[true]}, {species:'Magikarp'});
+            assert.deepEqual(enumerateLegal(forced),['switch 3']);
+            const trapped=safeObservation({...own,active:[{...own.active[0],trapped:true}]},{species:'Magikarp'});
+            assert.deepEqual(enumerateLegal(trapped),['move 2']);
+            assert.deepEqual(enumerateLegal({phase:'wait',own:[],active:null,foe:{species:null}}),['']);
+            const disabledMega=safeObservation({...own,active:[{...own.active[0],canMegaEvo:true}]},{species:'Magikarp'});
+            assert.ok(enumerateLegal(disabledMega).includes('move 2 mega'));
+            return {local_contracts:8,pass:8};
+          }
+          
+          function set(name,moves,ability='No Ability',item=''){
+            return {name,species:name,ability,item,moves,level:50,nature:'Hardy',
+              evs:{hp:0,atk:0,def:0,spa:0,spd:0,spe:0}};
+          }
+          function teamsA(){return [
+            [set('Charizard',['growl'],'Blaze'),set('Blastoise',['watergun'],'Torrent'),
+              set('Venusaur',['vinewhip'],'Overgrow'),set('Pikachu',['thunderbolt'],'Static'),
+              set('Snorlax',['tackle'],'Immunity'),set('Alakazam',['psychic'],'Synchronize')],
+            [set('Annihilape',['finalgambit'],'Vital Spirit'),set('Magikarp',['splash'],'Swift Swim'),
+              set('Eevee',['tackle'],'Run Away'),set('Raichu',['thunderbolt'],'Static'),
+              set('Machamp',['karatechop'],'No Guard'),set('Lapras',['surf'],'Water Absorb')]
+          ];}
+          function teamsB(){return [
+            [set('Blastoise',['watergun'],'Torrent'),set('Venusaur',['vinewhip'],'Overgrow'),
+              set('Charizard',['ember'],'Blaze'),set('Jolteon',['thunderbolt'],'Volt Absorb'),
+              set('Lapras',['surf'],'Water Absorb'),set('Snorlax',['tackle'],'Immunity')],
+            [set('Machamp',['karatechop'],'No Guard'),set('Pikachu',['thunderbolt'],'Static'),
+              set('Wartortle',['watergun'],'Torrent'),set('Gengar',['shadowball'],'Cursed Body'),
+              set('Dragonite',['dragonclaw'],'Inner Focus'),set('Raticate',['tackle'],'Run Away')]
+          ];}
+          function createBattle(Battle,Dex,teams,seed){
+            const f=Dex.formats.get(FORMAT);
+            assert.equal(f.exists,true,'Missing pinned M-C format');
+            assert.equal(f.mod,'champions');
+            const b=new Battle({formatid:f.id,strictChoices:true,seed,
+              p1:{name:'baselineA',team:teams[0]},p2:{name:'baselineB',team:teams[1]}});
+            assert.equal(b.gameType,'singles');
+            assert.equal(b.requestState,'teampreview');
+            return b;
+          }
+          function publicFoe(b,i){
+            const foe=b.sides[1-i];
+            const active=foe.active?.[0];
+            // Revealed opponent species only, no opponent set, ability, item, move or bench introspection.
+            return {species:active?.species?.name || null};
+          }
+          function getAction(b,i,scores){
+            const req=b.sides[i].activeRequest;
+            return chooseFromRequest(req,publicFoe(b,i),scores,b.dex);
+          }
+          function previewPick(b,scores){
+            assert.equal(b.requestState,'teampreview');
+            const a=getAction(b,0,scores[0]),c=getAction(b,1,scores[1]);
+            b.makeChoices(a,c);
+            assert.equal(b.requestState,'move');
+            assert.equal(b.p1.pokemon.length,3);
+            assert.equal(b.p2.pokemon.length,3);
+            return {choices:[a,c],selected:[b.p1.pokemon.map(p=>p.species.name),b.p2.pokemon.map(p=>p.species.name)]};
+          }
+          function simulatedStep(b,scores){
+            const before=b.turn,phase=b.requestState;
+            if(b.ended)return null;
+            if(!['move','switch'].includes(phase))throw new Error('Unexpected phase '+phase);
+            const actions=[getAction(b,0,scores[0]),getAction(b,1,scores[1])];
+            b.makeChoices(actions[0],actions[1]);
+            return {before,after:b.turn,phase,actions};
+          }
+          function signature(b){
+            const selected=b.log.filter(s=>/^\|(turn|move|switch|faint|win|tie|cant|detailschange|cant|mega|turn|\-damage|\-heal|\-mega)\|/.test(s));
+            return crypto.createHash('sha256').update(selected.join('\n')).digest('hex');
+          }
+          function runMini(Battle,Dex,teamMaker,seed,maxSteps=12){
+            const b=createBattle(Battle,Dex,teamMaker(),seed);
+            try{
+              const scoreVectors=teamMaker===teamsA ?
+                [[100,80,50,90,70,0],[100,75,65,3,2,1]] :
+                [[80,70,60,55,50,20],[90,80,70,60,10,0]];
+              const preview=previewPick(b,scoreVectors);
+              const phases=[]; let moves=0,switches=0;
+              for(let i=0;i<maxSteps && !b.ended;i++){
+                const row=simulatedStep(b,scoreVectors);if(!row)break;
+                phases.push(row.phase);
+                if(row.phase==='move')moves++;
+                if(row.phase==='switch')switches++;
+              }
+              assert.ok(moves>0,'Must make at least one turn decision');
+              assert.ok(b.turn>=1);
+              return {preview,phases,moveSteps:moves,switchSteps:switches,
+                turns:b.turn,ended:b.ended,winner:b.winner||null,digest:signature(b)};
+            }finally{b.destroy();}
+          }
+          function runIntegrated(){
+            const {Battle,Dex}=require('./dist/sim');
+            const evidence=[];
+            const cases=[
+              ['SELECT_6_TO_3_NOT_FIRST_THREE',()=>{
+                const b=createBattle(Battle,Dex,teamsA(),[1,2,3,4]);
+                try{
+                  const p=previewPick(b,[[100,80,50,90,70,0],[100,75,65,3,2,1]]);
+                  assert.deepEqual(p.choices,['team 142','team 123']);
+                  assert.deepEqual(p.selected[0],['Charizard','Pikachu','Blastoise']);
+                  return p;
+                }finally{b.destroy();}
+              }],
+              ['FORCED_DOUBLE_KO_REPLACEMENT',()=>{
+                const b=createBattle(Battle,Dex,teamsA(),[1,2,3,4]);
+                try{
+                  previewPick(b,[[100,80,50,90,70,0],[100,75,65,3,2,1]]);
+                  const first=[getAction(b,0),getAction(b,1)];
+                  assert.deepEqual(first,['move 1','move 1']);
+                  b.makeChoices(...first);
+                  assert.ok(b.p1.pokemon[0].fainted,'Charizard should faint');
+                  assert.ok(b.p2.pokemon[0].fainted,'Annihilape should faint');
+                  assert.equal(b.requestState,'switch');
+                  const replacement=[getAction(b,0),getAction(b,1)];
+                  assert.deepEqual(replacement,['switch 2','switch 2']);
+                  b.makeChoices(...replacement);
+                  assert.equal(b.requestState,'move');
+                  assert.equal(b.p1.active[0].species.name,'Pikachu');
+                  assert.equal(b.p2.active[0].species.name,'Magikarp');
+                  return {first,replacement,active:[b.p1.active[0].species.name,b.p2.active[0].species.name]};
+                }finally{b.destroy();}
+              }],
+              ['CANDIDATE_INDEPENDENT_TWO_ROSTERS',()=>{
+                const a=runMini(Battle,Dex,teamsA,[1,2,3,4],10);
+                const b=runMini(Battle,Dex,teamsB,[5,6,7,8],10);
+                assert.notDeepEqual(a.preview.selected[0],b.preview.selected[0]);
+                return {a:{moves:a.moveSteps,switches:a.switchSteps,turns:a.turns},
+                  b:{moves:b.moveSteps,switches:b.switchSteps,turns:b.turns}};
+              }],
+              ['DETERMINISTIC_SMALL_ROLLOUT',()=>{
+                const a=runMini(Battle,Dex,teamsA,[1,2,3,4],10),b=runMini(Battle,Dex,teamsA,[1,2,3,4],10);
+                assert.equal(a.digest,b.digest,'Same seed / roster / policy must replay identically');
+                assert.deepEqual(a.phases,b.phases);
+                return {digest:a.digest,moveSteps:a.moveSteps,switchSteps:a.switchSteps,ended:a.ended};
+              }],
+              ['PUBLIC_INFO_INVARIANCE',()=>{
+                const battle=createBattle(Battle,Dex,teamsB(),[5,6,7,8]);
+                try{
+                  previewPick(battle,[[80,70,60,55,50,20],[90,80,70,60,10,0]]);
+                  const request=battle.p1.activeRequest;
+                  const publicEnemy={species:battle.p2.active[0].species.name};
+                  const withSecrets={...publicEnemy,item:'Choice Scarf',ability:'Levitate',unrevealedMoves:['spore'],benchSecret:['Dragonite']};
+                  const o1=safeObservation(request,publicEnemy);
+                  const o2=safeObservation(request,withSecrets);
+                  assert.deepEqual(o1,o2);
+                  const c1=chooseFromRequest(request,publicEnemy,[],battle.dex);
+                  const c2=chooseFromRequest(request,withSecrets,[],battle.dex);
+                  assert.equal(c1,c2);
+                  assert.equal(JSON.stringify(o2).includes('Choice Scarf'),false);
+                  return {same_choice:c1,no_unrevealed_enemy_fields:true};
+                }finally{battle.destroy();}
+              }],
+            ];
+            const local=unitTests();
+            for(const [id,fn] of cases){
+              try{
+                const result={id,status:'PASS',evidence:fn()};evidence.push(result);
+                console.log('R27_256_CASE '+JSON.stringify(result));
+              }catch(err){
+                const result={id,status:'FAIL',error:String(err?.stack||err)};evidence.push(result);
+                console.error('R27_256_CASE '+JSON.stringify(result));process.exitCode=1;
+              }
+            }
+            const summary={revision:'R27.256',pin:PIN,format:FORMAT,
+              scope:'Generic simulator adapter demonstration; NOT original private engine integration / actual Champions certification',
+              local_contracts:local.pass,integrated_pass:evidence.filter(x=>x.status==='PASS').length,
+              integrated_total:evidence.length,old_party_dependency:false,
+              cases:evidence.map(x=>({id:x.id,status:x.status}))};
+            console.log('R27_256_SUMMARY '+JSON.stringify(summary));
+            console.log('CERTIFICATION_GATE Native33=0/33 Exact34=0/34 Acceptance=0/8 FORMAL=DENY; archived Stage1.5 counter not applicable');
+            if(summary.integrated_pass!==summary.integrated_total)process.exitCode=1;
+          }
+          if (require.main===module) {
+            try {if(process.argv.includes('--unit')){const r=unitTests();console.log('R27_256_UNIT '+JSON.stringify(r));}
+              else runIntegrated();}
+            catch(err){console.error('R27_256_FATAL '+String(err?.stack||err));process.exitCode=1;}
+          }
+          module.exports={chooseThree,safeObservation,enumerateLegal,chooseAction,chooseFromRequest,unitTests};
+          NODE
+          node --check R27_256_ENGINE_PROBES.cjs
+          node R27_256_ENGINE_PROBES.cjs --unit
+          node R27_256_ENGINE_PROBES.cjs
+          echo 'R27_256_WORKFLOW PASS'
