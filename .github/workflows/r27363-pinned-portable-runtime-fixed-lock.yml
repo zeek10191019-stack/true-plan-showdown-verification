@@ -1,0 +1,121 @@
+name: 'R27.363 Portable Pinned Showdown Runtime - Restore Exact Lock'
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r27363-portable-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  public_portable_runtime:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Setup exact Node 22.18.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch public pinned Showdown source
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-showdown
+      - name: Pin source identity and build the real simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          cd pinned-showdown
+          test "$(git rev-parse HEAD)" = aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          test "$(git rev-parse 'HEAD^{tree}')" = 98c9038b81fa5ed7f1e9818736b701918920501e
+          test "$(git hash-object package-lock.json)" = 069534c3d12cc3b9305b201bca0e4602fac139b9
+          test "$(node -v)" = v22.18.0
+          sha256sum package-lock.json | tee ../proof/package-lock.sha256
+          git rev-parse HEAD > ../proof/pinned-commit.txt
+          git rev-parse 'HEAD^{tree}' > ../proof/pinned-tree.txt
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/battle.js && test -f dist/sim/dex.js && test -f dist/sim/team-validator.js
+          # Retain the version-locked runtime dependencies but not development-only modules.
+          npm prune --omit=dev --no-audit --no-fund
+          test -d node_modules/ts-chacha20
+          # npm prune may rewrite package-lock.json (observed in R27.362).
+          # Restore its byte-exact pinned identity AFTER dependency pruning.
+          git restore --source=HEAD --worktree -- package-lock.json
+          test "$(sha256sum package-lock.json | awk '{print $1}')" = '15ad8a83f7ae0e8b3f0a54d3ca9c74e6b14c004c5e6ac02536f3fa2689f49a5d'
+          test "$(git hash-object package-lock.json)" = '069534c3d12cc3b9305b201bca0e4602fac139b9'
+          echo 'UPSTREAM_RUNTIME_BUILD_PASS_NOT_RETAIL_CHAMPIONS_CERTIFICATION' > ../proof/build-status.txt
+      - name: Create synthetic-only offline execution probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > pinned-showdown/runtime_probe.cjs <<'JS'
+          'use strict';
+          const fs=require('node:fs');
+          const assert=require('node:assert/strict');
+          const {Dex}=require('./dist/sim/dex');
+          const {Battle}=require('./dist/sim/battle');
+          const fmt=Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');
+          assert.equal(fmt.mod,'champions');
+          assert.equal(Dex.forFormat(fmt).formats.getRuleTable(fmt).evLimit,66);
+          const species=['Sylveon','Gyarados','Garchomp','Mimikyu','Archaludon','Arboliva'];
+          const moves={Sylveon:['Tackle','Hyper Voice','Protect','Quick Attack'],Gyarados:['Tackle','Protect','Waterfall','Bite'],Garchomp:['Earthquake','Protect','Tackle','Dragon Claw'],Mimikyu:['Tackle','Protect','Shadow Sneak','Play Rough'],Archaludon:['Tackle','Protect','Flash Cannon','Dragon Pulse'],Arboliva:['Tackle','Protect','Energy Ball','Strength Sap']};
+          const evs={hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+          const ivs={hp:31,atk:31,def:31,spa:31,spd:31,spe:31};
+          const team=()=>species.map(name=>({name,species:name,level:50,ability:'',item:'',nature:'Hardy',moves:moves[name],evs:{...evs},ivs:{...ivs}}));
+          const b=new Battle({formatid:fmt.id,strictChoices:true,seed:[4660,22136,39612,57072],p1:{name:'SyntheticUser',team:team()},p2:{name:'SyntheticOpponent',team:team()}});
+          try{
+            assert.equal(b.requestState,'teampreview');
+            b.makeChoices('team 123','team 123');
+            assert.equal(b.requestState,'move');
+            const r=b.p1.activeRequest;
+            const mm=r.active[0].moves.filter(m=>m&&!m.disabled&&m.pp>0).map(m=>({kind:'move',id:m.id,pp:m.pp}));
+            const ss=r.side.pokemon.flatMap((p,i)=>!p.active&&!p.fainted&&i>=1?[{kind:'switch',slot:i+1}]:[]);
+            assert.deepEqual(mm,[{kind:'move',id:'tackle',pp:20},{kind:'move',id:'hypervoice',pp:12},{kind:'move',id:'protect',pp:8},{kind:'move',id:'quickattack',pp:20}]);
+            assert.deepEqual(ss,[{kind:'switch',slot:2},{kind:'switch',slot:3}]);
+            const result={schema:'TRUE_PLAN_R27362_OFFLINE_PINNED_RUNTIME_PROBE_V1',source_commit:'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',node_version:process.version,format:fmt.name,upstream_synthetic_only:true,retail_game_certified:false,real_screen_observed:false,production_gate_allowed:false,native33_credit:0,exact34_credit:0,stage15_battle_credit:0,moves:mm,switches:ss};
+            assert.equal(process.version,'v22.18.0');
+            console.log(JSON.stringify(result));
+          }finally{b.destroy();}
+          JS
+      - name: Repackage runtime and prove independent offline execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          # .bin contains npm symlinks and is unnecessary for Node require(); omit links.
+          test "$(find pinned-showdown/node_modules -type l ! -path '*/.bin/*' | wc -l)" -eq 0
+          tar --hard-dereference -czf proof/portable-runtime.tar.gz --exclude=node_modules/.bin --exclude=node_modules/.cache -C pinned-showdown dist data config package.json package-lock.json node_modules runtime_probe.cjs
+          sha256sum proof/portable-runtime.tar.gz > proof/portable-runtime.sha256
+          # Fail closed if a tar symlink, hardlink, device or unsafe path remains.
+          python3 - <<'PY_ARCHIVE_CHECK'
+          import tarfile
+          from pathlib import PurePosixPath
+          with tarfile.open('proof/portable-runtime.tar.gz','r:gz') as tar:
+              entries=0
+              for entry in tar:
+                  entries+=1
+                  p=PurePosixPath(entry.name.removeprefix('./'))
+                  if not (entry.isdir() or entry.isfile()) or p.is_absolute() or '..' in p.parts:
+                      raise SystemExit('UNSAFE_PORTABLE_TAR_MEMBER')
+          if entries < 200: raise SystemExit('INCOMPLETE_PORTABLE_TAR')
+          print('PORTABLE_TAR_TYPES_AND_PATHS_PASS',entries)
+          PY_ARCHIVE_CHECK
+          mkdir -p "$RUNNER_TEMP/isolated" 
+          tar -xzf proof/portable-runtime.tar.gz -C "$RUNNER_TEMP/isolated"
+          (cd "$RUNNER_TEMP/isolated" && node runtime_probe.cjs) | tee proof/isolated-runtime.json
+          test -s proof/isolated-runtime.json
+          test "$(sha256sum "$RUNNER_TEMP/isolated/package-lock.json" | awk '{print $1}')" = 15ad8a83f7ae0e8b3f0a54d3ca9c74e6b14c004c5e6ac02536f3fa2689f49a5d
+          test "$(sha256sum "$RUNNER_TEMP/isolated/package-lock.json" | awk '{print $1}')" = 15ad8a83f7ae0e8b3f0a54d3ca9c74e6b14c004c5e6ac02536f3fa2689f49a5d
+          echo 'PORTABLE_RUNTIME_ISOLATED_PASS_NOT_RETAIL_CHAMPIONS_PARITY' > proof/artifact-status.txt
+      - name: Upload version-bound public upstream portable bundle
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r27363-pinned-public-portable-runtime
+          path: proof/
+          if-no-files-found: warn
+          retention-days: 5
