@@ -1,0 +1,121 @@
+name: R27.360 Pinned Champions Upstream Engine Bundle
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r27360-pinned-upstream-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  public_pinned_engine_bundle:
+    if: ${{ github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Setup exact Node.js version
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.18.0'
+      - name: Fetch public upstream exact pinned commit
+        uses: actions/checkout@v4
+        with:
+          repository: smogon/pokemon-showdown
+          ref: aa17ca0fac8bc5605df673bd8774c2d0e91efa43
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-showdown
+      - name: Verify commit and six source file identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p proof
+          cd pinned-showdown
+          test "$(git rev-parse HEAD)" = 'aa17ca0fac8bc5605df673bd8774c2d0e91efa43'
+          test "$(git rev-parse HEAD^{tree})" = '98c9038b81fa5ed7f1e9818736b701918920501e'
+          test "$(git hash-object package.json)" = 'adfd48d058c5fcc31e9222707ac8ead75f8f7926'
+          test "$(git hash-object package-lock.json)" = '069534c3d12cc3b9305b201bca0e4602fac139b9'
+          test "$(git hash-object config/formats.ts)" = 'bad5f11f7b0e30e2b12572e51d86ad8e17a90d94'
+          test "$(git hash-object data/mods/champions/scripts.ts)" = '7f100a0947a203454a1a97b54f6a99932e808bce'
+          test "$(git hash-object data/mods/champions/abilities.ts)" = '5f6e7f985601f704109b6b6d31cedf7ae9f281c7'
+          test "$(git hash-object sim/battle.ts)" = 'c17ef24008c4e453a221fe0ef5324eefc3e50e78'
+          test "$(node -v)" = 'v22.18.0'
+          git rev-parse HEAD > ../proof/pinned-commit.txt
+          git rev-parse 'HEAD^{tree}' > ../proof/pinned-tree.txt
+          echo 'SOURCE_IDENTITY_PASS_NOT_GAME_CERTIFICATION' | tee ../proof/source-status.txt
+      - name: Install locked dependencies and build real upstream simulator
+        working-directory: pinned-showdown
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run build
+          test -f dist/sim/battle.js
+          test -f dist/sim/dex.js
+          test -f dist/sim/team-validator.js
+          echo 'UPSTREAM_BUILD_PASS_NOT_CHAMPIONS_GAME_PARITY' | tee ../proof/build-status.txt
+      - name: Derive independent choices from authentic upstream Battle object
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const fs = require('node:fs');
+          const {Dex} = require('./pinned-showdown/dist/sim/dex');
+          const {Battle} = require('./pinned-showdown/dist/sim/battle');
+          const fmt = Dex.formats.get('[Gen 9 Champions] BSS Reg M-C');
+          assert.equal(fmt.mod, 'champions');
+          const rules = Dex.forFormat(fmt).formats.getRuleTable(fmt);
+          assert.equal(rules.evLimit, 66);
+          const names = ['Sylveon','Gyarados','Garchomp','Mimikyu','Archaludon','Arboliva'];
+          const moves = {
+            Sylveon:['Tackle','Hyper Voice','Protect','Quick Attack'],
+            Gyarados:['Tackle','Protect','Waterfall','Bite'],
+            Garchomp:['Earthquake','Protect','Tackle','Dragon Claw'],
+            Mimikyu:['Tackle','Protect','Shadow Sneak','Play Rough'],
+            Archaludon:['Tackle','Protect','Flash Cannon','Dragon Pulse'],
+            Arboliva:['Tackle','Protect','Energy Ball','Strength Sap']
+          };
+          const evs = {hp:0,atk:0,def:0,spa:0,spd:0,spe:0};
+          const ivs = {hp:31,atk:31,def:31,spa:31,spd:31,spe:31};
+          function team() {return names.map(species => ({name:species,species,level:50,ability:'',item:'',nature:'Hardy',moves:moves[species],evs:{...evs},ivs:{...ivs}}));}
+          const b = new Battle({formatid:fmt.id,strictChoices:true,seed:[4660,22136,39612,57072],p1:{name:'SyntheticUser',team:team()},p2:{name:'SyntheticOpponent',team:team()}});
+          try {
+            assert.equal(b.requestState,'teampreview');
+            b.makeChoices('team 123','team 123');
+            assert.equal(b.requestState,'move');
+            const r=b.p1.activeRequest;
+            assert.ok(r && Array.isArray(r.active) && r.active.length===1);
+            assert.ok(r.side && Array.isArray(r.side.pokemon));
+            const moveActions=r.active[0].moves.filter(m=>m&&!m.disabled&&m.pp>0)
+              .map(m=>({kind:'move',id:m.id,pp:m.pp}));
+            const switchActions=r.side.pokemon.flatMap((p,i)=>(!p.active&&!p.fainted&&i>=1)?[{kind:'switch',slot:i+1}]:[]);
+            assert.equal(moveActions.length,4);
+            assert.equal(switchActions.length,2);
+            const result={schema:'TRUE_PLAN_R27360_PINNED_UPSTREAM_REQUEST_V1',
+              source_commit:'aa17ca0fac8bc5605df673bd8774c2d0e91efa43',
+              source:'PINNED_UPSTREAM_BATTLE_ACTIVE_REQUEST',format:fmt.name,
+              synthetic_team_and_opponent:true,retail_observation:false,
+              observed_retail_legal_actions:false,source_only:true,
+              native33:'0/33',exact34:'0/34',stage15:'560/3500',
+              team_preview_to_move_request_pass:true,moves:moveActions,switches:switchActions};
+            fs.writeFileSync('proof/r27360-request.json',JSON.stringify(result,null,2)+'\n');
+            console.log('PINNED_UPSTREAM_REQUEST_PASS_NOT_GAME_CERTIFICATION',JSON.stringify(result));
+          } finally {b.destroy();}
+          NODE
+      - name: Package portable upstream source and build outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -czf proof/pinned-source.tar.gz -C pinned-showdown --exclude=.git --exclude=node_modules --exclude=dist .
+          tar -czf proof/pinned-dist.tar.gz -C pinned-showdown dist
+          sha256sum proof/pinned-source.tar.gz proof/pinned-dist.tar.gz > proof/archives-sha256.txt
+          du -h proof/pinned-source.tar.gz proof/pinned-dist.tar.gz
+          echo 'SOURCE_AND_DIST_ARCHIVES_READY_NOT_RETAIL_CERTIFIED' > proof/artifact-status.txt
+      - name: Upload proof and portable public engine bundle
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: r27360-pinned-public-upstream-bundle
+          path: proof/
+          if-no-files-found: warn
+          retention-days: 5
