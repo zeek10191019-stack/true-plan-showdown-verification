@@ -1,0 +1,55 @@
+# R27.397 | Public-only, free standard runner. Deploy ONLY the verified diagnostic HTML.
+# Does NOT check out the repository or publish its workflows, research code, or videos.
+name: R27.397 Safari Probe Isolated GitHub Pages Deploy
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: r27397-pages-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  deploy-probe-only:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event_name == 'workflow_dispatch' && github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Require intended public repository
+        shell: bash
+        env:
+          EXPECTED_REPO: zeek10191019-stack/true-plan-showdown-verification
+          REPO_IS_PRIVATE: ${{ github.event.repository.private }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "$EXPECTED_REPO"
+          test "${REPO_IS_PRIVATE:-unknown}" = 'false'
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          echo 'PUBLIC_REPOSITORY=PASS; NO PAID RUNNERS OR SIGNING'
+      - name: Retrieve and verify single diagnostic HTML (no checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public
+          url="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_SHA}/r27396-safari-capture-probe.html"
+          curl --fail --location --silent --show-error --retry 3 "$url" -o public/r27396-safari-capture-probe.html
+          echo '731531bdd533ba88f1f648f416702ea6b7c9575959a62d6e52bea9b2d48c1ee8  public/r27396-safari-capture-probe.html' | sha256sum --check --status
+          cp public/r27396-safari-capture-probe.html public/index.html
+          echo 'HTML_SHA256=PASS; OTHER_REPOSITORY_FILES=NOT_DEPLOYED'
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload verified static page
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: public
+      - name: Deploy isolated page
+        id: deployment
+        uses: actions/deploy-pages@v4
+      - name: Certification boundary
+        shell: bash
+        run: |
+          echo 'WEB_PAGES_DEPLOY_ONLY; SAFARI_CAPTURE_BACKGROUND_E2E=NOT_CERTIFIED'
