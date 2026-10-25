@@ -1,0 +1,454 @@
+# R27.428: one diagnostic crop per move for name + PP.
+# R27.427: correct PORTRAIT diagnostic orientation and 4 move-name crop geometry; retains pinned R27.424 original and R27.425 iOS compilation fix.
+# Read-only diagnostics only; no private Battle AI, Apple credentials, signing, live advice, or game certification.
+# Upload under .github/workflows/R27428_iPhone.yml; start manually on the public repository only.
+name: R27.428 Single Crop Move Name and PP OCR Diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r27428-iphone-ipa-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  iphoneos-unsigned:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event_name == 'workflow_dispatch' && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Download pinned R27.424 workflow without repository checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'zeek10191019-stack/true-plan-showdown-verification'
+          test "$GITHUB_EVENT_NAME" = workflow_dispatch
+          test '${{ github.event.repository.private }}' = false
+          mkdir -p .github/workflows
+          curl --fail --show-error --silent --location --retry 3 --connect-timeout 15 --max-time 90 \
+            --proto '=https' --tlsv1.2 \
+            'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/5af3ed4771e4793e4faa9fbbf65ad082c906ddda/.github/workflows/R27424_iPhone.yml' \
+            --output .github/workflows/R27424_iPhone.yml
+          test -s .github/workflows/R27424_iPhone.yml
+          actual="$(git hash-object .github/workflows/R27424_iPhone.yml)"
+          test "$actual" = '59b7537714c05ac15e6e0e32f0b9daf0987ff9d1'
+          echo "R27.426_PINNED_ORIGINAL_BLOB_VERIFIED=$actual"
+          echo 'R27.426_NO_REPOSITORY_CHECKOUT=PASS'
+      - name: R27.425 verify source and replay tests with iOS availability correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import sys
+
+          SOURCE = Path('.github/workflows/R27424_iPhone.yml')
+          EXPECTED_BLOB_SHA = '59b7537714c05ac15e6e0e32f0b9daf0987ff9d1'
+          EXPECTED_ARCHIVE_SHA256 = '0e4de5a1945bfdfe05a9c69db795d437f87ca1b217f3af2f1f30a053f4535da8'
+          TARGET = Path('ios/ChampionsOnDevice/CaptureCoordinator.swift')
+          EXPECTED_TITLES = [
+              'Restore R27.424 research source with exact archive digest',
+              'Original Swift pure-state safety regressions',
+              'R27.424 legacy volatile diagnostic assertions (20)',
+              'R27.424 legacy negative-screen and preview-retention tests (25)',
+              'R27.424 independent raw visual diagnostic memory tests (43)',
+              'R27.424 8-frame RAM-only timeline tests (41)',
+              'R27.424 diagnostic orientation and inverse ROI geometry tests (61)',
+              'R27.424 manual ROI calibration geometry and fail-closed tests (135)',
+              'R27.424 manual OCR token, invalidation and display-only safety tests (244)',
+              'R27.424 manual ground truth four-move exact score and fail-closed tests (170)',
+              'R27.424 display-aligned cropped and rotated Vision geometry tests (217)',
+              'R27.424 exact display-pixel crop ROI and fail-closed tests (379)',
+              'R27.424 native output geometry and 48MB bounded history tests (1152)',
+              'iPhoneOS SDK unsigned compile only',
+              'Restore auditable unsigned IPA packager',
+              'Package only research app into unsigned IPA and validate manifest',
+          ]
+
+          def fail(reason):
+              raise RuntimeError('R27.426 FAIL_CLOSED: ' + reason)
+
+          if not SOURCE.is_file():
+              fail('R27.424 SHA-pinned YAML not downloaded')
+          blob_sha = subprocess.check_output(['git', 'hash-object', str(SOURCE)], text=True).strip()
+          if blob_sha != EXPECTED_BLOB_SHA:
+              fail('R27.424 YAML blob changed; refusing unverified replay ' + blob_sha)
+          text = SOURCE.read_text(encoding='utf-8')
+          if EXPECTED_ARCHIVE_SHA256 not in text:
+              fail('expected R27.424 archive hash missing')
+
+          # A strictly pinned YAML source; parse only each original literal `run: |` block.
+          scripts = {}
+          title = None
+          recording = False
+          for line in text.splitlines():
+              if line.startswith('      - name: '):
+                  title = line[len('      - name: '):]
+                  recording = False
+              elif line == '        run: |':
+                  if title is None or title in scripts:
+                      fail('ambiguous original script declaration')
+                  scripts[title] = []
+                  recording = True
+              elif recording:
+                  if line.startswith('          '):
+                      scripts[title].append(line[10:])
+                  elif not line.strip():
+                      scripts[title].append('')
+                  else:
+                      recording = False
+          if any(not scripts.get(name) for name in EXPECTED_TITLES):
+              fail('missing or empty original test/build/package script')
+          positions = [text.find('      - name: '+name+'\n') for name in EXPECTED_TITLES]
+          if positions != sorted(positions) or min(positions) < 0:
+              fail('original step order changed')
+          if len(list(SOURCE.parent.glob('R27424_iPhone.yml'))) != 1:
+              fail('source lookup ambiguity')
+
+          def run_original(name):
+              print('R27.425_REPLAY_BEGIN:', name, flush=True)
+              script = '\n'.join(scripts[name]) + '\n'
+              subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script], check=True)
+              print('R27.425_REPLAY_PASS:', name, flush=True)
+
+          # Preserve the R27.424 source-archive SHA check before applying the iOS-only fix.
+          run_original(EXPECTED_TITLES[0])
+          original_zip = Path('/tmp/r27402-source.zip')
+          if not original_zip.is_file() or hashlib.sha256(original_zip.read_bytes()).hexdigest() != EXPECTED_ARCHIVE_SHA256:
+              fail('embedded source archive SHA256 mismatch')
+          if not TARGET.is_file():
+              fail('CaptureCoordinator.swift absent after authenticated restore')
+          raw = TARGET.read_bytes()
+          original_lines = raw.splitlines(keepends=True)
+          unavailable = {b'config.scalesToFit = true', b'config.preservesAspectRatio = true'}
+          matches = [line for line in original_lines if line.strip() in unavailable]
+          if len(matches) != 2 or {line.strip() for line in matches} != unavailable:
+              fail('expected exactly two iOS-unavailable property assignments')
+          patched = b''.join(line for line in original_lines if line.strip() not in unavailable)
+          if patched == raw or any(token in patched for token in unavailable):
+              fail('patch not complete')
+          TARGET.write_bytes(patched)
+          before = hashlib.sha256(raw).hexdigest()
+          after = hashlib.sha256(patched).hexdigest()
+          print('R27.425_IOS_AVAILABILITY_PATCH=PASS; REMOVED_TWO_MACOS_ONLY_SETTINGS', flush=True)
+          print('R27.424_CAPTURE_COORDINATOR_SHA256='+before, flush=True)
+          print('R27.425_CAPTURE_COORDINATOR_SHA256='+after, flush=True)
+
+          # R27.427 one-frame visual diagnosis: captured 1290 x 2796 portrait pixels
+          # contain sideways LANDSCAPE game content. Correct only the explicitly
+          # requested manual diagnostic preview and four move-name ROIs.
+          # This is a measured ONE-SCREEN calibration, not scene recognition.
+          def replace_exact(file, old, new, count=1):
+              path=Path('ios/ChampionsOnDevice')/file
+              text=path.read_text(encoding='utf-8')
+              if text.count(old)!=count:
+                  fail('R27.427 source anchor changed: '+file+' expected '+str(count)+' matches, found '+str(text.count(old)))
+              path.write_text(text.replace(old,new),encoding='utf-8')
+
+          replace_exact('FrameOrientationSampler.swift',
+              '        return FrameOrientationGeometry.inspect(rgb:rgb)',
+              '''        let proposal=FrameOrientationGeometry.inspect(rgb:rgb)
+                  // Only display/explicit manual OCR; NEVER authorizes advice.
+                  // ScreenCaptureKit delivered a portrait pixel frame for a sideways game.
+                  // If the diagnostic sampling does not find a rotated central strip,
+                  // provisionally render portrait captures LEFT 90 degrees.
+                  // User can override rotation; no automatic game-screen certificate.
+                  if source.height > source.width * 3 / 2 &&
+           proposal.suggestedTurn == .none {
+            return FrameOrientationGeometry.Proposal(
+                crop:proposal.crop,suggestedTurn:.left,
+                sidePillarSuspected:proposal.sidePillarSuspected,
+                status:"縦フレームを診断用に左90°回転（ゲーム画面の認証ではありません）")
+                  }
+                  return proposal''')
+
+          replace_exact('MoveROICalibration.swift',
+              '        static let initial = Layout()',
+              '''        static let initial = Layout()
+                  // R27.427: manual-only ROI measured from ONE sideways Sylveon battle frame.
+                  // Landscape normalized (x,y,w,h) = (.746, .435, .140, .075).
+                  // Four slots spaced (.075 + .046) vertically. No game-state inference.
+                  static let portraitLandscapeDiagnostics = Layout(
+            x:0.746,top:0.435,width:0.140,height:0.075,gap:0.046)''')
+          replace_exact('CaptureCoordinator.swift',
+              '@Published var calibrationLayout = MoveROICalibration.Layout.initial',
+              '@Published var calibrationLayout = MoveROICalibration.Layout.portraitLandscapeDiagnostics')
+          replace_exact('CaptureCoordinator.swift',
+              'calibrationLayout = .initial',
+              'calibrationLayout = .portraitLandscapeDiagnostics',count=2)
+
+          # Check that the four slots actually overlap the supplied screenshot's
+          # move-name text on a normalized LANDSCAPE 2796 x 1290 orientation.
+          # Pixel-space comparison is approximate: no claim of 4/4 OCR accuracy.
+          roi=Path('tests/r27427_roi_runner/main.swift')
+          roi.parent.mkdir(parents=True,exist_ok=True)
+          roi.write_text('''import Foundation
+          let layout=MoveROICalibration.Layout.portraitLandscapeDiagnostics
+          guard let rois=MoveROICalibration.displayed(layout),rois.count==4 else {fatalError("invalid ROI")}
+          let expectedTop:[Double]=[0.435,0.556,0.677,0.798]
+          for i in 0..<4 {
+              let r=rois[i]
+              precondition(abs(r.x-0.746)<0.000001 && abs(r.y-expectedTop[i])<0.000001)
+              precondition(abs(r.width-0.14)<0.000001 && abs(r.height-0.075)<0.000001)
+              precondition(r.valid)
+              let px=(r.x*2796.0,(r.y)*1290.0,r.width*2796.0,r.height*1290.0)
+              precondition(px.0>2080 && px.0<2110 && px.2>385 && px.2<400)
+              precondition(px.3>90 && px.3<100)
+          }
+          guard let mapped=MoveROICalibration.map(layout:layout,
+               crop:FrameOrientationGeometry.full,turn:.left),mapped.count==4 else {fatalError("invalid inverse")}
+          precondition(mapped.allSatisfy { $0.sourceTopLeft.valid && $0.visionBottomLeft.valid })
+          print("R27.427_LANDSCAPE_MOVE_ROI_GEOMETRY_4_OF_4_PASS_NOT_OCR")
+          ''',encoding='utf-8')
+          subprocess.run(['swiftc','ios/ChampionsOnDevice/FrameOrientationGeometry.swift',
+                          'ios/ChampionsOnDevice/MoveROICalibration.swift',str(roi),
+                          '-o','/tmp/r27427-roi-check'],check=True)
+          subprocess.run(['/tmp/r27427-roi-check'],check=True)
+          sampler=Path('ios/ChampionsOnDevice/FrameOrientationSampler.swift').read_text(encoding='utf-8')
+          coordinator=Path('ios/ChampionsOnDevice/CaptureCoordinator.swift').read_text(encoding='utf-8')
+          if sampler.count('source.height > source.width * 3 / 2') != 1 or coordinator.count('portraitLandscapeDiagnostics') != 3:
+              fail('R27.427 runtime orientation or reset references missing')
+          print('R27.427_PORTRAIT_TO_LANDSCAPE_MANUAL_ONLY_PATCH=PASS',flush=True)
+          print('R27.427_4_CORRECT_CROPS_GEOMETRY=PASS_NOT_DEVICE_OCR',flush=True)
+
+          # All previous R27.424 regression suites, with the R27.425 and R27.427
+          # changes both applied. A failure blocks downstream compilation/upload.
+          for name in EXPECTED_TITLES[1:13]:
+              run_original(name)
+          print("R27.428_ORIGINAL_24_FILE_REGRESSIONS_PASS_BEFORE_PP_MUTATION",flush=True)
+          # R27.428: one region containing both move name and current/max PP.
+          # One primary Vision request per move; contrast fallback only if incomplete.
+          # PP is diagnostic only; no legal-action authorization.
+          replace_exact('MoveROICalibration.swift',
+              'x:0.746,top:0.435,width:0.140,height:0.075,gap:0.046',
+              'x:0.746,top:0.435,width:0.185,height:0.075,gap:0.046')
+
+          parser_source = r'''import Foundation
+
+          // R27.428: one OCR patch per move row, with name and PP extracted from
+          // the SAME Vision result. Diagnostic-only; never confers battle legality.
+          struct MovePPPairParser {
+              struct Token {
+                  let text: String
+                  let confidence: Float
+              }
+              struct Result {
+                  let moveName: String?
+                  let moveConfidence: Float?
+                  let currentPP: Int?
+                  let maximumPP: Int?
+                  let ppConfidence: Float?
+                  var isComplete: Bool {
+            moveName != nil && currentPP != nil && maximumPP != nil
+                  }
+              }
+              private static let ppExpression = try! NSRegularExpression(
+                  pattern: #"(?<![0-9])([0-9]{1,2})\s*/\s*([0-9]{1,2})(?![0-9])"#)
+
+              static func parse(_ tokens: [Token]) -> Result? {
+                  guard !tokens.isEmpty, tokens.count <= 16 else { return nil }
+                  // NFKC handles full-width numbers and U+FF0F slash. No guesswork
+                  // from standalone digits, timestamps, or UI ornaments.
+                  let normalized = tokens.map { $0.text.precomposedStringWithCompatibilityMapping }
+                  let joined = normalized.joined(separator: " ")
+                  let matches = ppExpression.matches(in: joined,range:NSRange(joined.startIndex...,in:joined))
+                  var current: Int? = nil
+                  var maximum: Int? = nil
+                  var confidence: Float? = nil
+                  if matches.count == 1,let match=matches.first,
+           let a=Range(match.range(at:1),in:joined),
+           let b=Range(match.range(at:2),in:joined),
+           let c=Int(joined[a]),let m=Int(joined[b]),
+           m > 0 && m <= 99 && c >= 0 && c <= m {
+            current=c;maximum=m
+            // PP confidence is approximate if OCR split the value into tokens.
+            confidence=tokens.map { $0.confidence }.min()
+                  }
+                  var validNames = [(String,Float)]()
+                  for (i,token) in tokens.enumerated() {
+            let str=normalized[i]
+            let range=NSRange(str.startIndex...,in:str)
+            let withoutPP=ppExpression.stringByReplacingMatches(in:str,
+                range:range,withTemplate:"")
+                .trimmingCharacters(in:.whitespacesAndNewlines)
+            guard !withoutPP.isEmpty,
+                  withoutPP.unicodeScalars.contains(where:{ CharacterSet.letters.contains($0) }),
+                  !withoutPP.contains(":"),
+                  !["PP","pp","ＰＰ"].contains(withoutPP),
+                  withoutPP.count <= 40 else { continue }
+            validNames.append((withoutPP,token.confidence))
+                  }
+                  // Ambiguous text fragments may be shown as diagnostic, never certified.
+                  let name=validNames.first?.0
+                  let nameConfidence=validNames.first?.1
+                  if name == nil && current == nil { return nil }
+                  return Result(moveName:name,moveConfidence:nameConfidence,
+            currentPP:current,maximumPP:maximum,ppConfidence:confidence)
+              }
+          }
+          '''
+          parser_file=Path('ios/ChampionsOnDevice/MovePPPairParser.swift')
+          parser_file.parent.mkdir(parents=True,exist_ok=True)
+          if parser_file.exists():
+              fail('R27.428 PP parser already exists unexpectedly')
+          parser_file.write_text(parser_source,encoding='utf-8')
+          print('R27.428_PARSER_SHA256='+hashlib.sha256(parser_file.read_bytes()).hexdigest(),flush=True)
+
+          replace_exact('ManualROIOCRProbe.swift',
+              '''        let width: Int
+                  let height: Int''',
+              '''        let width: Int
+                  let height: Int
+                  let rawCurrentPP: Int?
+                  let rawMaximumPP: Int?
+                  let enhancedCurrentPP: Int?
+                  let enhancedMaximumPP: Int?''')
+          replace_exact('ManualROIOCRProbe.swift',
+              '            let raw=upscaled.flatMap(read)\n            let enhanced=upscaled.flatMap(contrastGray).flatMap(read)\n            results.append(Result(recognized:raw?.0,confidence:raw?.1,\n                processedRecognized:enhanced?.0,processedConfidence:enhanced?.1,\n                crop:ui,width:patch.width,height:patch.height))',
+              '            // One primary Vision request contains move name and PP.\n            let raw=upscaled.flatMap(readCombined)\n            // Retry the same cropped frame with preprocessing only if incomplete.\n            let enhanced=raw?.isComplete == true ? nil :\n                upscaled.flatMap(contrastGray).flatMap(readCombined)\n            results.append(Result(recognized:raw?.moveName,\n                confidence:raw?.moveConfidence,\n                processedRecognized:enhanced?.moveName,\n                processedConfidence:enhanced?.moveConfidence,\n                crop:ui,width:patch.width,height:patch.height,\n                rawCurrentPP:raw?.currentPP,rawMaximumPP:raw?.maximumPP,\n                enhancedCurrentPP:enhanced?.currentPP,\n                enhancedMaximumPP:enhanced?.maximumPP))')
+          old='    private static func read(_ source:CGImage)->(String,Float)? {\n        let request=VNRecognizeTextRequest()\n        request.recognitionLevel = .accurate\n        request.recognitionLanguages = ["ja-JP","en-US"]\n        request.usesLanguageCorrection = false\n        let handler=VNImageRequestHandler(cgImage:source,orientation:.up,options:[:])\n        do {\n            try handler.perform([request])\n            guard let candidate=request.results?.first?.topCandidates(1).first,\n                  let safe=ManualOCRDiagnosticGate.sanitize(candidate.string)\n            else {return nil}\n            return(safe,candidate.confidence)\n        } catch {return nil}\n    }'
+          new='    private static func readCombined(_ source:CGImage)->MovePPPairParser.Result? {\n        let request=VNRecognizeTextRequest()\n        request.recognitionLevel = .accurate\n        request.recognitionLanguages = ["ja-JP","en-US"]\n        request.usesLanguageCorrection = false\n        let handler=VNImageRequestHandler(cgImage:source,orientation:.up,options:[:])\n        do {\n            try handler.perform([request])\n            let tokens=(request.results ?? []).sorted {\n                $0.boundingBox.minX < $1.boundingBox.minX\n            }.compactMap { observation -> MovePPPairParser.Token? in\n                guard let candidate=observation.topCandidates(1).first else{return nil}\n                return MovePPPairParser.Token(text:candidate.string,\n                    confidence:candidate.confidence)\n            }\n            return MovePPPairParser.parse(tokens)\n        } catch {return nil}\n    }'
+          replace_exact('ManualROIOCRProbe.swift',old,new)
+
+
+          replace_exact('CaptureCoordinator.swift',
+              '                    return "枠\\(i+1)：元画像3倍=\\(raw)／グレー高コントラスト3倍=\\(enhanced)（両方未認証）"',
+              '                    let firstPP: String\n                    if let cur=v.rawCurrentPP,let max=v.rawMaximumPP {\n                        firstPP="\\(cur)/\\(max)"\n                    } else { firstPP="未検出" }\n                    let fallbackPP: String\n                    if let cur=v.enhancedCurrentPP,let max=v.enhancedMaximumPP {\n                        fallbackPP="\\(cur)/\\(max)"\n                    } else { fallbackPP="未検出" }\n                    return "枠\\(i+1)：技=\\(raw)／PP=\\(firstPP)｜補正再検=\\(enhanced)／補正PP=\\(fallbackPP)（手動診断・未認証）"')
+          replace_exact('CaptureCoordinator.swift',
+              '''                    "frame \\(frame)・\\(dimensions)・\\(patches)。OCRのみ各3倍拡大（元の画素情報は増えません）。"''',
+              '''                    "frame \\(frame)・\\(dimensions)・\\(patches)。各枠は技名+PPを1回のOCRで診断（不完全な枠のみ再解析）。拡大による新規画素情報なし。"''')
+
+          # Geometry: four wider regions cover move name AND PP, still 4 crops.
+          test_source=Path('tests/r27428_pp_runner/main.swift')
+          test_source.parent.mkdir(parents=True,exist_ok=True)
+          test_source.write_text(r'''import Foundation
+          let examples:[(String,String,Int,Int)]=[
+              ("ハイパーボイス", "12/12",12,12),
+              ("みきり", "8/8",8,8),
+              ("あくび", "12/12",12,12),
+              ("ねがいごと", "8/8",8,8),
+          ]
+          for (name,pp,c,m) in examples {
+              let parsed=MovePPPairParser.parse([.init(text:name,confidence:0.93),.init(text:pp,confidence:0.88)])
+              precondition(parsed?.isComplete == true)
+              precondition(parsed?.moveName == name && parsed?.currentPP == c && parsed?.maximumPP == m)
+          }
+          // PP can appear as separate stacked Vision observations inside one patch.
+          let stacked=MovePPPairParser.parse([.init(text:"ハイパーボイス",confidence:0.95),
+              .init(text:"12",confidence:0.91),.init(text:"/12",confidence:0.93)])
+          precondition(stacked?.isComplete == true && stacked?.currentPP == 12 && stacked?.maximumPP == 12)
+          let zero=MovePPPairParser.parse([.init(text:"あくび",confidence:0.95),.init(text:"0/8",confidence:0.93)])
+          precondition(zero?.isComplete == true && zero?.currentPP == 0 && zero?.maximumPP == 8)
+          let fullwidth=MovePPPairParser.parse([.init(text:"10まんボルト １２／１２",confidence:0.91)])
+          precondition(fullwidth?.isComplete == true && fullwidth?.moveName == "10まんボルト")
+          for malformed in ["15/8", "8/0", "999/999", "17:00", "8/8 9/9", "120/120"] {
+              let x=MovePPPairParser.parse([.init(text:"あくび "+malformed,confidence:0.85)])
+              precondition(x?.currentPP == nil && x?.maximumPP == nil)
+          }
+          let unknown=MovePPPairParser.parse([.init(text:"ねがいごと",confidence:0.95)])
+          precondition(unknown?.moveName == "ねがいごと" && unknown?.currentPP == nil)
+          print("R27.428_COMBINED_NAME_PP_PARSER_4_EXAMPLES_AND_SAFETY_PASS")''',encoding='utf-8')
+          subprocess.run(['swiftc',str(parser_file),str(test_source),'-o','/tmp/r27428-pp-test'],check=True)
+          subprocess.run(['/tmp/r27428-pp-test'],check=True)
+          geom=Path('tests/r27428_roi_runner/main.swift')
+          geom.parent.mkdir(parents=True,exist_ok=True)
+          geom.write_text('''import Foundation
+          let l=MoveROICalibration.Layout.portraitLandscapeDiagnostics
+          guard let rois=MoveROICalibration.displayed(l),rois.count==4 else {fatalError("invalid ROI")}
+          for r in rois {
+              precondition(abs(r.width-0.185)<0.00001)
+              precondition(r.x+r.width<0.99)
+              precondition(r.valid)
+              let px=r.width*2796.0
+              precondition(px>510 && px<525)
+          }
+          print("R27.428_FOUR_COMBINED_MOVE_AND_PP_CROPS_GEOMETRY_PASS")
+          ''',encoding='utf-8')
+          subprocess.run(['swiftc','ios/ChampionsOnDevice/FrameOrientationGeometry.swift',
+              'ios/ChampionsOnDevice/MoveROICalibration.swift',str(geom),
+              '-o','/tmp/r27428-roi-test'],check=True)
+          subprocess.run(['/tmp/r27428-roi-test'],check=True)
+
+          probe=Path('ios/ChampionsOnDevice/ManualROIOCRProbe.swift').read_text(encoding='utf-8')
+          if probe.count('upscaled.flatMap(readCombined)') != 1 or \
+              probe.count('upscaled.flatMap(contrastGray).flatMap(readCombined)') != 1:
+              fail('incorrect one-primary-plus-conditional-fallback OCR wiring')
+          if not parser_file.is_file():
+              fail('combined OCR parser unavailable')
+          print('R27.428_ONE_PATCH_ONE_PRIMARY_OCR_PER_MOVE=PASS',flush=True)
+          print('R27.428_PP_NOT_BATTLE_LEGALITY_CERTIFIED',flush=True)
+          for source_file in Path("ios/ChampionsOnDevice").glob("*.swift"):
+              subprocess.run(["swiftc","-frontend","-parse",str(source_file)],check=True)
+          if len(list(Path("ios/ChampionsOnDevice").glob("*.swift"))) != 25:
+              fail("R27.428 expected exactly 25 Swift app files after PP parser addition")
+          print("R27.428_25_APP_SWIFT_FILES_PARSE_PASS",flush=True)
+          # Real iPhoneOS SDK compile is the previously-failing gate. Fail closed on errors.
+          for name in EXPECTED_TITLES[13:]:
+              run_original(name)
+
+          dist = Path('r27424-dist')
+          ipa = dist/'R27_424_Unsigned_ChampionsResearch.ipa'
+          if not ipa.is_file():
+              fail('expected unsigned IPA absent')
+          report = {
+              'release': 'R27.426',
+              'derived_from': 'R27.424',
+              'original_workflow_blob_sha': blob_sha,
+              'source_retrieval': 'direct pinned public raw download; no checkout',
+              'original_source_zip_sha256': EXPECTED_ARCHIVE_SHA256,
+              'source_file': str(TARGET),
+              'source_sha256_before': before,
+              'source_sha256_after': after,
+              'patch': 'removed exactly config.scalesToFit=true and config.preservesAspectRatio=true (unavailable on iOS)',
+              'original_suites_replayed': len(EXPECTED_TITLES)-4,
+              'iPhoneOS_compile': 'PASS',
+              'unsigned_ipa': ipa.name,
+              'unsigned_ipa_sha256': hashlib.sha256(ipa.read_bytes()).hexdigest(),
+              'app_bundle_version': '424 (unchanged; R27.425 is the CI source hotfix)',
+              'device_install_certified': False,
+              'game_OCR_certified': False,
+              'automatic_battle_advice_enabled': False,
+          }
+          (dist/'R27_425_BUILD_AUDIT.json').write_text(json.dumps(report, sort_keys=True, indent=2)+'\n', encoding='utf-8')
+          roi_report = {
+              'release':'R27.427',
+              'derived_from':'R27.426',
+              'original_pinned_archive_sha256':EXPECTED_ARCHIVE_SHA256,
+              'capture_diagnostic_preview':'portrait frame 90 degree LEFT, if sampler proposal none; manual override remains',
+              'sample_frame':'one screenshot 1290x2796px in capture space',
+              'diagnostic_layout_on_oriented_landscape': {'x':0.746,'top':0.435,'width':0.14,'height':0.075,'gap':0.046},
+              'four_move_roi_geometry_static_check':'PASS',
+              'image_ocr_recognition_accuracy':'UNTESTED - previous device result 0/4',
+              'automatic_move_recommendation_enabled':False,
+              'native_ios_compile':'PASS',
+              'unsigned_ipa_sha256':hashlib.sha256(ipa.read_bytes()).hexdigest(),
+              'app_bundle_version':'424 - same internal version as source; derived diagnostic is R27.427',
+              'device_install_certified':False
+          }
+          (dist/'R27_427_ORIENTATION_ROI_AUDIT.json').write_text(json.dumps(roi_report,ensure_ascii=False,sort_keys=True,indent=2)+'\n',encoding='utf-8')
+          pp_report={'release':'R27.428','parent':'R27.427','region_count':4,
+              'fields_per_region':['move_name','current_pp','maximum_pp'],
+              'normalized_box':{'x':0.746,'top':0.435,'width':0.185,'height':0.075,'gap':0.046},
+              'primary_vision_requests_per_frame':4,
+              'maximum_with_conditional_fallback':8,
+              'pp_parser_static_test':'PASS','real_device_pp_accuracy':'UNTESTED',
+              'move_recommendations_enabled':False,'pp_not_legal_action_source':True,
+              'signed':False,'device_installed':False}
+          (dist/'R27_428_COMBINED_NAME_PP_OCR_AUDIT.json').write_text(
+              json.dumps(pp_report,ensure_ascii=False,sort_keys=True,indent=2)+'\n',encoding='utf-8')
+          print('R27.428_IPHONEOS_UNSIGNED_BUILD_AND_COMBINED_OCR_WIRING_PASS; DEVICE_NAME_PP_ACCURACY_UNCERTIFIED', flush=True)
+          PY
+      - name: Upload R27.428 combined move and PP unsigned IPA diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: r27428-combined-name-pp-ocr-unsigned-ipa
+          path: r27424-dist/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Keep certification boundaries explicit
+        shell: bash
+        run: |
+          echo 'R27.428: 4 COMBINED NAME-PP CROPS; ONE PRIMARY OCR EACH; UNTRUSTED PP; NOT SIGNED; NO AUTOMATIC ACTIONS; STAGE UNCHANGED'
