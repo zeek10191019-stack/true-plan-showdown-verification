@@ -1,0 +1,168 @@
+# R27.425: iPhoneOS availability fix, derived from SHA-pinned R27.424 public research source.
+# Read-only diagnostics only; no private Battle AI, Apple credentials, signing, live advice, or game certification.
+# Upload under .github/workflows/R27425_iPhone.yml; start manually on the public repository only.
+name: R27.425 iPhone SDK Availability Fix and Unsigned IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r27425-iphone-ipa-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  iphoneos-unsigned:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event_name == 'workflow_dispatch' && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Require public repository and load original workflow
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: R27.425 verify source and replay tests with iOS availability correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import sys
+
+          SOURCE = Path('.github/workflows/R27424_iPhone.yml')
+          EXPECTED_BLOB_SHA = '59b7537714c05ac15e6e0e32f0b9daf0987ff9d1'
+          EXPECTED_ARCHIVE_SHA256 = '0e4de5a1945bfdfe05a9c69db795d437f87ca1b217f3af2f1f30a053f4535da8'
+          TARGET = Path('ios/ChampionsOnDevice/CaptureCoordinator.swift')
+          EXPECTED_TITLES = [
+              'Restore R27.424 research source with exact archive digest',
+              'Original Swift pure-state safety regressions',
+              'R27.424 legacy volatile diagnostic assertions (20)',
+              'R27.424 legacy negative-screen and preview-retention tests (25)',
+              'R27.424 independent raw visual diagnostic memory tests (43)',
+              'R27.424 8-frame RAM-only timeline tests (41)',
+              'R27.424 diagnostic orientation and inverse ROI geometry tests (61)',
+              'R27.424 manual ROI calibration geometry and fail-closed tests (135)',
+              'R27.424 manual OCR token, invalidation and display-only safety tests (244)',
+              'R27.424 manual ground truth four-move exact score and fail-closed tests (170)',
+              'R27.424 display-aligned cropped and rotated Vision geometry tests (217)',
+              'R27.424 exact display-pixel crop ROI and fail-closed tests (379)',
+              'R27.424 native output geometry and 48MB bounded history tests (1152)',
+              'iPhoneOS SDK unsigned compile only',
+              'Restore auditable unsigned IPA packager',
+              'Package only research app into unsigned IPA and validate manifest',
+          ]
+
+          def fail(reason):
+              raise RuntimeError('R27.425 FAIL_CLOSED: ' + reason)
+
+          if not SOURCE.is_file():
+              fail('R27.424 YAML not found in checkout')
+          blob_sha = subprocess.check_output(['git', 'hash-object', str(SOURCE)], text=True).strip()
+          if blob_sha != EXPECTED_BLOB_SHA:
+              fail('R27.424 YAML blob changed; refusing unverified replay ' + blob_sha)
+          text = SOURCE.read_text(encoding='utf-8')
+          if EXPECTED_ARCHIVE_SHA256 not in text:
+              fail('expected R27.424 archive hash missing')
+
+          # A strictly pinned YAML source; parse only each original literal `run: |` block.
+          scripts = {}
+          title = None
+          recording = False
+          for line in text.splitlines():
+              if line.startswith('      - name: '):
+                  title = line[len('      - name: '):]
+                  recording = False
+              elif line == '        run: |':
+                  if title is None or title in scripts:
+                      fail('ambiguous original script declaration')
+                  scripts[title] = []
+                  recording = True
+              elif recording:
+                  if line.startswith('          '):
+                      scripts[title].append(line[10:])
+                  elif not line.strip():
+                      scripts[title].append('')
+                  else:
+                      recording = False
+          if any(not scripts.get(name) for name in EXPECTED_TITLES):
+              fail('missing or empty original test/build/package script')
+          positions = [text.find('      - name: '+name+'\n') for name in EXPECTED_TITLES]
+          if positions != sorted(positions) or min(positions) < 0:
+              fail('original step order changed')
+          if len(list(SOURCE.parent.glob('R27424_iPhone.yml'))) != 1:
+              fail('source lookup ambiguity')
+
+          def run_original(name):
+              print('R27.425_REPLAY_BEGIN:', name, flush=True)
+              script = '\n'.join(scripts[name]) + '\n'
+              subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script], check=True)
+              print('R27.425_REPLAY_PASS:', name, flush=True)
+
+          # Preserve the R27.424 source-archive SHA check before applying the iOS-only fix.
+          run_original(EXPECTED_TITLES[0])
+          original_zip = Path('/tmp/r27402-source.zip')
+          if not original_zip.is_file() or hashlib.sha256(original_zip.read_bytes()).hexdigest() != EXPECTED_ARCHIVE_SHA256:
+              fail('embedded source archive SHA256 mismatch')
+          if not TARGET.is_file():
+              fail('CaptureCoordinator.swift absent after authenticated restore')
+          raw = TARGET.read_bytes()
+          original_lines = raw.splitlines(keepends=True)
+          unavailable = {b'config.scalesToFit = true', b'config.preservesAspectRatio = true'}
+          matches = [line for line in original_lines if line.strip() in unavailable]
+          if len(matches) != 2 or {line.strip() for line in matches} != unavailable:
+              fail('expected exactly two iOS-unavailable property assignments')
+          patched = b''.join(line for line in original_lines if line.strip() not in unavailable)
+          if patched == raw or any(token in patched for token in unavailable):
+              fail('patch not complete')
+          TARGET.write_bytes(patched)
+          before = hashlib.sha256(raw).hexdigest()
+          after = hashlib.sha256(patched).hexdigest()
+          print('R27.425_IOS_AVAILABILITY_PATCH=PASS; REMOVED_TWO_MACOS_ONLY_SETTINGS', flush=True)
+          print('R27.424_CAPTURE_COORDINATOR_SHA256='+before, flush=True)
+          print('R27.425_CAPTURE_COORDINATOR_SHA256='+after, flush=True)
+
+          # All previous R27.424 regression suites, now against the corrected app source.
+          for name in EXPECTED_TITLES[1:13]:
+              run_original(name)
+          # Real iPhoneOS SDK compile is the previously-failing gate. Fail closed on errors.
+          for name in EXPECTED_TITLES[13:]:
+              run_original(name)
+
+          dist = Path('r27424-dist')
+          ipa = dist/'R27_424_Unsigned_ChampionsResearch.ipa'
+          if not ipa.is_file():
+              fail('expected unsigned IPA absent')
+          report = {
+              'release': 'R27.425',
+              'derived_from': 'R27.424',
+              'original_workflow_blob_sha': blob_sha,
+              'original_source_zip_sha256': EXPECTED_ARCHIVE_SHA256,
+              'source_file': str(TARGET),
+              'source_sha256_before': before,
+              'source_sha256_after': after,
+              'patch': 'removed exactly config.scalesToFit=true and config.preservesAspectRatio=true (unavailable on iOS)',
+              'original_suites_replayed': len(EXPECTED_TITLES)-4,
+              'iPhoneOS_compile': 'PASS',
+              'unsigned_ipa': ipa.name,
+              'unsigned_ipa_sha256': hashlib.sha256(ipa.read_bytes()).hexdigest(),
+              'app_bundle_version': '424 (unchanged; R27.425 is the CI source hotfix)',
+              'device_install_certified': False,
+              'game_OCR_certified': False,
+              'automatic_battle_advice_enabled': False,
+          }
+          (dist/'R27_425_BUILD_AUDIT.json').write_text(json.dumps(report, sort_keys=True, indent=2)+'\n', encoding='utf-8')
+          print('R27.425_IPHONEOS_UNSIGNED_COMPILE_AND_PACKAGE=PASS; DEVICE_OCR_UNCERTIFIED', flush=True)
+          PY
+      - name: Upload R27.425 corrected unsigned IPA diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: r27425-ios-availability-fix-unsigned-ipa
+          path: r27424-dist/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Keep certification boundaries explicit
+        shell: bash
+        run: |
+          echo 'R27.425: COMPILE AND IPA PACKAGE ONLY; NOT SIGNED; NOT INSTALLED ON DEVICE; GAME FOUR-MOVE OCR NOT CERTIFIED; STAGE UNCHANGED'
