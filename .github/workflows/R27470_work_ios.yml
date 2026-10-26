@@ -1,0 +1,184 @@
+# R27.470 integrates R27.469 strict HP safety into the R27.467 iOS research app.
+# Exact fixed R27.465 public source carrier + bounded R27.470 patch archive.
+# No repository checkout, signing, paid API, auto trigger, or live battle recommendations.
+# WARNING: hosted macOS/Xcode Actions can incur charges; explicit user approval required.
+name: R27470 Champions Research iPhoneOS HP fail-closed integration
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r27470-ios-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - name: Restore pinned R27465 research source and verify byte closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import base64, hashlib, io, json, re, stat, zipfile
+          from pathlib import Path, PurePosixPath
+          import urllib.request
+          # Fixed commit and blob SHA-1 prevent moving-branch or substituted source.
+          source_url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/bd0ffdbe0ce56146defc1e20df90a9338e79ed93/.github/workflows/R27465_work_ios.yml'
+          req=urllib.request.Request(source_url, headers={'User-Agent':'TruePlan-R27467-pinned-source-fetch','Accept':'text/plain'})
+          with urllib.request.urlopen(req, timeout=40) as response:
+              carrier_bytes=response.read(300001)
+          assert 100000<len(carrier_bytes)<=300000, 'FAIL_CLOSED: abnormal source carrier length'
+          carrier_hash=hashlib.sha1(b'blob '+str(len(carrier_bytes)).encode()+b'\0'+carrier_bytes).hexdigest()
+          assert carrier_hash=='24d8686077ba77ff44d970250ec95a9464ea3721', 'FAIL_CLOSED: carrier git blob SHA-1 mismatch'
+          content=carrier_bytes.decode('utf-8')
+          print('R27467_CARRIER_GIT_BLOB_SHA1='+carrier_hash)
+          matches=re.findall(r"source=base64\.b64decode\('([A-Za-z0-9+/=]+)'\)",content)
+          assert len(matches)==1, 'FAIL_CLOSED: embedded archive not unique'
+          blob=base64.b64decode(matches[0],validate=True)
+          expected='9c00cc7728ccb18ecab2e19dbc0d76db4185e1c8a67d15fb037500aad17e8089'
+          assert hashlib.sha256(blob).hexdigest()==expected, 'FAIL_CLOSED: source SHA-256 mismatch'
+          with zipfile.ZipFile(io.BytesIO(blob)) as z:
+              assert z.testzip() is None, 'FAIL_CLOSED: embedded archive CRC mismatch'
+              members=z.infolist()
+              assert len(members)>40 and len(members)<100, 'FAIL_CLOSED: abnormal archive count'
+              assert sum(m.file_size for m in members)<25000000, 'FAIL_CLOSED: excessive source size'
+              seen=set()
+              for m in members:
+                  p=PurePosixPath(m.filename)
+                  assert m.filename and not p.is_absolute() and '..' not in p.parts, 'FAIL_CLOSED: path escape'
+                  assert str(p) not in seen, 'FAIL_CLOSED: duplicate archive filename'
+                  seen.add(str(p))
+                  assert not stat.S_ISLNK((m.external_attr>>16)&0xFFFF), 'FAIL_CLOSED: source symlink'
+              z.extractall('.')
+          manifest=json.loads(Path('PUBLIC_SOURCE_SHA256.json').read_text())
+          assert len(manifest)==43, 'FAIL_CLOSED: source manifest count'
+          for path,expected_file_hash in manifest.items():
+              assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==expected_file_hash,path
+          print('R27467_PINNED_R27465_SOURCE_SHA256='+expected)
+          print('R27467_SOURCE_CLOSURE=PASS, files='+str(len(manifest)))
+          PYCODE
+      - name: Integrate strict HP safety into iOS research app
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import base64,hashlib,io,stat,subprocess,sys,zipfile
+          from pathlib import Path, PurePosixPath
+          payload=base64.b64decode('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',validate=True)
+          assert hashlib.sha256(payload).hexdigest()=='4f1f88a14403f530f0b5f1acff4593d26b000cadc1a20b606b09b6c3fc816ad6', 'FAIL_CLOSED: R27470 addon ZIP SHA mismatch'
+          allow={'R27470_ADDON/src/ResearchHPIntegrationGate.swift','R27470_ADDON/src/ResearchHPStrictCandidate.swift','R27470_ADDON/tests/fixture.swift','R27470_ADDON/tests/guard/main.swift','R27470_ADDON/tests/integration/main.swift','R27470_ADDON/tools/integrate_r27470.py'}
+          with zipfile.ZipFile(io.BytesIO(payload)) as z:
+              assert z.testzip() is None, 'FAIL_CLOSED: addon ZIP CRC'
+              names=z.namelist()
+              assert len(names)==len(allow) and set(names)==allow, 'FAIL_CLOSED: unexpected addon members'
+              for m in z.infolist():
+                  p=PurePosixPath(m.filename)
+                  assert not p.is_absolute() and '..' not in p.parts, 'FAIL_CLOSED: escaped addon path'
+                  assert not stat.S_ISLNK((m.external_attr>>16)&0xFFFF), 'FAIL_CLOSED: addon symlink'
+                  assert m.file_size<1000000, 'FAIL_CLOSED: addon file too large'
+              z.extractall('.')
+          subprocess.run([sys.executable,'R27470_ADDON/tools/integrate_r27470.py'],check=True)
+          ios=Path('ios/ChampionsOnDevice')
+          files=sorted(ios.glob('*.swift'))
+          assert len(files)==37,len(files)
+          body=(ios/'ResearchBattleVision.swift').read_text(encoding='utf-8')
+          assert body.count('ResearchHPCandidateConsensus.inspectStrict(')==1
+          assert 'ownerROIAttested: false' in body and 'frameAgeMs: nil' in body
+          assert 'ResearchHPCandidateConsensus.inspect([primary,enlarged' not in body
+          print('R27470_SOURCE_PATCH_SHA256=4f1f88a14403f530f0b5f1acff4593d26b000cadc1a20b606b09b6c3fc816ad6')
+          print('R27470_APP_SOURCE_PATCH=PASS, files=37')
+          PYCODE
+      - name: Native tests and Swift parsing
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift native_wire_tests/main.swift -o "$RUNNER_TEMP/wire"
+          "$RUNNER_TEMP/wire" | grep -E 'SWIFT_RESEARCH_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/FrameEvidenceExportGate.swift native_evidence_tests/main.swift -o "$RUNNER_TEMP/evidence"
+          "$RUNNER_TEMP/evidence" | grep -E 'SWIFT_EVIDENCE_EXPORT_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchOwnerGate.swift ios/ChampionsOnDevice/ResearchMoveCandidates.swift ios/ChampionsOnDevice/ResearchScreenClassifier.swift ios/ChampionsOnDevice/ResearchNameAndGenderCandidates.swift ios/ChampionsOnDevice/ResearchHPCandidateConsensus.swift native_regression_tests/main.swift -o "$RUNNER_TEMP/regression"
+          "$RUNNER_TEMP/regression" | grep -E 'R27460_REGRESSION_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchOwnerGate.swift ios/ChampionsOnDevice/ResearchScreenClassifier.swift ios/ChampionsOnDevice/ResearchNameAndGenderCandidates.swift ios/ChampionsOnDevice/ResearchGenderGlyphProbe.swift native_gender_tests/main.swift -o "$RUNNER_TEMP/gender"
+          "$RUNNER_TEMP/gender" | grep -E 'R27465_LOCAL_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/FrameEvidenceExportGate.swift native_export_budget_tests/main.swift -o "$RUNNER_TEMP/exportbudget"
+          "$RUNNER_TEMP/exportbudget" | grep -E 'R27459_EXPORT_BUDGET_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/ResearchHPStrictCandidate.swift R27470_ADDON/tests/guard/main.swift -o "$RUNNER_TEMP/hp_safety"
+          "$RUNNER_TEMP/hp_safety" | grep -E 'R27469_SWIFT_HP_SAFETY_ASSERTIONS_PASS=34'
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchOwnerGate.swift ios/ChampionsOnDevice/ResearchHPCandidateConsensus.swift ios/ChampionsOnDevice/ResearchHPStrictCandidate.swift ios/ChampionsOnDevice/ResearchHPIntegrationGate.swift R27470_ADDON/tests/integration/main.swift -o "$RUNNER_TEMP/hp_integration"
+          "$RUNNER_TEMP/hp_integration" | grep -E 'R27470_SWIFT_INTEGRATION_ASSERTIONS_PASS=22'
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import subprocess
+          files=sorted(Path('ios/ChampionsOnDevice').glob('*.swift'))
+          assert len(files)==37,len(files)
+          for f in files:
+              subprocess.run(['swiftc','-frontend','-parse',str(f)],check=True)
+          print('R27470_SWIFT_PARSE_PASS='+str(len(files)))
+          PYCODE
+      - name: Build unsigned iPhoneOS app and repair IPA packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          test -d "$sdk/System/Library/Frameworks/ScreenCaptureKit.framework"
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+          xcodegen generate --spec ios/project.yml --project ios
+          if ! xcodebuild -project ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch \
+                 -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+                 ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+                 -derivedDataPath "$RUNNER_TEMP/r27470-derived" build > "$RUNNER_TEMP/r27470-build.log" 2>&1; then
+            grep -E 'error:|BUILD FAILED' "$RUNNER_TEMP/r27470-build.log" | tail -40 || true
+            exit 1
+          fi
+          echo 'R27470_IPHONEOS_UNSIGNED_COMPILE=PASS'
+          python3 - <<'PYCODE'
+          import hashlib, os, plistlib, subprocess, zipfile
+          from pathlib import Path, PurePosixPath
+          app=Path(os.environ['RUNNER_TEMP'])/'r27470-derived/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app'
+          assert app.is_dir(),'FAIL_CLOSED: compiled app missing'
+          plist=app/'Info.plist'
+          assert plist.is_file(),'FAIL_CLOSED: missing Info.plist'
+          info=plistlib.loads(plist.read_bytes())
+          exe_name=info.get('CFBundleExecutable')
+          assert isinstance(exe_name,str) and exe_name and '/' not in exe_name and '\\' not in exe_name,'FAIL_CLOSED: invalid executable name'
+          exe=app/exe_name
+          assert exe.is_file(),'FAIL_CLOSED: missing executable'
+          assert 'arm64' in subprocess.check_output(['xcrun','lipo','-archs',str(exe)],text=True).split(),'FAIL_CLOSED: no arm64'
+          assert not (app/'_CodeSignature').exists(),'FAIL_CLOSED: signed source not expected'
+          info['CFBundleVersion']='470'
+          info['CFBundleShortVersionString']='0.4.70'
+          plist.write_bytes(plistlib.dumps(info,sort_keys=False))
+          assert plistlib.loads(plist.read_bytes())['CFBundleVersion']=='470','FAIL_CLOSED: version write failed'
+          ipa=Path('dist/R27_470_Unsigned_ChampionsResearch.ipa')
+          ipa.parent.mkdir(parents=True,exist_ok=True)
+          entries=sorted(app.rglob('*'))
+          assert entries and not any(p.is_symlink() for p in entries),'FAIL_CLOSED: symlink not supported'
+          files=[p for p in entries if p.is_file()]
+          assert len(files)>1,'FAIL_CLOSED: incomplete app'
+          with zipfile.ZipFile(ipa,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+              for p in files:
+                  z.write(p,arcname=str(PurePosixPath('Payload')/app.name/p.relative_to(app).as_posix()))
+          with zipfile.ZipFile(ipa) as z:
+              assert z.testzip() is None,'FAIL_CLOSED: IPA CRC'
+              plist_bytes=z.read('Payload/ChampionsOnDeviceResearch.app/Info.plist')
+              archived_plist=plistlib.loads(plist_bytes)
+              assert archived_plist['CFBundleVersion']=='470'
+              assert archived_plist['CFBundleShortVersionString']=='0.4.70'
+              assert 'Payload/ChampionsOnDeviceResearch.app/'+exe_name in z.namelist()
+          size=ipa.stat().st_size
+          assert 1000<size<50000000,'FAIL_CLOSED: implausible IPA size'
+          print('R27470_IPA_PACKAGING=PASS')
+          print('R27470_IPA_SHA256='+hashlib.sha256(ipa.read_bytes()).hexdigest())
+          print('R27470_IPA_BYTES='+str(size))
+          print('RESEARCH_ONLY_FORMAL_HOLD_STAGE1_5_560_NATIVE33_0_EXACT34_0')
+          PYCODE
+      - name: Upload downloadable unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: R27470_UNSIGNED_RESEARCH_IPA
+          path: dist/R27_470_Unsigned_ChampionsResearch.ipa
+          if-no-files-found: error
+          retention-days: 3
