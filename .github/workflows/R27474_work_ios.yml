@@ -1,0 +1,276 @@
+# R27.474: pinned R27.472 path + final research-only provenance/clock/replay publication fence.
+# Zero actions/checkout. No signing, automatic start, private code, or live recommendations.
+# Manual only. macOS GitHub Actions might charge: user must approve before running.
+name: R27474 Champions Research iPhoneOS selected-frame continuity history
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r27474-ios-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - name: Restore pinned R27465 research source and verify byte closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import base64, hashlib, io, json, re, stat, zipfile
+          from pathlib import Path, PurePosixPath
+          import urllib.request
+          # Fixed commit and blob SHA-1 prevent moving-branch or substituted source.
+          source_url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/bd0ffdbe0ce56146defc1e20df90a9338e79ed93/.github/workflows/R27465_work_ios.yml'
+          req=urllib.request.Request(source_url, headers={'User-Agent':'TruePlan-R27467-pinned-source-fetch','Accept':'text/plain'})
+          with urllib.request.urlopen(req, timeout=40) as response:
+              carrier_bytes=response.read(300001)
+          assert 100000<len(carrier_bytes)<=300000, 'FAIL_CLOSED: abnormal source carrier length'
+          carrier_hash=hashlib.sha1(b'blob '+str(len(carrier_bytes)).encode()+b'\0'+carrier_bytes).hexdigest()
+          assert carrier_hash=='24d8686077ba77ff44d970250ec95a9464ea3721', 'FAIL_CLOSED: carrier git blob SHA-1 mismatch'
+          content=carrier_bytes.decode('utf-8')
+          print('R27467_CARRIER_GIT_BLOB_SHA1='+carrier_hash)
+          matches=re.findall(r"source=base64\.b64decode\('([A-Za-z0-9+/=]+)'\)",content)
+          assert len(matches)==1, 'FAIL_CLOSED: embedded archive not unique'
+          blob=base64.b64decode(matches[0],validate=True)
+          expected='9c00cc7728ccb18ecab2e19dbc0d76db4185e1c8a67d15fb037500aad17e8089'
+          assert hashlib.sha256(blob).hexdigest()==expected, 'FAIL_CLOSED: source SHA-256 mismatch'
+          with zipfile.ZipFile(io.BytesIO(blob)) as z:
+              assert z.testzip() is None, 'FAIL_CLOSED: embedded archive CRC mismatch'
+              members=z.infolist()
+              assert len(members)>40 and len(members)<100, 'FAIL_CLOSED: abnormal archive count'
+              assert sum(m.file_size for m in members)<25000000, 'FAIL_CLOSED: excessive source size'
+              seen=set()
+              for m in members:
+                  p=PurePosixPath(m.filename)
+                  assert m.filename and not p.is_absolute() and '..' not in p.parts, 'FAIL_CLOSED: path escape'
+                  assert str(p) not in seen, 'FAIL_CLOSED: duplicate archive filename'
+                  seen.add(str(p))
+                  assert not stat.S_ISLNK((m.external_attr>>16)&0xFFFF), 'FAIL_CLOSED: source symlink'
+              z.extractall('.')
+          manifest=json.loads(Path('PUBLIC_SOURCE_SHA256.json').read_text())
+          assert len(manifest)==43, 'FAIL_CLOSED: source manifest count'
+          for path,expected_file_hash in manifest.items():
+              assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==expected_file_hash,path
+          print('R27467_PINNED_R27465_SOURCE_SHA256='+expected)
+          print('R27467_SOURCE_CLOSURE=PASS, files='+str(len(manifest)))
+          PYCODE
+      - name: Integrate strict HP safety into iOS research app
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import base64,hashlib,io,stat,subprocess,sys,zipfile
+          from pathlib import Path, PurePosixPath
+          payload=base64.b64decode('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',validate=True)
+          assert hashlib.sha256(payload).hexdigest()=='4f1f88a14403f530f0b5f1acff4593d26b000cadc1a20b606b09b6c3fc816ad6', 'FAIL_CLOSED: R27470 addon ZIP SHA mismatch'
+          allow={'R27470_ADDON/src/ResearchHPIntegrationGate.swift','R27470_ADDON/src/ResearchHPStrictCandidate.swift','R27470_ADDON/tests/fixture.swift','R27470_ADDON/tests/guard/main.swift','R27470_ADDON/tests/integration/main.swift','R27470_ADDON/tools/integrate_r27470.py'}
+          with zipfile.ZipFile(io.BytesIO(payload)) as z:
+              assert z.testzip() is None, 'FAIL_CLOSED: addon ZIP CRC'
+              names=z.namelist()
+              assert len(names)==len(allow) and set(names)==allow, 'FAIL_CLOSED: unexpected addon members'
+              for m in z.infolist():
+                  p=PurePosixPath(m.filename)
+                  assert not p.is_absolute() and '..' not in p.parts, 'FAIL_CLOSED: escaped addon path'
+                  assert not stat.S_ISLNK((m.external_attr>>16)&0xFFFF), 'FAIL_CLOSED: addon symlink'
+                  assert m.file_size<1000000, 'FAIL_CLOSED: addon file too large'
+              z.extractall('.')
+          subprocess.run([sys.executable,'R27470_ADDON/tools/integrate_r27470.py'],check=True)
+          ios=Path('ios/ChampionsOnDevice')
+          files=sorted(ios.glob('*.swift'))
+          assert len(files)==37,len(files)
+          body=(ios/'ResearchBattleVision.swift').read_text(encoding='utf-8')
+          assert body.count('ResearchHPCandidateConsensus.inspectStrict(')==1
+          assert 'ownerROIAttested: false' in body and 'frameAgeMs: nil' in body
+          assert 'ResearchHPCandidateConsensus.inspect([primary,enlarged' not in body
+          print('R27470_SOURCE_PATCH_SHA256=4f1f88a14403f530f0b5f1acff4593d26b000cadc1a20b606b09b6c3fc816ad6')
+          print('R27470_APP_SOURCE_PATCH=PASS, files=37')
+          PYCODE
+      - name: Add own HP split digit diagnostic (R27.472)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import base64,hashlib,io,stat,subprocess,sys,zipfile
+          from pathlib import Path,PurePosixPath
+          payload=base64.b64decode('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',validate=True)
+          assert hashlib.sha256(payload).hexdigest()=='a170685fd5cc1fff7a590452b311d99a70bac2c9b7b9810a27b1d10943613262', 'FAIL_CLOSED: R27472 ZIP SHA mismatch'
+          allow={'R27472_ADDON/src/ResearchHPSplitDiagnostic.swift','R27472_ADDON/tests/ResearchReadingFixture.swift','R27472_ADDON/tests/main.swift','R27472_ADDON/tools/integrate_r27472.py'}
+          with zipfile.ZipFile(io.BytesIO(payload)) as z:
+              assert z.testzip() is None, 'FAIL_CLOSED: R27472 ZIP CRC'
+              members=z.infolist()
+              assert len(members)==len(allow) and set(m.filename for m in members)==allow, 'FAIL_CLOSED: R27472 ZIP members'
+              for m in members:
+                  path=PurePosixPath(m.filename)
+                  assert not path.is_absolute() and '..' not in path.parts and not stat.S_ISLNK((m.external_attr>>16)&0xffff)
+                  assert m.file_size<1000000
+              z.extractall('.')
+          subprocess.run([sys.executable,'R27472_ADDON/tools/integrate_r27472.py'],check=True)
+          ios=Path('ios/ChampionsOnDevice')
+          assert len(list(ios.glob('*.swift')))==38
+          body=(ios/'ResearchBattleVision.swift').read_text(encoding='utf-8')
+          assert body.count('ResearchHPCandidateConsensus.inspectStrict(')==1
+          assert body.count('ResearchHPSplitDiagnostic.inspectOwn(')==1
+          assert 'ownerROIAttested: false' in body and 'frameAgeMs: nil' in body
+          assert 'productionEnabled = false' in (ios/'ResearchHPSplitDiagnostic.swift').read_text()
+          print('R27472_PATCH_SOURCE_SHA256=a170685fd5cc1fff7a590452b311d99a70bac2c9b7b9810a27b1d10943613262')
+          print('R27472_APP_SOURCE_PATCH=PASS, swift_files=38')
+          PYCODE
+      - name: Add observation freshness and provenance fence (R27.473)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import base64,hashlib,io,stat,subprocess,sys,zipfile
+          from pathlib import Path,PurePosixPath
+          payload=base64.b64decode('UEsDBBQAAAAIAGlUWl1syB8tYgYAAKsTAAAvAAAAUjI3NDczX0FERE9OL3NyYy9SZXNlYXJjaE9ic2VydmF0aW9uRmVuY2Uuc3dpZnSVWG1zGjcQ/u5fsfaH1GTsi9umyQwxyWDAEyY2eAC702k7WNwtoPpOoicdDs34v3ele+NewPZ9sqXd1bOr3WdX8GAlQw2XMhIe01yKg4N372D0y0fn/cdfm7AK5RoFEy6eskcWIsiZwnBtJWGOtO7AQEJAUhCiK4MAEzsnIKQxNWNa+3iqNNMILNJLGfL/EgkmPBgMgc24z/UGtAQXQ83nG9qBYWcEo2Ef5KPA0DGmJkuEFXMfUP+kwGUrHREgY4NORr7SoHmAdFCwUmCwBlJILQV3T11fug/QaQ+6/W570hs3jTn8N2L2XDmHWMCTAeNCQRApDTOyrTXZQw8UrlhIDvgb50DpMHI1jFAhC93lZcgCHJtDm9Aji5rNfIQfB0Cfjzrxv99twliHXCyyDVxJd9mEvtDZ0tzYMqLbi3HE0btWdv3D+2zHul3YeTqohddbc8/cVUcKjd/1FjpFu9dpmDomCO3E5yZcSOlngqsQ11xGdFLV8S8lZychE4qbK95hjC3wIvIWqHPkds8kCXcT3+JTujhnka+htdejY6tuTexxaM58hSeZaO6S4H6+vNuHkn7Bi59/OzuzOw1zCSiioB7wHYYed3WaDclVuEwhcLGmfPRsSL9K3yOfj/qDu/ZVvzsdT9rXN9Ovw6vuUa4QiQdB1WG97NrUTdVuB98Gw98H087VsPNt2h1et/uDsjanyleKU7ZaA9mJ1zfD8bh/cdVLtEtqdEc+WpdSDcJGwpej9nWvIkxiVnaEK59tMg0jGiuMejdX7T/KerY2RtL3ZyxH1rsZdr5OR8Orq4t2FZetnbJKcsYOlYRCrPtlzU77ZnI7SmOwy0I5V27FGkM+5+ildi7akwlFZzJqD8b9SX84mN4O7nqj/mW/1611oUOExolCMbeVe5Ix2JaVo+eqnhZNBeVFv05zcF+GZtIe+pplhRrXOrFnF30+w5gUDYnfp9yO3v0J3KfY6W8Zwj31EY8AUojuYe6zhVOpkmHeWC4NjATvFiXkNnrCkKyJiy3JAnnMI+ECUiURFePxNA5qHWvlhVz53JhVmvtZtAVOiaViAoDTzy+4CPNZrEvKFMIZIlNS7L+TOsjT+ILS6yFUxGavwGC+PZLHWbLEAE/yfLB/NDJDT9lfi4iFHhzayDtp/3OI74KAKK+zpFbqagzVMSd/ncclJ4Klvo6qLbwBPvpcoGo4XPWCld6UfY6tWoKAzy04O0lWkt4Jn2mpViXvo1YmWc17aJ1mkgjOFtXHynUb5y34cEYfIOVkKcIhEtOI+K6dMtHXxZDP4+ZvWSQ9Le1YJeNJvEk2j3YaPWOhEC3z/55Ymc+IlKNl1oqxqnPzFa4W3U1cLqYMHLZg26maw0jnMI3OrsZdo1bBuZ/IGxUDReRPu2KRuRTfwPnWbfwoAqh0vEbpjBpzrdaWvTdvSoWQ7Kb/viAINd36Oc9fjer8taAqff2FkNKs2D0QEri64ytscV4uiBeg3jVaPJtJNVRAzXaAlI6gopk21EmDH7V760L24sneLtRtXZ/xgPxAtSQmVfC4RLFtTS+Rh4TXt91WLfkKlkzRe808elDQIOrhit5xKDT1dmN/5nO1RM8pUfwLYvwcF9bPsI36MFxIvQTT2jF+4NEAS9W6xk9k8x+kwMTPuNBESzEf3s5wLkN8m0XOvG+3AyGBrSX3gJ6v4dyXj/Y1KXDBjFUz4EPAFYWT5uQ5d224yjGotpFWNYWe7QjVWbwuBMnbCVrVU08rh5ZwGr3zVm3jitGVuKAw5p8Y9W1GSmT3DQ4Fb7Mpwtk15G4NFuasg9jzdNocSMDvXGnzZEoPvbCcfceV+S3C42whpDITYMA2oLgfZ6+FyURqhwYu6kczM7ZS+qYoKONNKpR+q6ALWYiAzDiV+ZL5/giZR2jUTSjXFgLz4ynOrjbhzxRmIvi3ncnMM3grEVJxhwyOybyab+xF2FVCVcoYu+w84MaQLI15hl4P0+V4Pksbfyl7nqozch4xi9vcWXPfhe6ZlwkbexyWf6c4Mauj8m8UhdE0ic1WRLIXByV5DMpJ8sIJ2Oo4fjXTWMF1A758gaMoS6CjXcmZHHJMcYuf+jGFUC6KyPeLbhHiaTz6H+WV1PrruOBf41NeePFe7mXjUwKXNuIB+ah4AhXgPA5rAiYd/BNvk0pxyOqdgZlWwtPB/1BLAwQUAAAACABpVFpdWxLst3wGAABuGAAAHQAAAFIyNzQ3M19BRERPTi90ZXN0cy9tYWluLnN3aWZ0rVhtb9s2EP6eX8Hok4UpmuXYCWzM69LEQQM0SWG3BYa1MGiJjonQpCZRdrKi/33HF1myY9ly0gBbZfL43N3D4/F4dB6LRKJrkfEISyr40dECJyiE37LfPJpmPEThjISPjTEM8ogqmR76C2dShEykWUJQw0Unf6L3QjAPjVFCcKpERjKh/MFFP44Q/NEpOl6thwU/0BRLzAZJIpKGM2yd++3zU4TTlCRKAmYpI1EPfWsYPNdx0U+NpE1Dv/VRcPTT2JdKPI/BPhrlWlEfORMsJSMnF44yisQ9dAPL+qilfk6VqPkdnJ6fehrY/o2RmIAVC2JEztog1OmctprNdsf4FxK6OXvW6Zy1NQ1DkhKchLPrBM/JSFlmGXg50TAm3lz1wHQPbBThrAf/eGiqZNQ4GLpmXPkvN/M27a2+vZV5ajT/dnOmQvkEPIFWkkrlgdozcEAmGVGuxQkVSW+Lpe9AiFNWMmWM0iWVEBkFyhSzVMNMsuiByIKfoNNsvuRmsKAR4SG5FFySJ7mNpQ2RRgpjt4ILKTgNL5kIHy9WruRO5TbGCVlQkQEL2isPGbI/J5inOgiLpbknHsIP5L02XrFn3FhxtyBJREMJ/Ond2UaTcj40tvZ2elLNxlejZYONe729+nxeKymfLDDLsCQNbYtXaLUfrm/NBeuPGJHqVKo9MkfFPTJHOndJTXp+YpVdkSnOGNjY7yM/449cLLkm+0rMMeUfBIs8R+PZSRTpCWcrrAo512CBcka0tyUMPWgoXQHsd9tAW6eNCj8iTOLbVKlqdzpB1yrQ0DDiw1D6wkZDiANZoukFXtBsNr2WCtey3RrhEkPyghRJvnBYS6cU4sWBeLFhgsi/GWY14QN3Fy0KNJinSACIRa+Dq/5X0+z/SCJUrNeB7Xa7a6gULow0pRNGdEwYk6eZVBeBXn4QqM4Z7u5Q42BrQuVsTiQNEQ4T0I9CJVW5nWW6N2mhHIKIRvrAGgVkHstndHNVhYbQYXjLGYXUEuOQ7AAFOk6CA0A5eYCDsCDmmthJcrM+qOCwm1Tjrh/B7ZtXC1RHV34h1YmGWoD5XbYHUHFal8m6NgJoXciaVgZeyyDqm1fdrObybO7moF4yqMA+A6qDSvxZtkplb8Bv7k09c/xUqFEXE2jvFwpaXsfEmNeC0Kg2xMi1lFw7D0htD8DlaRVM0Fl1SGKGn+1Rf8JwuZorIdHjzi4l7e4eJRppKBib4FUuNOB2bAd84HX3+aDP+jq8HqoDDxTBZkGmrYYPcazyts6461rsDJrn1dZrNZrYKFRWJflsFSMmtdfWV2N/tgYiVzXnvpx36r1FwRLZzYJypvJUvXfMmdqpZbN2LfQY9sy8LWQRbBkUvVA+8Ncp9dTHXv+MBrSm+jB9q9goK6wKEOtbJEhaOGhi5bANrBuRZu9eoS/o7trK6jNnFHJCIihvZgmcPCYenm2atBn7fiNb1k2W2/e6AK28F+yIeURZW/TIkOAIXtr9vFa3vxuP5LmnLgVVqZOezzPGvAQvx7pSd4Lz4Hf4z1G1+9S8eLS0bRo4w8FocDG8/DC+v/v49/73AGbM6k0/wf7QFGYwa/zz3c2rurgYRoym8vWYZa8VvuCkjP5rgL1NLXIpNrSoHQCSSbSVegdC2Z/FTsH/fEKSBnDu7tmGYLUJX+6+DoY31zeDong9PtgrbaLyAD7QVCQTGkWlhHT8NppW6HP6pC+qsgbFEBdD7c2B8fmuMjLfYHlui7J3wjB/tD2yF0bH/UrsiOIHLlJ4Ab3udewhcPK+6BgpEb/oICkKhkXnSM8WnaTc9dhXm9k3vSCnMEnFI8p4+ZaLfU2wziqa47L4Kqkygh8RhChcKmFpqaUH1jqjzxcfB+Pr4cXtYPzh/uOVswZkBMsr7U76yntI5WnDsW2Bvu4JOO66IWouJ7/1C9nXh+3NdLd2+VNUTMqp9VaMcUxTPMUTIBfsivZnKEg0URaq3wOO4YUfqS0w96VTzKGIpnp2BbjhHfoDbXgEy/NnprFsglPCKC9qL7hsTLWrVLZURWMENp67tn/l2wapEtYN3EJ+vaTL5fNOKzouOsNQlBTLbBlDo9fn8diLW9/dzfhUcijF031Pa90s9eF5dFL6rtnP4WDoiXpZSTonGraOxio9m/0oqtu4S8iJqmeUI0NBwKXu3LfPT+0BvR7cXQ7GF6PRYPj55v5uNP4E3/1vDd2yd2HR/1BLAwQUAAAACACNVFpduh2/y8YFAAB6DQAAJgAAAFIyNzQ3M19BRERPTi90b29scy9pbnRlZ3JhdGVfcjI3NDczLnB5lVdLb9tGEL7zV2zdA6lGphznVajQQZbtRoVtCZLjomgKYUUOxW3IXXZ3KcUteqkvvRQ9FWiLAsmpCIIiP6D1vzESJKf8hc4uqZctP6IDRe3OzuP7ZmdGH39Uy5WsDRmvAR+T7FjHgt9x1tbWepsP/LsP7hAahkyzMZCIsmQ9SISCkDCuYSSpZoITGmmQpBDfIJSH5fum7zi9nJNIipRQMgbJIoZnM8Y5lEL37xEtAciE6ZgMBT4yyYQkGdVBDGpmB0LfOQBUQQQ+JpJp3ISnTGnGRyRiCajPCLcCQUz5CHe3qNYJkL7G0wRVdru1TqtHpMjxDCjfxOhY39BYnLAhYWkmpCZd/OmU7zFVZstxpBC6YXb8YBJ6FYcJ1TBrNRffaq2YphlioTp8G8YsANdRIpcBNMyu2wMFVAZx4dIRUyjqqwmLtOuklLMIlC61dR9t7bVbg37nUa+1M+g/bG7eu+9/qwR3HSRCcOuDNxiYkAeDii9BiWQMXsXPqASuy6+aq2RQm9rtDBXIsWVrF3gAU9tU4bomUxd8pqxer2JZLCI4t2idmK9VibvbbO8NWnud/s52fcptcbRmhUnKlEKWXCdCFjhNAVklX89Aedjta8kC3UL1LESySu9Q9VykPc+3zy8R6WcJ09uMjrjArAhKkW/qDsFPGaln6DAuVK4IQYKE73IkCfOmCGQaAnFvmcNT3LgoNbrXAF3xbaqqi8YiI0VoIoGGx4iL0jRJIHQdDU91o2TAbA7MgufmOlr/1K1MPTCLfiByjltzJGZItjAjgatc+ag5g0AXSHtupdG4fd6V+QUOYiRqxtqVps6DXtrpTPhVRjYvM+KKCQfZ67SbGi843npEiCYKXJMyxoPz+qw8SXOliYSUolTOp4VmrjWSyFpzBPuqTjhLLtVGR3CdrkUYEjA5MGlgct6/63WlCECpNo+Eny28q2MMJH2UaZbCJ7c3NjYqK5Ex28h+mpFEBGVhTYdslItcoXWLV8N1XVJ+jPGMBk9AN5bLS9cuekP7Y8DCevHW3q5CJoK4bp9VC4nZtS9VnUteN4+qQxY+wuYzhAOqB6mqT3/uq6qEANh8B2GoshTxG6iYYsmqm8JZRXdX4FbEsgqDIh4SYNpqmQcaM2QVGBwmi0jUamVa3UEN+TBhxYl1gyjeZmwYnJpbZu+aTw6xr8AcbkWwYDoLuozFJDnGHAiEDCGskmGO/sfAsLeINEVfsAkGT0gobJJgpLYSDAH4oh7GQ8gAH1yjNlomtE+KNkZzbLSSfY+XnxjcTYdiPAIpsXzarPadRaot3tmc611DW98E4E35vYJo3Cx4Xsnu/kpm9y2rlVVeoBN5MvflQtWDMU1yrD9eKT9XYkoZXnjl08xg412qIpzVFG/J6HIEkk46q4Ogk95yHAuB2PZfOrB2dvLb2ck/ZyenZyfP37169frfv89O/nvzx09vX/z87vnvr589e3/65+PHy074yGCIhdRHM0cYKlTen/765q+Xb1/+8vbF6VplMQ168C0WRNI8+IpEOTINmE4jTCeqCaRMY/qRAC+IrTLriRBPTJ95AsfF2KRjpha1yRKvdcExqczgMqHHVVweURniEKSIiAiGZocAYuYdvEwRCy2mM0WjHKXJpdhj+vdKnrCoje24QhNvyl2FAJZk8sMSEzqWYkJ2cUTEELENYAaw8It+52Am9aNjykEx2IUNWw8kZAkNoKwIVbzXt8rX27MWVx4433o+2GlbdD9U6YVEvomWmzbga9Vc11xn/Q2LXIjlEt3e4XSI8wNpLPTNUn85kfp2eC7GiXKnOhsrbjjNFCqGx1jSvGIgtCNKsVCZUXdDbYtnG42L+hz8S2CB2XyANX7Q2erv9I6ah+3OwWB35wCn5G7zsPWw0W32++554a3m4eHezuCo3TfixTjdcG+VY71fNCtvcc6aBuHH8DRk+EdCm4iWtRZm+1+2dw8v1bkCl2WV/wNQSwECFAMUAAAACABpVFpdbMgfLWIGAACrEwAALwAAAAAAAAAAAAAApIEAAAAAUjI3NDczX0FERE9OL3NyYy9SZXNlYXJjaE9ic2VydmF0aW9uRmVuY2Uuc3dpZnRQSwECFAMUAAAACABpVFpdWxLst3wGAABuGAAAHQAAAAAAAAAAAAAApIGvBgAAUjI3NDczX0FERE9OL3Rlc3RzL21haW4uc3dpZnRQSwECFAMUAAAACACNVFpduh2/y8YFAAB6DQAAJgAAAAAAAAAAAAAApIFmDQAAUjI3NDczX0FERE9OL3Rvb2xzL2ludGVncmF0ZV9yMjc0NzMucHlQSwUGAAAAAAMAAwD8AAAAcBMAAAAA',validate=True)
+          assert hashlib.sha256(payload).hexdigest()=='58c0e3dda347bb9c82e9d076f6948a2bebe73425344242dbc43ae83ce7c257e2', 'FAIL_CLOSED: R27473 patch SHA mismatch'
+          expected={'R27473_ADDON/src/ResearchObservationFence.swift','R27473_ADDON/tests/main.swift','R27473_ADDON/tools/integrate_r27473.py'}
+          with zipfile.ZipFile(io.BytesIO(payload)) as z:
+              assert z.testzip() is None, 'FAIL_CLOSED: R27473 addon CRC'
+              members=z.infolist()
+              assert len(members)==len(expected) and set(m.filename for m in members)==expected, 'FAIL_CLOSED: unknown addon path'
+              assert sum(m.file_size for m in members)<500000
+              for m in members:
+                  p=PurePosixPath(m.filename)
+                  assert p.parts and not p.is_absolute() and '..' not in p.parts and not stat.S_ISLNK((m.external_attr>>16)&0xffff)
+              z.extractall('.')
+          subprocess.run([sys.executable,'R27473_ADDON/tools/integrate_r27473.py'],check=True)
+          ios=Path('ios/ChampionsOnDevice')
+          assert len(list(ios.glob('*.swift')))==39, 'FAIL_CLOSED: unexpected swift file count'
+          source=(ios/'ResearchBattleVision.swift').read_text('utf-8')
+          assert source.count('ResearchObservationFence.allReadingsProvisional(readings)')==1
+          assert source.count('ResearchObservationFence.evaluate(receipt)')==1
+          assert source.count('ResearchHPCandidateConsensus.inspectStrict(')==1
+          assert source.count('ResearchHPSplitDiagnostic.inspectOwn(')==1
+          assert 'ownerROIAttested: false' in source and 'frameAgeMs: nil' in source
+          print('R27473_PATCH_SOURCE_SHA256=58c0e3dda347bb9c82e9d076f6948a2bebe73425344242dbc43ae83ce7c257e2')
+          print('R27473_APP_SOURCE_PATCH=PASS, swift_files=39')
+          PYCODE
+      - name: Add selected frame continuity monitor (R27.474)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import base64,hashlib,io,zipfile,stat,subprocess,sys
+          from pathlib import Path,PurePosixPath
+          b64='UEsDBBQAAAAIAC5qWl3EQsumLwQAAKsJAAA1AAAAUjI3NDc0X0FERE9OL3NyYy9SZXNlYXJjaEZyYW1lQ29udGludWl0eU1vbml0b3Iuc3dpZnSlVtFO60YQfc9XzCOowXAr2itxS6s0QEFAIhGuqj6hxR7HK+xda3cdyL3i33tm7YQ4SduHWpGSeGdnz5mZM7O6qq0LdGUbk6mgrRkMjo/p4cfPyenn0zNyHJQ2nkLBVCof6OJm9MdkOnu8GY/u7v4i++zZLTgbkg+uSUPjVFkuaaFKnZHnktPAmXjMnao4ocdCe8LH2ECKUmuCNo1tPM1Sx2zGqoYLvtWBchavtbM2J3zS0qYvR5mtAEf86YyxNyyH9DC9Iftq2PlC10PCfrNeJetINaGwTn+L7CiXN6CV2qrijnIiDmdLkxbOGv2NO1ZxzQO5rahqyqDrkmn2qvNAX28oKP/i6VWHgiazO4BLBrk2qgRS5T09sGfl0uJKeI9bngB0jwMCIHwfEB4fcEZKJQchmiF+OPHSqOeSMzqnXJWeo2HtNOBwtKyawG9YbU89OOwZLJRDngL7cNaHMAuqqn/bseU3VWnD2RkomfDzKfye7BipNOUaebyy7lp7wF/2zDsqkn6aGVX7AsltCcojmP8L0spuG05v8Z9hRLP3FkjemJR8B+PgkI5+3QcqBjEpPwIoT8Y5IzXdYmPaZTheGUANUl0rfwcrWu33cAP+6tdwvXf72cdm993hDjWosYaqZp22YiQPnlp97QtwjEDv9eVC5JEyXqKq/3dQdL5mS790CUkq9YY96/c/nNOnjS2Q21j8SNUv2CiAIWUyelYhQGPBKeN1q75CLRjdghbsdK7hCiYcdYNWteFPm9ij0sY5SH/deo5iXESvtQoFupQlw/AFgyAbPE6zOLDhpFdr0pn4LaC+94Zu3C4f9LLrYQB92wCNp5HfKGKVeohS7hdD7Xih0frW5dNbbUPxuI7Ev7pSc/69yeYc7uHt008nJ4c9Mq5N9AeX6Ud/uxI6CaNhN0BxEMM1XNE/W/043Az1Q5wJZA0avdrT9+Ms0GnAf+R3jtO9NvO2Qrs8bbqbje4vO7oJfZ3cTqZ/Tp7Gd9Px7dPF9H50M3m6nt5dgEQVJ5Ei+fulm0zieMufl6qXGSOt3nFdqiWKOHBsrh1q1FpmuR1DKbug8yXwsS8MwCabpd3GLkHJZKBE5+cEDbwYDJyY4Ys4kK5tmW3oKMY95lSauNDuLcHrrtC3pbPHYktEO22phbrZMBAN+JRRaE3MD4SEcQjMMnZgzyGhERTx2iXgmGubFpQqI5HxusTecrnylZaonlVIiw6VTEDbyDRHIUiFbsiXIDUjRxhSdS0HBuXC4CNRLkhC5XzpBNpHnJRpNTfWC0YvxWPNcHVhiLnSaTe23+NlZWqkrOBN2kgNbctZ8Jdi7xehnGn/cmw4vFr3IgYe0KXs5XZQ6AyKRqeSa1CycfeJ4RGxHMWS2Woo3DUCWM3hzS2TAZum6neLLnEPncnu0F853W4zO/cF9OP3wd9QSwMEFAAAAAgALmpaXcDo082ABQAAZxMAAB0AAABSMjc0NzRfQURET04vdGVzdHMvbWFpbi5zd2lmdLVYTW/bOBC951dwdYqxqiE5RoMaSLv56taHJAsnPSxQwKCksc2NTAokZddb9L/v8EOWFTuRkt31wXEozvDNmzdDUmxZCKnJZ1HyjGom+NGKSqJBaUXOSHQ0K3lK0gWkj8dTkgqeMTNpRH6jpRZpLlQpgRz3yLuP5EKIPCRTsgSl6BxG5F5Lxuc98uOI4GdeUpnVLtAGcgXkB5lRTfNrKYU8DiaD0/7wdIhjLIdsRL4de2+9oEd+Wj8O269nJD766eDNJF0Cwkuo1vl2XYQfnAcGEBQiXYzImGscG5gRllX/xlFovfoPxkgLjTG5Ce+HZso0iiJjJYE2huMosoFPQAGV6eKzwXGv6bLwIe8/OHYYx1cjjzas0Nk/oYvFPGZZA9juRyQK5AqyGzXawg0RXQrMjxqkvYoe5diho304n0xYyYEH24Rifig5OyMJsp+DJhIjb0y/FFwzXjK9uRGcaUxiz06cSVALnOyS48YUpwUOyb75oRZC47jTlhno59Tk1qzGGSopgGWhN2TBFHrdBI2p8J0uGYfMTMbcBH+DFKQabE6laQqFhuyzkF+cq4ZR9ThwEFexBci4KiDV95DjN9raIGxIle9V3F+BzFhqAfdL/sjFml/mIn28EkvK+BeRY1YC/4Ck5gnhgEYkBanZjO0gRW8Z5JreqDp8LgjjK+C4vmOR2Cl1dAbTLpeewNDhRA8zJpHPFc1ZRkzkxpGQqI4ipxsieF6z2vCzy26MfgSHfXIbFodJrmwlaOptLceDrhwPGhybgO2siQ3AE+yiAROhqTwJf1l37ZENtsbYlUquXx9bZU05F5osxQr21dqaJO8kE6CIcZMuKJ8DcdM8Y1huOQN55orJtLVB+CGMI+xecRxHNeyDnHrrXoNM62oi8jyh6aOlMsjFGsU5vmrh8Dk+Aum9VYTQbEV5Cp25qB0UOGBb3BMaTI+8wAk7RMRIQ1RRMWilovLQJMMOHyLDPnglDWju7DCdqKzlklX4FZjtr5HFOK6wD9uwO+tel7YTFFLMkUPliz8pNSmxl8hm13k2IX6pMODwXfvC0hK5eZ0mBmGg18LsTEJmDdMXar9Npa7CWFq1scTE3u78EHuHGkqQllJi0913bzJo+Lg2ud1J4onR4MCI8KRVf1v7bmnksPZSSvG8xUSp2nNXLxEGztbX4ZsoOlAZtb7pTGON1GVuGBJ6UTeqiyCMDDtDo/DhaRs71ra5vjslPUjKlT02ft2q2IEpOUodN0mi1kwjpKdq6ESTXdcfyOpGjG7lWjINwX8PG8UFVFeglWZ5fkDIrQV2EgbexV7LNblIpHgE3pDqwCTkJGrLhLNsxoSHEdNM7PnQRWEPUO5gs7dldCLeLeMbzG63bOkTdTxGV5H9inttcP2IP0yNrzqu42jrvow7tjoFdA/lXfyqRRKaPdmcOhFOUWcVDapMlkwpVKfabrgE1bMQ0uuH4eUQJyR4YZmda+MMsidq+hDZ3bdNT4c8dWuBjfOzqg7QYllQ+VytuLg/9f1dyu9ESssyxbsSzU2xZAyvu42TaeeiGz4BtePOl5+qNg/cS5Rl8y2bwoG9z7ReDMj1XTyyytIQ6WAE/zoFB7dD5WrF96i9Mv/l5ctgH7tzhrSjyK45xbXd2cQPETGbbT01HHm6JzDHH3LTVz6U/TRX96VgnouEGoTOBGWOnRf1viG2IF+5zkvV+rvf1bz0nxbrc0reIrPXsv8Fz8B8nfQ6pHULxin17Vl4/jZQr2BqTOF9c+cu8Op1mje32vt2XK9ZCi23vo/Nlw8HwGOLLDOm/Y1QKpKYN2NW8IVkXNtXVMPT4fTy7vZhfPt1/PDn9ObudvxwN5me399fTx7Gd7f30z/w99m3Y/uuqoe2/wBQSwMEFAAAAAgAWmpaXW0Ru4QyBAAANgkAACYAAABSMjc0NzRfQURET04vdG9vbHMvaW50ZWdyYXRlX3IyNzQ3NC5weZ1VXW/iOBR9z6/wdh6SaJlASyidrvLAUrogdUpFOiONVqvIODdgTbCztgNFq/nvex0MpbRdjRYJcOzr+3HuuScffmnXWrXnXLRBrEm1NUsput7Z2dmgqsotqbgQkJPZRT+K+zHRUAIzkH8sFF0BYVIYLmputmQlBTdSEdyRzrxLtKwVAx15t5SXhJVSoy9eELMEd0bmWwOatAkXGpThUpBKcmFIzosC1G9ESEJrdMnsacEZtTaRTdArlFyRipplyeeEryqpDHnAR8+tl1TbI89TUprEnkRskwehx6VO7F7bx1V7uKSrCp3qqbiBNWfge7vcEnvqz0ADVWz5OzWmhK9c2/h6wwvjewWIU7PpHOtYN1ne2tO9qYDNS8Nbi+DwAODnHX57c5rnUjQ5B1lW8BKyLIwUaFmuIQijiioQxv21fa1Y+yf9aguzAz/iuvEdhISKnDTVnOw1eTzvtYh/O5jcZcO7aTq6uSYrrjUXC7IGhc2xzRVV/RxGSPzCJoInro1+fX1PK1oqoPnWksDQsoQcoUUuVQpwi/x5wGz8kBrFmRliajynZo9u68hiIgwsVNOAP962SKuSmxtOF0Jqw5mz+OvaI/hxmQe2Vxg/PK69eCv7TjvuX9hUFfxdIzsM7FG5Jv/g9g/fY7WyfUoc6rbWrOE9ctHFc1yN9JJe9C4DdyOMlvCU8wVoE4RJ4se0A91uHPd6+XmvH/eLXi/uz6FHIY47/U8dml/Ou3HvotOhF5/iIp5f0fn8vBP3ri7Pabdz6b/dgP2gknQ8IGxJxcJ2YC7zbeISiXJgMofAr03x8coPPVnmiV+CIQoY8MogunVpknenANa0rLEdgbMPfU9BVVIGK4vMf7hq+DxG/ki1ncECF2ob7XUoQsZUuErdc2N8FMOha0uJmKyFCTBxRPK8IffR9lEyeNw5xakW8FQ1EQ6QuSCEIWFt13eUXVH1HdQpaw98xbnUIHStD4k3fA5sY94nqLOdbsQLw1cgYyYz5BZSTz8ouW6kipaBcnshToFGfFASpEFZYMNSsu8Dg0TEwq5JQUsN+zn4QJrTj7lcUaymQr0sCNdIVJHjgKJu7yW/1Yw5PltVl4ovOAY9wBI13lDzHTJJQn4iiV0O9uNeMXA8nM8g2w6+mstmEBXm2MiOladSLjjDX21wJne3fxzI4WNtec0sjCNB57a4xKWxD+G5oUgaxjiuWCq1jnjTOj9MszN/k1s76uHdBjYM4IwP6fz/9h57s7K7UdgApzQ7IT+WntC95pyZgScTuNstjCet0+Qw8HtFR7fHTpLktWOvUvgGD3ycFBT3LB3djYaPo5vsdjb4PMrGk/RxOvuWPQweh+PkYZCm/umN2SgdDWbDcfZ1kk6m9xnKEopi4v96opJv6OkLxTz1O5zeP07uv0wev2Xp9MtsOHrX82mZJ27/BVBLAwQUAAAACABaalpdXn0XfIcCAADSBgAAJgAAAFIyNzQ3NF9BRERPTi90ZXN0cy90ZXN0X2ludGVncmF0aW9uLnB5lZRNb9swDIbv+RW62QYCJ2nsps3gQxG0aA9bhzTbDsMg0LJcC1MkQ5K7usP++yjnY8PmpOlFTqSXDymKpFjX2jjSKOEct25IanCVFPmQgP/3IupSSD4kFdjNttBDou2Q2CavjWbc4m/H151ssLy/X2VbQvwRvyGl/oDSKDbcavnEwyiuwXDl7NfJt8HDcpF5o1FgDRstueVgWHVjYM0XWjmhGuHa9xqj0ya2P0TpgsHHq9XidmvltJZ2JJTjjwYcp+ZslsySuG6DwcOXu5vV6vphtZPi9exoDULtQEyCteQzN6IUvAh3OYhXuCzA8mg+IAUvid+knQ2t8RYYe2i5LKO5X2NkcOPuVBiUQoEkG+rxqwRDvDhmBArq+LMLo+gvT1Kz70I99vtYN2gQe0kY/U95948amdyQn2Rj1aiNHfl11L/SeE1dNMwJrfqj+HN+rSCXvCAZKUFa/hqY+QhwBbHuJ1tMFyZJO0wUW3j1VfcovJif5sEZUFb40I65ycE5yVd77RudQOM09aXQUwkf9KYYGsXIRnKU1m1rJVtqFdS20oeKy/P2kugVZi2hPZzgriiXnehWywJZu145SNRS5oDF0x9bx9tKTiTyWrOqH9cdvRG3edDTHvuTetr2/IlwnGisonXrKqwq2yoHz1tPOCT9OLM87KbSIYB1RjD86MYwTmtxoK0SGPPpNEnStJikOMjKNE1mOU+BJ8l4djmG4jyfJunZeAxnl0mZ5BeQ55Nxkl6cT2A6Pg+Gp0QBilXaHEiVLtqY6QZHHKYmyrLJK0xshmafTt8XiBYv0D86tq3RNz2cafq6TpSEUoXVRWmWBZT68U1pMN/Par8Rov9c49u22SQa/AZQSwECFAMUAAAACAAualpdxELLpi8EAACrCQAANQAAAAAAAAAAAAAApIEAAAAAUjI3NDc0X0FERE9OL3NyYy9SZXNlYXJjaEZyYW1lQ29udGludWl0eU1vbml0b3Iuc3dpZnRQSwECFAMUAAAACAAualpdwOjTzYAFAABnEwAAHQAAAAAAAAAAAAAApIGCBAAAUjI3NDc0X0FERE9OL3Rlc3RzL21haW4uc3dpZnRQSwECFAMUAAAACABaalpdbRG7hDIEAAA2CQAAJgAAAAAAAAAAAAAApIE9CgAAUjI3NDc0X0FERE9OL3Rvb2xzL2ludGVncmF0ZV9yMjc0NzQucHlQSwECFAMUAAAACABaalpdXn0XfIcCAADSBgAAJgAAAAAAAAAAAAAApIGzDgAAUjI3NDc0X0FERE9OL3Rlc3RzL3Rlc3RfaW50ZWdyYXRpb24ucHlQSwUGAAAAAAQABABWAQAAfhEAAAAA'
+          payload=base64.b64decode(b64,validate=True)
+          expected='9178447e016c58a83e99ab12cefa3454e4a4d4ee7556b520d872073f8e19f215'
+          assert hashlib.sha256(payload).hexdigest()==expected,'FAIL_CLOSED: R27474 patch archive SHA mismatch'
+          allow={'R27474_ADDON/'+s for s in ['src/ResearchFrameContinuityMonitor.swift', 'tests/main.swift', 'tools/integrate_r27474.py', 'tests/test_integration.py']}
+          with zipfile.ZipFile(io.BytesIO(payload)) as z:
+              assert z.testzip() is None,'FAIL_CLOSED: patch ZIP CRC'
+              members=z.infolist()
+              assert len(members)==len(allow) and {m.filename for m in members}==allow,'FAIL_CLOSED: unknown patch contents'
+              for member in members:
+                  p=PurePosixPath(member.filename)
+                  assert not p.is_absolute() and '..' not in p.parts,'FAIL_CLOSED: ZIP path traversal'
+                  assert not stat.S_ISLNK((member.external_attr>>16)&0xFFFF),'FAIL_CLOSED: ZIP symlink'
+                  assert member.file_size<=100000,'FAIL_CLOSED: patch member oversized'
+              z.extractall('.')
+          subprocess.run([sys.executable,'R27474_ADDON/tools/integrate_r27474.py'],check=True)
+          print('R27474_SOURCE_PATCH_SHA256='+expected)
+          print('R27474_APP_SOURCE_PATCH=PASS, swift_files=40')
+          PYCODE
+      - name: Native tests and Swift parsing
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift native_wire_tests/main.swift -o "$RUNNER_TEMP/wire"
+          "$RUNNER_TEMP/wire" | grep -E 'SWIFT_RESEARCH_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/FrameEvidenceExportGate.swift native_evidence_tests/main.swift -o "$RUNNER_TEMP/evidence"
+          "$RUNNER_TEMP/evidence" | grep -E 'SWIFT_EVIDENCE_EXPORT_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchOwnerGate.swift ios/ChampionsOnDevice/ResearchMoveCandidates.swift ios/ChampionsOnDevice/ResearchScreenClassifier.swift ios/ChampionsOnDevice/ResearchNameAndGenderCandidates.swift ios/ChampionsOnDevice/ResearchHPCandidateConsensus.swift native_regression_tests/main.swift -o "$RUNNER_TEMP/regression"
+          "$RUNNER_TEMP/regression" | grep -E 'R27460_REGRESSION_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchOwnerGate.swift ios/ChampionsOnDevice/ResearchScreenClassifier.swift ios/ChampionsOnDevice/ResearchNameAndGenderCandidates.swift ios/ChampionsOnDevice/ResearchGenderGlyphProbe.swift native_gender_tests/main.swift -o "$RUNNER_TEMP/gender"
+          "$RUNNER_TEMP/gender" | grep -E 'R27465_LOCAL_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/FrameEvidenceExportGate.swift native_export_budget_tests/main.swift -o "$RUNNER_TEMP/exportbudget"
+          "$RUNNER_TEMP/exportbudget" | grep -E 'R27459_EXPORT_BUDGET_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/ResearchHPStrictCandidate.swift R27470_ADDON/tests/guard/main.swift -o "$RUNNER_TEMP/hp_safety"
+          "$RUNNER_TEMP/hp_safety" | grep -E 'R27469_SWIFT_HP_SAFETY_ASSERTIONS_PASS=34'
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchOwnerGate.swift ios/ChampionsOnDevice/ResearchHPCandidateConsensus.swift ios/ChampionsOnDevice/ResearchHPStrictCandidate.swift ios/ChampionsOnDevice/ResearchHPIntegrationGate.swift R27470_ADDON/tests/integration/main.swift -o "$RUNNER_TEMP/hp_integration"
+          "$RUNNER_TEMP/hp_integration" | grep -E 'R27470_SWIFT_INTEGRATION_ASSERTIONS_PASS=22'
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchHPSplitDiagnostic.swift R27472_ADDON/tests/main.swift -o "$RUNNER_TEMP/hp_split"
+          "$RUNNER_TEMP/hp_split" | grep -E 'R27472_SWIFT_HP_SPLIT_ASSERTIONS_PASS=41'
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchObservationFence.swift R27473_ADDON/tests/main.swift -o "$RUNNER_TEMP/frame_fence"
+          "$RUNNER_TEMP/frame_fence" | grep -E 'R27473_FRAME_FENCE_ASSERTIONS_PASS=51'
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchObservationFence.swift ios/ChampionsOnDevice/ResearchFrameContinuityMonitor.swift R27474_ADDON/tests/main.swift -o "$RUNNER_TEMP/continuity"
+          "$RUNNER_TEMP/continuity" | grep -E 'R27474_CONTINUITY_MONITOR_ASSERTIONS_PASS=47'
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import subprocess
+          files=sorted(Path('ios/ChampionsOnDevice').glob('*.swift'))
+          assert len(files)==40,len(files)
+          for f in files:
+              subprocess.run(['swiftc','-frontend','-parse',str(f)],check=True)
+          print('R27474_SWIFT_PARSE_PASS='+str(len(files)))
+          PYCODE
+      - name: Build unsigned iPhoneOS app and repair IPA packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          test -d "$sdk/System/Library/Frameworks/ScreenCaptureKit.framework"
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+          xcodegen generate --spec ios/project.yml --project ios
+          if ! xcodebuild -project ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch \
+                 -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+                 ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+                 -derivedDataPath "$RUNNER_TEMP/r27474-derived" build > "$RUNNER_TEMP/r27473-build.log" 2>&1; then
+            grep -E 'error:|BUILD FAILED' "$RUNNER_TEMP/r27473-build.log" | tail -40 || true
+            exit 1
+          fi
+          echo 'R27474_IPHONEOS_UNSIGNED_COMPILE=PASS'
+          python3 - <<'PYCODE'
+          import hashlib, os, plistlib, subprocess, zipfile
+          from pathlib import Path, PurePosixPath
+          app=Path(os.environ['RUNNER_TEMP'])/'r27474-derived/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app'
+          assert app.is_dir(),'FAIL_CLOSED: compiled app missing'
+          plist=app/'Info.plist'
+          assert plist.is_file(),'FAIL_CLOSED: missing Info.plist'
+          info=plistlib.loads(plist.read_bytes())
+          exe_name=info.get('CFBundleExecutable')
+          assert isinstance(exe_name,str) and exe_name and '/' not in exe_name and '\\' not in exe_name,'FAIL_CLOSED: invalid executable name'
+          exe=app/exe_name
+          assert exe.is_file(),'FAIL_CLOSED: missing executable'
+          assert 'arm64' in subprocess.check_output(['xcrun','lipo','-archs',str(exe)],text=True).split(),'FAIL_CLOSED: no arm64'
+          assert not (app/'_CodeSignature').exists(),'FAIL_CLOSED: signed source not expected'
+          info['CFBundleVersion']='474'
+          info['CFBundleShortVersionString']='0.4.74'
+          plist.write_bytes(plistlib.dumps(info,sort_keys=False))
+          assert plistlib.loads(plist.read_bytes())['CFBundleVersion']=='474','FAIL_CLOSED: version write failed'
+          ipa=Path('dist/R27_474_Unsigned_ChampionsResearch.ipa')
+          ipa.parent.mkdir(parents=True,exist_ok=True)
+          entries=sorted(app.rglob('*'))
+          assert entries and not any(p.is_symlink() for p in entries),'FAIL_CLOSED: symlink not supported'
+          files=[p for p in entries if p.is_file()]
+          assert len(files)>1,'FAIL_CLOSED: incomplete app'
+          with zipfile.ZipFile(ipa,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+              for p in files:
+                  z.write(p,arcname=str(PurePosixPath('Payload')/app.name/p.relative_to(app).as_posix()))
+          with zipfile.ZipFile(ipa) as z:
+              assert z.testzip() is None,'FAIL_CLOSED: IPA CRC'
+              plist_bytes=z.read('Payload/ChampionsOnDeviceResearch.app/Info.plist')
+              archived_plist=plistlib.loads(plist_bytes)
+              assert archived_plist['CFBundleVersion']=='474'
+              assert archived_plist['CFBundleShortVersionString']=='0.4.74'
+              assert 'Payload/ChampionsOnDeviceResearch.app/'+exe_name in z.namelist()
+          size=ipa.stat().st_size
+          assert 1000<size<50000000,'FAIL_CLOSED: implausible IPA size'
+          print('R27474_IPA_PACKAGING=PASS')
+          print('R27474_IPA_SHA256='+hashlib.sha256(ipa.read_bytes()).hexdigest())
+          print('R27474_IPA_BYTES='+str(size))
+          print('RESEARCH_ONLY_FORMAL_HOLD_STAGE1_5_560_NATIVE33_0_EXACT34_0')
+          PYCODE
+      - name: Upload downloadable unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: R27474_UNSIGNED_RESEARCH_IPA
+          path: dist/R27_474_Unsigned_ChampionsResearch.ipa
+          if-no-files-found: error
+          retention-days: 3
