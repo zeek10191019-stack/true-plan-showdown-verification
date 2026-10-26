@@ -1,0 +1,149 @@
+# R27.467: bypass broken git checkout, fetch pinned source carrier over HTTPS with byte integrity.
+# Research-only R27.465 source from immutable commit; no repository-wide checkout.
+# Manual run only. UNSIGNED IPA requires user-controlled signing before install.
+# GitHub Actions xcode-27/macOS may incur charges: seek explicit user approval before triggering.
+name: R27467 Champions Research iPhoneOS no-checkout fixed packaging
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r27467-ios-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - name: Restore pinned R27465 research source and verify byte closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import base64, hashlib, io, json, re, stat, zipfile
+          from pathlib import Path, PurePosixPath
+          import urllib.request
+          # Fixed commit and blob SHA-1 prevent moving-branch or substituted source.
+          source_url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/bd0ffdbe0ce56146defc1e20df90a9338e79ed93/.github/workflows/R27465_work_ios.yml'
+          req=urllib.request.Request(source_url, headers={'User-Agent':'TruePlan-R27467-pinned-source-fetch','Accept':'text/plain'})
+          with urllib.request.urlopen(req, timeout=40) as response:
+              carrier_bytes=response.read(300001)
+          assert 100000<len(carrier_bytes)<=300000, 'FAIL_CLOSED: abnormal source carrier length'
+          carrier_hash=hashlib.sha1(b'blob '+str(len(carrier_bytes)).encode()+b'\0'+carrier_bytes).hexdigest()
+          assert carrier_hash=='24d8686077ba77ff44d970250ec95a9464ea3721', 'FAIL_CLOSED: carrier git blob SHA-1 mismatch'
+          content=carrier_bytes.decode('utf-8')
+          print('R27467_CARRIER_GIT_BLOB_SHA1='+carrier_hash)
+          matches=re.findall(r"source=base64\.b64decode\('([A-Za-z0-9+/=]+)'\)",content)
+          assert len(matches)==1, 'FAIL_CLOSED: embedded archive not unique'
+          blob=base64.b64decode(matches[0],validate=True)
+          expected='9c00cc7728ccb18ecab2e19dbc0d76db4185e1c8a67d15fb037500aad17e8089'
+          assert hashlib.sha256(blob).hexdigest()==expected, 'FAIL_CLOSED: source SHA-256 mismatch'
+          with zipfile.ZipFile(io.BytesIO(blob)) as z:
+              assert z.testzip() is None, 'FAIL_CLOSED: embedded archive CRC mismatch'
+              members=z.infolist()
+              assert len(members)>40 and len(members)<100, 'FAIL_CLOSED: abnormal archive count'
+              assert sum(m.file_size for m in members)<25000000, 'FAIL_CLOSED: excessive source size'
+              seen=set()
+              for m in members:
+                  p=PurePosixPath(m.filename)
+                  assert m.filename and not p.is_absolute() and '..' not in p.parts, 'FAIL_CLOSED: path escape'
+                  assert str(p) not in seen, 'FAIL_CLOSED: duplicate archive filename'
+                  seen.add(str(p))
+                  assert not stat.S_ISLNK((m.external_attr>>16)&0xFFFF), 'FAIL_CLOSED: source symlink'
+              z.extractall('.')
+          manifest=json.loads(Path('PUBLIC_SOURCE_SHA256.json').read_text())
+          assert len(manifest)==43, 'FAIL_CLOSED: source manifest count'
+          for path,expected_file_hash in manifest.items():
+              assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==expected_file_hash,path
+          print('R27467_PINNED_R27465_SOURCE_SHA256='+expected)
+          print('R27467_SOURCE_CLOSURE=PASS, files='+str(len(manifest)))
+          PYCODE
+      - name: Native tests and Swift parsing
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift native_wire_tests/main.swift -o "$RUNNER_TEMP/wire"
+          "$RUNNER_TEMP/wire" | grep -E 'SWIFT_RESEARCH_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/FrameEvidenceExportGate.swift native_evidence_tests/main.swift -o "$RUNNER_TEMP/evidence"
+          "$RUNNER_TEMP/evidence" | grep -E 'SWIFT_EVIDENCE_EXPORT_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchOwnerGate.swift ios/ChampionsOnDevice/ResearchMoveCandidates.swift ios/ChampionsOnDevice/ResearchScreenClassifier.swift ios/ChampionsOnDevice/ResearchNameAndGenderCandidates.swift ios/ChampionsOnDevice/ResearchHPCandidateConsensus.swift native_regression_tests/main.swift -o "$RUNNER_TEMP/regression"
+          "$RUNNER_TEMP/regression" | grep -E 'R27460_REGRESSION_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/ResearchBattleWire.swift ios/ChampionsOnDevice/ResearchOwnerGate.swift ios/ChampionsOnDevice/ResearchScreenClassifier.swift ios/ChampionsOnDevice/ResearchNameAndGenderCandidates.swift ios/ChampionsOnDevice/ResearchGenderGlyphProbe.swift native_gender_tests/main.swift -o "$RUNNER_TEMP/gender"
+          "$RUNNER_TEMP/gender" | grep -E 'R27465_LOCAL_ASSERTIONS_PASS='
+          swiftc ios/ChampionsOnDevice/FrameEvidenceExportGate.swift native_export_budget_tests/main.swift -o "$RUNNER_TEMP/exportbudget"
+          "$RUNNER_TEMP/exportbudget" | grep -E 'R27459_EXPORT_BUDGET_ASSERTIONS_PASS='
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import subprocess
+          files=sorted(Path('ios/ChampionsOnDevice').glob('*.swift'))
+          assert len(files)==35,len(files)
+          for f in files:
+              subprocess.run(['swiftc','-frontend','-parse',str(f)],check=True)
+          print('R27467_SWIFT_PARSE_PASS='+str(len(files)))
+          PYCODE
+      - name: Build unsigned iPhoneOS app and repair IPA packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          test -d "$sdk/System/Library/Frameworks/ScreenCaptureKit.framework"
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+          xcodegen generate --spec ios/project.yml --project ios
+          if ! xcodebuild -project ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch \
+                 -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+                 ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+                 -derivedDataPath "$RUNNER_TEMP/r27467-derived" build > "$RUNNER_TEMP/r27466-build.log" 2>&1; then
+            grep -E 'error:|BUILD FAILED' "$RUNNER_TEMP/r27466-build.log" | tail -40 || true
+            exit 1
+          fi
+          echo 'R27467_IPHONEOS_UNSIGNED_COMPILE=PASS'
+          python3 - <<'PYCODE'
+          import hashlib, os, plistlib, subprocess, zipfile
+          from pathlib import Path, PurePosixPath
+          app=Path(os.environ['RUNNER_TEMP'])/'r27467-derived/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app'
+          assert app.is_dir(),'FAIL_CLOSED: compiled app missing'
+          plist=app/'Info.plist'
+          assert plist.is_file(),'FAIL_CLOSED: missing Info.plist'
+          info=plistlib.loads(plist.read_bytes())
+          exe_name=info.get('CFBundleExecutable')
+          assert isinstance(exe_name,str) and exe_name and '/' not in exe_name and '\\' not in exe_name,'FAIL_CLOSED: invalid executable name'
+          exe=app/exe_name
+          assert exe.is_file(),'FAIL_CLOSED: missing executable'
+          assert 'arm64' in subprocess.check_output(['xcrun','lipo','-archs',str(exe)],text=True).split(),'FAIL_CLOSED: no arm64'
+          assert not (app/'_CodeSignature').exists(),'FAIL_CLOSED: signed source not expected'
+          info['CFBundleVersion']='467'
+          info['CFBundleShortVersionString']='0.4.67'
+          plist.write_bytes(plistlib.dumps(info,sort_keys=False))
+          assert plistlib.loads(plist.read_bytes())['CFBundleVersion']=='467','FAIL_CLOSED: version write failed'
+          ipa=Path('dist/R27_467_Unsigned_ChampionsResearch.ipa')
+          ipa.parent.mkdir(parents=True,exist_ok=True)
+          entries=sorted(app.rglob('*'))
+          assert entries and not any(p.is_symlink() for p in entries),'FAIL_CLOSED: symlink not supported'
+          files=[p for p in entries if p.is_file()]
+          assert len(files)>1,'FAIL_CLOSED: incomplete app'
+          with zipfile.ZipFile(ipa,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+              for p in files:
+                  z.write(p,arcname=str(PurePosixPath('Payload')/app.name/p.relative_to(app).as_posix()))
+          with zipfile.ZipFile(ipa) as z:
+              assert z.testzip() is None,'FAIL_CLOSED: IPA CRC'
+              plist_bytes=z.read('Payload/ChampionsOnDeviceResearch.app/Info.plist')
+              archived_plist=plistlib.loads(plist_bytes)
+              assert archived_plist['CFBundleVersion']=='467'
+              assert archived_plist['CFBundleShortVersionString']=='0.4.67'
+              assert 'Payload/ChampionsOnDeviceResearch.app/'+exe_name in z.namelist()
+          size=ipa.stat().st_size
+          assert 1000<size<50000000,'FAIL_CLOSED: implausible IPA size'
+          print('R27467_IPA_PACKAGING=PASS')
+          print('R27467_IPA_SHA256='+hashlib.sha256(ipa.read_bytes()).hexdigest())
+          print('R27467_IPA_BYTES='+str(size))
+          print('RESEARCH_ONLY_FORMAL_HOLD_STAGE1_5_560_NATIVE33_0_EXACT34_0')
+          PYCODE
+      - name: Upload downloadable unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: R27467_UNSIGNED_RESEARCH_IPA
+          path: dist/R27_467_Unsigned_ChampionsResearch.ipa
+          if-no-files-found: error
+          retention-days: 3
