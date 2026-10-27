@@ -1,0 +1,69 @@
+name: R485
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r485-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - name: Restore pinned R484, validate mirrored observation evidence, build iOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import urllib.request,hashlib,textwrap,subprocess,os,base64,zlib,json
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/bf67af712a3ab54d786b8bd6fbdf44a0bb8886a8/.github/workflows/R5.yml'
+          with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'R485-Pinned'}),timeout=60) as f:
+              b=f.read(9000)
+          assert len(b)==6687
+          assert hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()=='092e50b56a6dec68aee41c9a0c5bcfb9b2d75eeb'
+          y=b.decode('utf-8')
+          start=y.index('        run: |\n')+len('        run: |\n')
+          end=y.index('      - name: Upload R484 IPA',start)
+          script=textwrap.dedent(y[start:end])
+          assert script.startswith('set -euo pipefail\n') and script.rstrip().endswith('bash "$RUNNER_TEMP/r484_build.sh"')
+          base='\n'.join(script.splitlines()[:-1])+'\n'
+          subprocess.run(['bash','-e','-o','pipefail'],input=base,text=True,check=True)
+          source=Path('ios/ChampionsOnDevice/ResearchUnifiedTelemetryBundle.swift')
+          s=source.read_text()
+          assert hashlib.sha256(s.encode()).hexdigest()=='0035d617f59dc570b086a91408e8cbe6c2978ea36da741a3f3531582dc266615','FAIL_CLOSED: R484 source mismatch'
+          needle,replacement=json.loads(zlib.decompress(base64.b64decode('eNqtVdFu2jAU/ZW7PLVSFKSq7Samag80ndjaZAodL4Ai41zAbWJHtkOVVv33XScgSGHTpjUvsc29xyfnniMmHuw9QpaVhSuQaCxmU7k9f90tlxXTGeRoQc0fqLRtwdwgvEyl53fwej1Izj4G558u+pBVZS44I1zqNKjXzAolAdciQ8kRispYYEuNCE/CrsCucHfrBqzlBSWrc8WyABJ8QG7BigJ9WKIq0OraByYziAcJMK1ZDVzJBd1sjX+Ip+gzZF67y2ChKg2OjBW2hoXAPDMBRLhGDchXqinagu2rswFbs7xCQ4LYTWkuyrlyamWCLaUyVvCg2+Vk3Apw01xIik66Ne6Zeq1kmKXMpoWZej6daeQo3pyJgi0xNSt2dnFJJ8egbKVlW2w4qS3TRyGzLSLLhFxusAq1xpSTmCKjsZnfwK3KtNumniTqdlmqRyyU3MFtSsqyfa/o3cWcdbcLpUGyAknVt0K9HJLZ82ZlUY/dQEjQZjNxMLONUd0YrZD06+ufUFq7bWHaXQfnsNk9Gp3EzR2ahOFW6TreWf6E5DJK9un774aj0TD6mkbh6D68Tu+GSRIntLgZhrfXU+/0EP8IX7LeTyJDg1KSApbDt1EcNcoZqytOXCgyTRRMr2Cl+ezOaVxHkbgqSqYF8WtSRGa+PKe8aUMNwHIlkaDcOEy1WAguKC3BIZATj5FklMYvDZ0RasFy8dwIEJCd2Mlx7Vz0XUM8d8nuUxi8JldTr7831JkPqnRQhioCozQN5jvWZnZ6nMv83bnsWeNfyLTeYvCB7CRy34l0Rezex01hNA5v4x9hGo6H12E0CNNBHN3cDgf3f2OlN9v//yuY/QJe8d42')))
+          assert s.count(needle)==1,'FAIL_CLOSED: patch anchor absent/duplicate'
+          s=s.replace(needle,replacement,1)
+          assert hashlib.sha256(s.encode()).hexdigest()=='adf5eed9442b593f7c03ebcb3190ec28721e4e0e03ff30f044f95eb7dd780577','FAIL_CLOSED: R485 patched source mismatch'
+          source.write_text(s)
+          test=zlib.decompress(base64.b64decode('eNrNVu9P4zYY/t6/wvhTo8s4CscJ5dRtgYYjWy+pksAJ9SrLTQwNJHHkOC0F8b/vdZyWttw2pt2kIZW2fu33x+PneZo0L7mQ6JzXRUJlyovOnApU9A86N3URo3jG4vsuQXML/UpryeOMV7VgqGv89PMp55lJ0GJGpRVKkRa3xlMpWMyLJFWZuvOuYeIbmmYssdC3rtpoYONT8a7fe9bp7yrYRlBijXUCyy6WE0itv6En/d6FzqglxXIP/Rb6XshESrP0sWl3X8W6i1TOVMif3rFYWonJSxWsrPF+BeOx5He2rCaGyYqYJ6rOfi1vToy9507GJJqmSf/y0h10jf26ThNdtImInoU2W+uP8T1bYssLvTrL1HiCLohkDxJb+Mz27OCaXIxI7+T4PbwwhBmFESF46V05gXvuOgMS+C7xv3pOoP7jiS50+M8LjaDQ4fve4Z+UCUdDN1LdDO1r/zJSxYjnR+TUjqKhQ8LIjpy2esEqwGjrElAfjfGUSpkxkibYAoxMzEoez7B1DLcqaK4DR0cfTFwKntSxgpywgk7hwrF1Q7OKNa0pxCtsjUXPFIcTE8taFJuj8WnFxJwlhEqSw8bewcGBOhizdHu1Z+I0p7eMVDN6ePwR5qX4XcsRwUoGjID28RSbMfBZWh+PIHsVC8YKcp8W0BTO+RyOs4zpbmMKZAUKsRYJOC9YVVk7d5HRSpKEZdCPgI62pp9oKsOxOpNA5oddMm/B+hSwilERzy6L9CZlSQSt5Ay4fQoCzNi+xqKhtl1VPE6bj92NZcVzqxHOAxBa3QhcyKrv9t1o9ZWwYvmqJdAsqICtNavmfuy3/T8Yn7TmH8e4klTWFZ4gWv2CWkn2+wif+V4U2AP3LPKBhv5p6ARXduT6HnGAfkN/5JALfzgAXrYZVjlVUk1VojpYpW6bmxgq+1hFJmtKb7RDk3kaM0KzjC+AYPqsMiF1rGWb3qO/rc/uNWg9GvtgTZKmRdVdSQgDP5So4PYSGoMGMCCnDHAhaFkyscuDki4zThNy16itSau1A3n+vViASRy8FzYDD0F+O7p4JYkdNbTC2mb8hgBNTf415dXKrCQbcb4omID3kt+znBftCRUpy2YzgP7UQfCnMJrSpN/i1KzB97FqftJvRlBMWedGcMvj73mY7wKdIXfjdk2FCbLQTrhJ33AZapgacV1KVSnSDNLjL24Yut5n4jlhBPb3xQ0CP4APYIbARZV0zU7nyh043plDgMnnQ+AxNjrP/y34bwIOTPft0H0NfO/zNlx6aRut/83Ut5xvj60WVoTZuNImtuVJaqPRLP+tNW2a0SjwrxzPVhMHTujYwdkF8b3h9cqccirjmTqYp0JwcADE5ingBv4hWpNGM56BJ2zXfosPFRzpbVuH/9qIXjyoo59L6kLDlayAaL2mo7Otwz8GjiSFu5Zo45cGYMhVlysUXpV9CxJt2k1AmmcuWqXxaq6WFasKTezHDNWkerngthDeqfSWOXSm3TFymoGA8p2Hp+//Uuwu4qdnPDEmnUaq60Qmdr0re+gOVkY2sq+Hvj2AgiUUkF0cfDg5frG3tartEGBRoIRwJAz737oFPG13/gDidvBQ'))
+          assert hashlib.sha256(test).hexdigest()=='f2c956bac981815694a57f78d3083ee8db27a351e6e67799bc473437d14d3ac3','FAIL_CLOSED: new test bytes mismatch'
+          p=Path(os.environ['RUNNER_TEMP'])/'r485/main.swift';p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(test)
+          exe=p.parent/'r485_tests'
+          subprocess.run(['swiftc','-O',str(source),str(p),'-o',str(exe)],check=True)
+          subprocess.run([str(exe)],check=True)
+          for sw in sorted(Path('ios/ChampionsOnDevice').glob('*.swift')):
+              subprocess.run(['swiftc','-frontend','-parse',str(sw)],check=True)
+          assert len(list(Path('ios/ChampionsOnDevice').glob('*.swift')))==43
+          print('R485_SWIFT_PARSE_PASS=43',flush=True)
+          build=Path(os.environ['RUNNER_TEMP'])/'r484_build.sh'
+          s=build.read_text()
+          for a,b in [('r27484','r27485'),('R484','R485'),("'484'","'485'"),("'0.4.84'","'0.4.85'")]:
+              assert a in s,'FAIL_CLOSED: build version replacement missing'
+              s=s.replace(a,b)
+          assert 'dist/R485.ipa' in s and "info['CFBundleVersion']='485'" in s
+          build=Path(os.environ['RUNNER_TEMP'])/'r485_build.sh';build.write_text(s)
+          subprocess.run(['bash','-n',str(build)],check=True)
+          print('R485_MIRROR_PATCH_AND_BUILD_SCRIPT=PASS',flush=True)
+          PY
+          bash "$RUNNER_TEMP/r485_build.sh"
+      - name: Upload R485 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: R485_UNSIGNED_IPA
+          path: dist/R485.ipa
+          if-no-files-found: error
+          retention-days: 3
