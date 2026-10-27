@@ -1,0 +1,88 @@
+name: R483
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r483-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - name: Pinned R82 restore plus R483 ROI blocker audit and unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import base64,hashlib,os,re,subprocess,urllib.request,zlib
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/7a0b4cd7fc6e2c2c0f4f80bd251c6ce7f359b751/.github/workflows/R82.yml'
+          with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'R483-Pinned'}),timeout=60) as reply:
+              carrier=reply.read(18000)
+          assert len(carrier)==12058,'FAIL_CLOSED: R82 source size'
+          sha=hashlib.sha1(b'blob '+str(len(carrier)).encode()+b'\0'+carrier).hexdigest()
+          assert sha=='660c4fb5f9126d89d453c284d19fba9bdb157b88','FAIL_CLOSED: R82 Git blob SHA'
+          encoded=re.findall(rb"^            '([A-Za-z0-9+/=]+)'$",carrier,re.M)
+          assert len(encoded)>5,'FAIL_CLOSED: missing carrier payload'
+          stages=zlib.decompress(base64.b64decode(b''.join(encoded))).split(b'\0')
+          assert len(stages)==3,'FAIL_CLOSED: expected three stages'
+          sizes=[1754,8297,3050]
+          hashes=['cd4212e875a8692d771bba10ddaf1f685f1a5f46b4de2b2bc2007ec3d5b79bda',
+                  '520b4536172c93fc3ecd2b814fd67718b96271b72f61b19a729091ecd7f2c87f',
+                  'f399bb371aab4aade40bfd9bd0fdb8d75e77883b9c1a8f9cd23d11fd6ec10f2b']
+          for idx,b in enumerate(stages):
+              assert len(b)==sizes[idx] and hashlib.sha256(b).hexdigest()==hashes[idx], 'FAIL_CLOSED: stage mismatch'
+          for idx in (0,1):
+              subprocess.run(['bash','-n'],input=stages[idx],check=True)
+              subprocess.run(['bash','-e','-o','pipefail'],input=stages[idx],check=True)
+              print('R483_BASE_STAGE_PASS='+str(idx+1),flush=True)
+          source=Path('ios/ChampionsOnDevice/ResearchUnifiedTelemetryBundle.swift')
+          assert hashlib.sha256(source.read_bytes()).hexdigest()=='eb8719822ac255769290b6b2a6cb29370e6788ab1a0462018ef69da8d7be6129','FAIL_CLOSED: R482 Swift base mismatch'
+          fragment=zlib.decompress(base64.b64decode('eNqtVtty4jgQfc9X9PgJaoPnsrcpdkiKgDNQQ2zKkOymKEoljADVOLZLkknYqfz7tnw3mJl5WD+ALLqPuo9OdwMA8PYtuB/+NH/7+GsXPJ9KyTcHUDsGkWAelwzClWRiTxUPg44KO1JRxWDlh95XJiTEkgdbCAP/cAEp2iqMgzVbg4ffCk1MGHK6DUKpuAceOm9DwZkEKhg877hiPpcK7WUI1PP4mgWK+jmYM3BBKoFnSAgFIKKIE2vBqAwD8OmK+RICtmcCmD4Pk+DRKqRiDQjNnpgSBzOB05FjCJs48ECE/IYHa8S9yTJpEY2pd2QXFotZcmgX+sFhubxuQ+cKanvwLcHUzzbWh/lMFQDQK5aXxcpMCIFPPfjw+x+AUbMKhn4EU7EIYGFIb8eeqNEFA7NlkU8DE+PtrNKAOzn35v69cVlDyB9DpxpLjXA3ns3G9mfiuMT6Z2Dhy4NFXKs/xM0ZGTmT4TmMPG6SxI1Y9syOfb/VPmNP13vuMUJ9P3xma7TfUMzxjHGeA5otjCKcSrBzxyF3ffvRWC4LhNditadaC1/ZAZXQg3e1/fA5ON2LopM9Gflcjaantih+cbK7jtFcq1eeAjGmT5wx9SlVyFWrXRhsULUZk8CDUiH1q+ebRD+YUCmdhYGvxhKovIYU94TLN2hhcmk9Repwqb1LjX18d3REdswbHa3JA6xp1UKPdrZGIr9Vk/ylB+8rhCf0Z6ItmG+wyapAl2YlkXSnlgtcX4NhHJOQu/bAuLcfLHd8O7aGxHXGxPnbtlz9aWAA+oobDk/C+xmU6TRBQVH8EMXcUTkVbMNfWlWw2XQynpPRlEz6j879nBjtBrqxf6WuSX/8C2wL/YG9RKFQSYst25kSlPuaFm9HBfWSvnmClytWB918M6l2j5Kql01eed28ny3xphZGyoztzMnUdR4s27gEY37v2rWtxlo+quxbt39nkVvXmo1sbDdV/7KSkd5cRFeASi2iMmkUsWCtuf5iPepby3vDFBEte45Ev1ZhEikkV3kGqLz28vqOQXJiz0CU13weolI6Z1CG96iZQX9etF+CGc6OcYppkZV1E5LtFLTU3P+fAVIZHpryvjsYEceePJKbsZ2EfTNxBl8s9+z0OJ0c9RHY4JGJgZx4Zj80uuDI5xuOXqgBgvkVTvj+A4coCgP8t1D3iqLveyUqIbuo8Mhk0+BVqIFg+IV9qZEGl6R0SShIHOAfr3Ab8H9TQrAJlTFqoybG6TNR7EWRtLl8b/z+9Jyuzuh8mVbw68XFf1dK6Hc=',validate=True))
+          assert hashlib.sha256(fragment).hexdigest()=='b1f023063d001b0fd7a4a38096584bfc61b442833f0e4b863066653a79b16805','FAIL_CLOSED: fragment bytes'
+          needle='    // Call on the SAME serial capture queue that protects continuity and\n'
+          s=source.read_text()
+          assert s.count(needle)==1,'FAIL_CLOSED: code insert anchor'
+          s=s.replace(needle,fragment.decode()+needle,1)
+          old='                "keyed_readings_count": keyed,\n'
+          assert s.count(old)==1,'FAIL_CLOSED: record insertion anchor'
+          s=s.replace(old,old+'                "roi_binding_blockers": roiBindingBlockers(readings),\n',1)
+          assert hashlib.sha256(s.encode()).hexdigest()=='5ee065484868c89d2fc1d7bf0da07d2373eb477fe98fbf052bb460d3f9335578','FAIL_CLOSED: R483 Swift patch SHA'
+          source.write_text(s)
+          verification=zlib.decompress(base64.b64decode('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',validate=True))
+          assert hashlib.sha256(verification).hexdigest()=='1a9e7df54acbbae49d23c0cd234958fdd9b76a30ab65588b7bad35beb9023625','FAIL_CLOSED: native test bytes'
+          regression=Path(os.environ['RUNNER_TEMP'])/'r483_test.swift'
+          regression.write_bytes(verification)
+          # Swift compiler expects main.swift when executable source set is present.
+          main=Path(os.environ['RUNNER_TEMP'])/'main.swift'
+          main.write_bytes(verification)
+          for label,actual in [('r483',main),('r482',Path('R482_NATIVE/main.swift'))]:
+              assert actual.is_file(), 'FAIL_CLOSED: regression source missing'
+              exe=Path(os.environ['RUNNER_TEMP'])/('test_'+label)
+              subprocess.run(['swiftc','-O',str(source),str(actual),'-o',str(exe)],check=True)
+              subprocess.run([str(exe)],check=True)
+          assert len(list(Path('ios/ChampionsOnDevice').glob('*.swift')))==43,'FAIL_CLOSED: Swift source count'
+          for file in sorted(Path('ios/ChampionsOnDevice').glob('*.swift')):
+              subprocess.run(['swiftc','-frontend','-parse',str(file)],check=True)
+          print('R483_SWIFT_PARSE_PASS=43',flush=True)
+          build=stages[2].decode()
+          for old,new in [('r27482','r27483'),('R482','R483'),("'482'","'483'"),("'0.4.82'","'0.4.83'")]:
+              assert old in build,'FAIL_CLOSED: build replacement anchor'
+              build=build.replace(old,new)
+          assert 'dist/R483.ipa' in build and "info['CFBundleVersion']='483'" in build
+          out=Path(os.environ['RUNNER_TEMP'])/'r483_build.sh'
+          out.write_text(build)
+          subprocess.run(['bash','-n',str(out)],check=True)
+          print('R483_SOURCE_AND_SCRIPT_INTEGRITY=PASS',flush=True)
+          PYCODE
+          bash "$RUNNER_TEMP/r483_build.sh"
+      - name: Upload R483 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: R483_UNSIGNED_IPA
+          path: dist/R483.ipa
+          if-no-files-found: error
+          retention-days: 3
