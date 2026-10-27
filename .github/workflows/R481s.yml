@@ -1,0 +1,160 @@
+# Short standalone YAML. R481 unchanged; prior R480 build pinned by immutable commit+Git blob.
+name: R481 small iOS
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r481-small-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - name: Restore pinned R480 successfully tested base
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import hashlib, re, subprocess, urllib.request
+          from pathlib import Path
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/e7ecc2b043fb0d7f211372afd2a44242c93a8cc8/.github/workflows/R480.yml'
+          req=urllib.request.Request(url,headers={'User-Agent':'TruePlan-R481-Small-Pinned','Accept':'text/plain'})
+          with urllib.request.urlopen(req,timeout=60) as res:
+              raw=res.read(40000)
+          assert len(raw)==31372, 'FAIL_CLOSED: reference length changed'
+          h=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+          assert h=='c1d41fc2b0ec34cec4130b9a9d6d99116a5c9c38', 'FAIL_CLOSED: reference immutable blob mismatch'
+          source=raw.decode('utf-8')
+          Path('R480_PINNED_REFERENCE.yml').write_bytes(raw)
+          expected=[
+              'Verify and restore immutable successful R27.478 build source',
+              'R27.479 fix capture session provenance and double start',
+              'Full R27.478 baseline regression and new R27.479 tests',
+              'R27.480 enforce predecessor epoch and uptime monotonicity',
+          ]
+          parts=re.split(r'(?m)^      - name: ',source)
+          sections={}
+          for part in parts[1:]:
+              step=part.split('\n',1)[0]
+              match=re.search(r'(?m)^        run: \|\n',part)
+              if match is None:continue
+              lines=[]
+              for line in part[match.end():].splitlines():
+                  if line.startswith('          '):lines.append(line[10:])
+                  elif not line.strip():lines.append('')
+                  else:break
+              sections[step]='\n'.join(lines)+'\n'
+          assert list(sections)==expected+['Build unsigned iPhoneOS app and repair IPA packaging'], 'FAIL_CLOSED: wrong source step order'
+          for step in expected:
+              code=sections[step]
+              assert code.startswith('set -euo pipefail\n'), 'FAIL_CLOSED: missing shell safety'
+              subprocess.run(['bash','-n'],input=code,text=True,check=True)
+              print('RUN_PINNED_R480_STEP='+step,flush=True)
+              subprocess.run(['bash','-e','-o','pipefail'],input=code,text=True,check=True)
+          assert len(list(Path('ios/ChampionsOnDevice').glob('*.swift')))==43,'FAIL_CLOSED: Swift source count'
+          print('R481_SHORT_PINNED_R480_RESTORATION=PASS')
+          PYCODE
+      - name: R481 classify capture anomalies in unified audit JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import hashlib,base64,zlib
+          from pathlib import Path
+          src=Path('ios/ChampionsOnDevice/ResearchUnifiedTelemetryBundle.swift')
+          assert len(list(src.parent.glob('*.swift')))==43, 'FAIL_CLOSED: expected 43 Swift sources'
+          assert src.is_file() and hashlib.sha256(src.read_bytes()).hexdigest()=='640e58d1e6579b007b1c524773ed0c600cb8ff3aabaf371358c434134d5249b4', 'FAIL_CLOSED: R480 source preimage changed'
+          patched=zlib.decompress(base64.b64decode('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',validate=True))
+          assert len(patched)<15000 and hashlib.sha256(patched).hexdigest()=='441ad93eafae37511c553d404b83af9effedbbd89ec66631c44327d868a8a83a', 'FAIL_CLOSED: R481 source corruption'
+          text=patched.decode('utf-8')
+          assert 'static func diagnosticTriage(' in text and '"capture_diagnostic_triage": diagnosticTriage(' in text
+          assert '"real_time_advice_enabled": false' in text and '"production_enabled": false' in text
+          src.write_bytes(patched)
+          print('R481_DIAGNOSTIC_SOURCE_SHA256='+hashlib.sha256(src.read_bytes()).hexdigest())
+          PYCODE
+          mkdir -p R481_NATIVE
+          python3 - <<'PYCODE'
+          import hashlib,base64,zlib
+          from pathlib import Path
+          script=zlib.decompress(base64.b64decode('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',validate=True))
+          assert len(script)<15000 and hashlib.sha256(script).hexdigest()=='e90d02e02c5fb8d4e08f6437b134dc49a06a87438b4b002eeb0d44b6eab47079', 'FAIL_CLOSED: R481 test corruption'
+          Path('R481_NATIVE/main.swift').write_bytes(script)
+          PYCODE
+          swiftc ios/ChampionsOnDevice/ResearchUnifiedTelemetryBundle.swift R481_NATIVE/main.swift -o "$RUNNER_TEMP/r481_test"
+          "$RUNNER_TEMP/r481_test" | grep -Fx 'R27481_CAPTURE_DIAGNOSTIC_TRIAGE_ASSERTIONS_PASS=53'
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import subprocess
+          sources=sorted(Path('ios/ChampionsOnDevice').glob('*.swift'))
+          assert len(sources)==43,'FAIL_CLOSED: unexpected Swift source count'
+          for src in sources: subprocess.run(['swiftc','-frontend','-parse',str(src)],check=True)
+          print('R481_SWIFT_PARSE_PASS=43')
+          PYCODE
+      - name: Build unsigned iPhoneOS app and repair IPA packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          test -d "$sdk/System/Library/Frameworks/ScreenCaptureKit.framework"
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+          xcodegen generate --spec ios/project.yml --project ios
+          if ! xcodebuild -project ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch \
+                 -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
+                 ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+                 -derivedDataPath "$RUNNER_TEMP/r27481-derived" build > "$RUNNER_TEMP/r27479-build.log" 2>&1; then
+            grep -E 'error:|BUILD FAILED' "$RUNNER_TEMP/r27479-build.log" | tail -40 || true
+            exit 1
+          fi
+          echo 'R481_IPHONEOS_UNSIGNED_COMPILE=PASS'
+          python3 - <<'PYCODE'
+          import hashlib, os, plistlib, subprocess, zipfile
+          from pathlib import Path, PurePosixPath
+          app=Path(os.environ['RUNNER_TEMP'])/'r27481-derived/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app'
+          assert app.is_dir(),'FAIL_CLOSED: compiled app missing'
+          plist=app/'Info.plist'
+          assert plist.is_file(),'FAIL_CLOSED: missing Info.plist'
+          info=plistlib.loads(plist.read_bytes())
+          exe_name=info.get('CFBundleExecutable')
+          assert isinstance(exe_name,str) and exe_name and '/' not in exe_name and '\\' not in exe_name,'FAIL_CLOSED: invalid executable name'
+          exe=app/exe_name
+          assert exe.is_file(),'FAIL_CLOSED: missing executable'
+          assert 'arm64' in subprocess.check_output(['xcrun','lipo','-archs',str(exe)],text=True).split(),'FAIL_CLOSED: no arm64'
+          assert not (app/'_CodeSignature').exists(),'FAIL_CLOSED: signed source not expected'
+          info['CFBundleVersion']='481'
+          info['CFBundleShortVersionString']='0.4.81'
+          plist.write_bytes(plistlib.dumps(info,sort_keys=False))
+          assert plistlib.loads(plist.read_bytes())['CFBundleVersion']=='481','FAIL_CLOSED: version write failed'
+          ipa=Path('dist/R481.ipa')
+          ipa.parent.mkdir(parents=True,exist_ok=True)
+          entries=sorted(app.rglob('*'))
+          assert entries and not any(p.is_symlink() for p in entries),'FAIL_CLOSED: symlink not supported'
+          files=[p for p in entries if p.is_file()]
+          assert len(files)>1,'FAIL_CLOSED: incomplete app'
+          with zipfile.ZipFile(ipa,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as z:
+              for p in files:
+                  z.write(p,arcname=str(PurePosixPath('Payload')/app.name/p.relative_to(app).as_posix()))
+          with zipfile.ZipFile(ipa) as z:
+              assert z.testzip() is None,'FAIL_CLOSED: IPA CRC'
+              plist_bytes=z.read('Payload/ChampionsOnDeviceResearch.app/Info.plist')
+              archived_plist=plistlib.loads(plist_bytes)
+              assert archived_plist['CFBundleVersion']=='481'
+              assert archived_plist['CFBundleShortVersionString']=='0.4.81'
+              assert 'Payload/ChampionsOnDeviceResearch.app/'+exe_name in z.namelist()
+          size=ipa.stat().st_size
+          assert 1000<size<50000000,'FAIL_CLOSED: implausible IPA size'
+          print('R481_IPA_PACKAGING=PASS')
+          print('R481_IPA_SHA256='+hashlib.sha256(ipa.read_bytes()).hexdigest())
+          print('R481_IPA_BYTES='+str(size))
+          print('RESEARCH_ONLY_FORMAL_HOLD_STAGE1_5_560_NATIVE33_0_EXACT34_0')
+          PYCODE
+      - name: Upload downloadable unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: R481_UNSIGNED_IPA
+          path: dist/R481.ipa
+          if-no-files-found: error
+          retention-days: 3
