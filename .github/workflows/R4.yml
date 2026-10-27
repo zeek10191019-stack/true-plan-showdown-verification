@@ -1,0 +1,71 @@
+name: R484
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r484-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - name: Pinned R83 baseline and transport conflict gate IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import urllib.request,hashlib,textwrap,subprocess,os,base64,zlib,json
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/965588beaa9ee153818a70b23cc89d6609e3b251/.github/workflows/R83.yml'
+          with urllib.request.urlopen(urllib.request.Request(url,headers={'User-Agent':'R484-Pinned'}),timeout=60) as f:
+              b=f.read(12000)
+          assert len(b)==9034
+          assert hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()=='87ed38b231cf4930ef459c9d798d9f3a7a8ff5d9'
+          y=b.decode('utf-8')
+          start=y.index('        run: |\n')+len('        run: |\n')
+          end=y.index('      - name: Upload R483 IPA',start)
+          script=textwrap.dedent(y[start:end])
+          assert script.startswith('set -euo pipefail\n') and script.rstrip().endswith('bash "$RUNNER_TEMP/r483_build.sh"')
+          base='\n'.join(script.splitlines()[:-1])+'\n'
+          subprocess.run(['bash','-e','-o','pipefail'],input=base,text=True,check=True)
+          source=Path('ios/ChampionsOnDevice/ResearchUnifiedTelemetryBundle.swift')
+          s=source.read_text()
+          assert hashlib.sha256(s.encode()).hexdigest()=='5ee065484868c89d2fc1d7bf0da07d2373eb477fe98fbf052bb460d3f9335578','FAIL_CLOSED: R483 source mismatch'
+          edits=json.loads(zlib.decompress(base64.b64decode('eNqtVm1v2zgM/itcPhQNkGa4obgNBbYhW7M7H7J4SLICRRIYskw3WlXJk+RkwaH//ajIeXHqrttt/iRb9MOHDylS02kLqmfJDAhVlA5eg06/IHenhq3aM7U1EDlIdKDQOszIaGP8djprFWwtNcuSL1arWWsOzL6FsTNC3cC/+983EHX8AHXg4n6/vCmZyTYOyXjrDVBa9KCtzo/zfv4cRi9eds9fnXehB84wZQttHKwMKwo0wJlSmtws0RiRIWj6pBXZZYI7EM7WoKrwdWrRLJkTWnnUQwkgFyjJIge3QPKiSQe3LjxwDUmoJZMig3/G8RCEJWRiAExKvSIHTkNOa0gZv/UvHkuXjixCkN0HiQm7lVKd8Nq9xbXt+nCYUPb0OFft4wTtVQ9xTvDbRleP9d1Md+o44amVSy3nHrfd+M+zYPAk8W0lHP9v0JVGHWRQm3W8T9apQUYIFzBrRcOr3iC6TIb98aR/mXzqXQ/i3iVh10Hv6685lYdid0gyAymSMuckJiKbtTqEiYXmi7DMDVntNgqjs5J7BgkqlkrMvH4N/A/q3ot+xWSJuwx4x/Mq9E2IQtHu/fdQhFJ7lKBtDaYpBz+j4sdoPI6Gf21V/BiNRvGIFh+i/uChmA2CbgsFv5ZMXsA7reVDA7sSji+C8A2UOaNQHlH/ojlC75JtTov78/x0r3W7A+nu8168djPKhjSZM3hG6goJJyce9TWkj5JsqoQnOB5Ugj9xXqItS3W88es8M8xZKd3Pcaq6QBOrsPXrvB4t8wDye8q5P7zqD+JP/VC/yft4+GEQvZ/8SCHfN8+6cOb+z4ybd8J03g2wF10YoUVm+OJMK7kGKdQtu8HtrJHMkTP4HB2OJz88SH+D1u7mJiH2INWlyjDrkDoZ475J50zIMy61pTXZUxF0YahrYF5CVM4CWs4KrKZQYQTtI1hHVhzyUvGnxQ510YazNzAN6wvoqXWtK1aJo0Zr+QLvGB0VSpIzJRaSqe4BszNmreYiTOTlH9QFHiaMUIhgaQMK5XYy6l1SduPRdRK/G/dHV71JFA+TXRH8Hfse1ogUoki4znCDNw0f5r75HNBKChKSBPMmnnYjVjVE9IrOTUKXAEE3CN8V/A3Aokf0KjTsNIFR/vhtkuk7GpwJpxtGapg7gmPZUnBMqrvGbmse8KhCw+J3Ft58/h/zJhkF')).decode())
+          assert len(edits)==2
+          for needle,updated in edits:
+              assert s.count(needle)==1,'FAIL_CLOSED: patch anchor missing or duplicate'
+              s=s.replace(needle,updated,1)
+          assert hashlib.sha256(s.encode()).hexdigest()=='0035d617f59dc570b086a91408e8cbe6c2978ea36da741a3f3531582dc266615','FAIL_CLOSED: R484 source mismatch'
+          source.write_text(s)
+          test=zlib.decompress(base64.b64decode('eNqNVm1vozgQ/p5f4foT6NjobtuTVlTcXtrQa3ZTqCCtVLEIudhpvSU4Mia5XNX/fmMMed2+9ENq8MwzM8/MY8NncyEVuhB1SYniouwtiESl93tvWpc5yh9Z/mRlaOGiv0mtRF6IqpYMWfanv86EKJwMLR+JcmMleflgP88ly0VJuUayFpbt4CnhBaMu+mFpQxvbp+Vv3h8vBv5nBWYZom5iANxBuUoB2jyhZ/PfgsyIq+TqCH2LwyBmkpOC/9ek29d71pKrR70V3v9kuXKpI+Z6s3KTfgXlMfqdrarUdliZC6rj9Gs1/WIfvfQKptA9Uapg3s3NaGjZ/brm1MRtNsV9xeSCtHBbaSIPJdi4Zpxi1ywdzOYif8TuMZQuyczsHR+fOHguBa1zDZSxktwDK9idkqICH8mITqvCbpLgJ7bCbhAHdVFoAiVZZor9q7CL48vwZjzMgnCSjf3Bd5ymqeFRsqou1K+Y3H58jljFiMwfb0o+5YxOWMFmDHg9g+YXrL9V6qCqRM6bpbX1WnPsNk2jQKYuFOoEeIgP5OCCVCqjrOALJhnNdupP7bbnlJUQ+yBXmCToDVtPkuZeem1h1D41kygTXCmi6gqniFRfUTsonofweRhMosFwdD4Jo7ssPIv96HYwGYVB5ge3/ji89rPLcDzEToewhUnogucsI0UhltAWg63nWyO3PTI2iPLK9K5z1/7QPyAl0wV0mbW1pfbXPihCEV5Wlt63NaSStek6eK2Bjhpipb2xP2g4jEMpUHgeoYKRJ2yb+aUcVKc6rrYH1u4ZaGPxOnfbbF1H4a0fDIJzP4v82B9E55dZGIzvOvYMFozcTOeImrf7cT7CZ4sD9RhrANHFPAixOxhegudkVQhCM00QNvO3U+WB1DYafEN0B9pNTQLrqdOpdJU96MnTMQz0bkWmnUtJ5nNGkTZDxuzAuyCKgUZayWwU8i5eY7mD9xGOO4htkreH7eG9aesA9AEELackV3r0e1MhkfXkLGzES5RYLeHOie1Ym144x8d/6he/6IGjS7R1zuBtmu1As+HNcw/Bn76E7gn1dAtOYZE8pd7itD064NnBa1FfjHxIGtR/MQbtQ24vzRW2lKJ8MP7NcvusTg/P+g67sX0LXVe+IEXN9HA21a+P6s+fm7KcJHWS3YlMtW7Vp2Z+HZyk8FOCD05NtW3s/UFvwoDrKLgdjEfQGD+e+MPsenA3DgfDdaUzXlW8q7V72sNKvabf71xYr4oltTt+WngHX43ieBT80yV1NYqiMIJFQ1irZbUUY7ZgRdVFf0/Imzj7tmuot/jQMUtxxaUUaxF/JGiric71g9qCbw5RKyBc+4BGWAn5iTlolbOC7p2MG+x1BzIYpRlRGbT5lROg2Wk/T5Cx3hNwB/vepQGHjjkGzL3Rm8PMKwtHJ19OMrg1g/g6jCabi3IQw32gb4MY2I1j74dVwpdb738vjHcv'))
+          assert hashlib.sha256(test).hexdigest()=='eNqNVm1vozgQ/p5f4foT6NjobtuTVlTcXtrQa3ZTqCCtVLEIudhpvSU4Mia5XNX/fmMMed2+9ENq8MwzM8/MY8NncyEVuhB1SYniouwtiESl93tvWpc5yh9Z/mRlaOGiv0mtRF6IqpYMWfanv86EKJwMLR+JcmMleflgP88ly0VJuUayFpbt4CnhBaMu+mFpQxvbp+Vv3h8vBv5nBWYZom5iANxBuUoB2jyhZ/PfgsyIq+TqCH2LwyBmkpOC/9ek29d71pKrR70V3v9kuXKpI+Z6s3KTfgXlMfqdrarUdliZC6rj9Gs1/WIfvfQKptA9Uapg3s3NaGjZ/brm1MRtNsV9xeSCtHBbaSIPJdi4Zpxi1ywdzOYif8TuMZQuyczsHR+fOHguBa1zDZSxktwDK9idkqICH8mITqvCbpLgJ7bCbhAHdVFoAiVZZor9q7CL48vwZjzMgnCSjf3Bd5ymqeFRsqou1K+Y3H58jljFiMwfb0o+5YxOWMFmDHg9g+YXrL9V6qCqRM6bpbX1WnPsNk2jQKYuFOoEeIgP5OCCVCqjrOALJhnNdupP7bbnlJUQ+yBXmCToDVtPkuZeem1h1D41kygTXCmi6gqniFRfUTsonofweRhMosFwdD4Jo7ssPIv96HYwGYVB5ge3/ji89rPLcDzEToewhUnogucsI0UhltAWg63nWyO3PTI2iPLK9K5z1/7QPyAl0wV0mbW1pfbXPihCEV5Wlt63NaSStek6eK2Bjhpipb2xP2g4jEMpUHgeoYKRJ2yb+aUcVKc6rrYH1u4ZaGPxOnfbbF1H4a0fDIJzP4v82B9E55dZGIzvOvYMFozcTOeImrf7cT7CZ4sD9RhrANHFPAixOxhegudkVQhCM00QNvO3U+WB1DYafEN0B9pNTQLrqdOpdJU96MnTMQz0bkWmnUtJ5nNGkTZDxuzAuyCKgUZayWwU8i5eY7mD9xGOO4htkreH7eG9aesA9AEELackV3r0e1MhkfXkLGzES5RYLeHOie1Ym144x8d/6he/6IGjS7R1zuBtmu1As+HNcw/Bn76E7gn1dAtOYZE8pd7itD064NnBa1FfjHxIGtR/MQbtQ24vzRW2lKJ8MP7NcvusTg/P+g67sX0LXVe+IEXN9HA21a+P6s+fm7KcJHWS3YlMtW7Vp2Z+HZyk8FOCD05NtW3s/UFvwoDrKLgdjEfQGD+e+MPsenA3DgfDdaUzXlW8q7V72sNKvabf71xYr4oltTt+WngHX43ieBT80yV1NYqiMIJFQ1irZbUUY7ZgRdVFf0/Imzj7tmuot/jQMUtxxaUUaxF/JGiric71g9qCbw5RKyBc+4BGWAn5iTlolbOC7p2MG+x1BzIYpRlRGbT5lROg2Wk/T5Cx3hNwB/vepQGHjjkGzL3Rm8PMKwtHJ19OMrg1g/g6jCabi3IQw32gb4MY2I1j74dVwpdb738vjHcv_SHA','FAIL_CLOSED: tests mismatch'
+          main=Path(os.environ['RUNNER_TEMP'])/'r484/main.swift';main.parent.mkdir(parents=True,exist_ok=True);main.write_bytes(test)
+          exe=main.parent/'r484_tests'
+          subprocess.run(['swiftc','-O',str(source),str(main),'-o',str(exe)],check=True)
+          subprocess.run([str(exe)],check=True)
+          for sw in sorted(Path('ios/ChampionsOnDevice').glob('*.swift')):
+              subprocess.run(['swiftc','-frontend','-parse',str(sw)],check=True)
+          assert len(list(Path('ios/ChampionsOnDevice').glob('*.swift')))==43
+          print('R484_SWIFT_PARSE_PASS=43',flush=True)
+          build=Path(os.environ['RUNNER_TEMP'])/'r483_build.sh'
+          s=build.read_text()
+          for before,after in [('r27483','r27484'),('R483','R484'),("'483'","'484'"),("'0.4.83'","'0.4.84'")]:
+              assert before in s,'FAIL_CLOSED: build version anchor missing'
+              s=s.replace(before,after)
+          assert 'dist/R484.ipa' in s and "info['CFBundleVersion']='484'" in s
+          build=Path(os.environ['RUNNER_TEMP'])/'r484_build.sh';build.write_text(s)
+          subprocess.run(['bash','-n',str(build)],check=True)
+          print('R484_SOURCE_AND_SCRIPT_INTEGRITY=PASS',flush=True)
+          PY
+          bash "$RUNNER_TEMP/r484_build.sh"
+      - name: Upload R484 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: R484_UNSIGNED_IPA
+          path: dist/R484.ipa
+          if-no-files-found: error
+          retention-days: 3
