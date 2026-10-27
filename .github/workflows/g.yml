@@ -1,0 +1,138 @@
+name: R490 Focused PP and Guided Four Moves
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - name: Restore R489, integrate R490, test and build iPhoneOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import urllib.request,hashlib,base64,zlib,re,subprocess,os
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/e5ad189e7647eee7b64a885df0633aea16826087/.github/workflows/f.yml'
+          request=urllib.request.Request(url,headers={'User-Agent':'R490-pinned-source'})
+          with urllib.request.urlopen(request,timeout=70) as res: carrier=res.read(20000)
+          assert len(carrier)==15819,'FAIL_CLOSED: pinned R489 length'
+          blob_hash=hashlib.sha1(b'blob '+str(len(carrier)).encode()+b'\0'+carrier).hexdigest()
+          assert blob_hash=='acb63f9b4a196ae1a8d54654d23c014a11fc60b7','FAIL_CLOSED: immutable Git blob mismatch'
+          s=carrier.decode()
+          m=re.search(r"b=zlib.decompress\(base64.b85decode\(\s*((?:\s*'[^']*'\s*)+)\)\)",s)
+          assert m,'FAIL_CLOSED: R489 compressed payload format drift'
+          b=zlib.decompress(base64.b85decode(''.join(re.findall(r"'([^']*)'",m.group(1)))))
+          assert hashlib.sha256(b).hexdigest()=='af8771186072e48f7f15dad6642d3ec81885e2ca1df959deffadbf2634b9d126', 'FAIL_CLOSED: R489 bootstrap drift'
+          end=b'\nbash "$RUNNER_TEMP/r489_build.sh"\n'
+          assert b.endswith(end)
+          subprocess.run(['bash','-e','-o','pipefail'],input=b[:-len(end)],check=True)
+          assert (Path(os.environ['RUNNER_TEMP'])/'r489_build.sh').is_file(),'FAIL_CLOSED: base build unavailable'
+          patch=zlib.decompress(base64.b85decode(''.join((
+                        'c-pO5YjYDv7X9vD(WT8snq@q;fRIE)uwWjc3b4vDsoDaH8qc((smw!}hq0G(6|x}#1Hptx65'
+                        '<3xAR%lZ$>y<M9?5@UkZeBj7xvul8C$aD7|5#1@~Ef#_I;dt@9CL}?>Vflhc(+8VU|<({E(I'
+                        'KvnRQ(=>gs9sTXN9m$kg0Z=j|-b<1;uL3alqwG5tBdJNC=&0@VTJD}IY$mav}+j8~L^R?ipR'
+                        'SB~_ktOagU%ahePiIv1kkgzY9&p_^YGo*9>Gsgzp53^U&eDT`Lo?mBb7Ptn9I03~&nc|p`D~'
+                        '0?E;}f6Q6ozwd50A>yKCE?y+;Q24wiTBD6pZ8Z@kF@FY*n}94iPcx0>xSiei!GbKN`=^06?d'
+                        'Y>tYN)iF>llEC(%RF~|~`qwqc&C>n`(_NEgxf?mGyCq^;wdXI3w|hO;9xt%4##xz+Jg|q2TK'
+                        's5VVECN7LCp(=%<@1v#O@9oi7FNDGoL#;Bn7;#`w+{j+;e#7TRhNubkp?QqMyxXdwLi?eSJ('
+                        'Q`DTBCL5gLB%;sa3q1y~r!3n~Fq=BpZzIT+BO3d)Ry2@PI9g`g18-%n?-S@nTmP*~vN1;llV'
+                        'vS{3{<YWf$-}(R!;gGl9zP&9K#1JX9>)#RJC7UdS%sjN&*#@mQNmxP(q5_54ok1PUJzOaJ0@'
+                        '<^hqlK+C2|dD<vY4<{ga!yBaEUU&2p;>>)n!Ewk@R(%|i6*wr=3&pkYM5&s~EDIj>U4JbQRP'
+                        'qaL-wS|QVyQ92gVXZ3}T8z)|FAxoFN(5gf3%PkALESu=+TGR5m5yGv3@M2J42c<s`3*YAUxS'
+                        '@(aW$QBk+B`%lvHXA))1{i>Id$C#_vv+ZObi;~E*}G^0J*jhzS6I#jz0E|Zb!VZX`|An8GWj'
+                        'e?wdk>1>(b^*hLf9>Ixq)sf30CQHD`LWjuF`z0$Asvtm)M$K|W9(olYBD9<Jo#_fQ!V?IX(b'
+                        'D3+|omwR0V*VN~#I^A*?277j?iZx@RAzfe7k{noO1;?TAR$OmN7~1PxK0dEmh<-_1W=^1$z9'
+                        'KpRX7`<qy*N8%~@chsB3Jyj#>G<s4PfF`lUM~RyFdXKwHKAZc)Y%I_Gq#qoF^Pe2(PL5%^V_'
+                        'W46taw&q4O6QyJqIWDItO1GG~Zxv0|+|sX_ZxuIfe7;EJT-96)%t#3Iv7E$oIRSKvXSF>(Th'
+                        ';dXY+b#MSQX)m(PEM)9kP{0tuv)k^U;m@>0g`2KVA50ws<Hvs`V><^e?YGdw8n(!{q#>+k*o'
+                        '`@zjIX?45->=N4{1eD?5kW}@3}LQ~;ip`|J{=)_qvM_3`ju}t$e-$A=4bJI`e&OAMNZvN4|R'
+                        'dj4!nVtX7)z;0~<_GtetJxvBYkaT=R?OeH-@JE~gkAojdH3VEaj*5^?bh6P^S{hAXHLb9@8b'
+                        'pr@5GH09a5#li5}`;Nt>;roJ2rXHi7yuAa0dvo(rT~0SezZHJb=?djt5wwz$cbT4+`&7V|x5'
+                        ';z^O@FDpkCy>(soko%JB^9p+Z&N19DtdP;Nkths3cQdUCMCPIk2B9b#QVh2NF^H-7=)--!M+'
+                        'o;^jqUfC9)+GmfbX-dQ4Zgu<~rOp<%}NPHENz;6t>EYh}?a;8woa2^1TrvPsbL0Y$QIG%Y@4'
+                        '+l1D6O5rfb>L|spLL#i?cB4})bHuwp@VL-VCH(3GOcc47X_74uH^g*{nFapcbt57{LOHFtJ$'
+                        'p|D*Flu_(=EHy-teXzpw_OiI6tyx@6Ir%WD|bhh$<35wL4{m<KGexku4#!@G+ZNA2R6A6gi8'
+                        'KcDlDKQ)`%}OdnYNOMHc!I?^(io1*X;pmL?8@6afdhB`ICpo*-O691L_3m(urY#a)+N3Bb_a'
+                        'p3C4v-6jRcnLespwodwh1?qKhH6Sx(@jSs7SXT~yz+eatrf5AVDA{C=6qywikC<ygXk@^=Ov'
+                        'emx4z`XNP+|vaJ>m{>=vbhKy)cI9(1?I3x;pbJi~7}T;{lO5oASZJ?f|d_mycQ|{J<P<l#3X'
+                        'v5DZAjNVjob;=ru#flUS);07^{@Stc}DYigR1p}2hNMKO$j3|)ocLi+gq^54GOGH=D@6^9_B'
+                        'm(nDqM+m3_U%mV=_Ni~=VmIB^zS7J0=*jBHtJcVS1&^CQX&9y$ZnY&Zb(g8o;&)8OaoTpq_j'
+                        'w+sfzS#n>OJT6V?b$o^6U~FQrj!98s+CzzQ}mRvJr$j`qN*0gg$<*<6Qvb$6U09gx{{Qh=by'
+                        'MlW$i>L46iLf>V+A*vz-A}}s=l)BY@Ym|6@ds`I_=4Ppc^fGi8WKlSw044U&MfdKxL?n!AQF'
+                        '_g&iuo!=w4;_8*0vP$>-$yws&T7Y3%3+Eyq2(mt}RA((NgK@^-r4Du8BVKaeJrAbm0f0i}Fe'
+                        'coD)ge;YG-yT&jTbH;RJNF`F8EabWilwfnKc!0uhPr-wO`p{V19epM`798V?n$_dht_PcUKQ'
+                        'Mx!L0K2n`m?OYO<SFzDwEZ%6O6=m)2h^4uA2)CQ*t*<l^~5su--|eS^E>-tfmd}wABS-m8j{'
+                        '29MM{onzMMvxvKIic;VDh069sUvVlp+Yy}An<syO%iq%0*8n6(a#|4??aicSm%Gu-VxP|h4)'
+                        'u>cI#aw3N`ep@&Wvq9(k-{`Qh2JGA1hm8VIiEVGo(Od$vf^e_ui5dVNSU9|7yXmoGp+BAq(!'
+                        'izA+ML|MM32MD1adY+8Xj8?zNB`n83%Mm*DU6iJVEIgu&rC!!NZCcpx~lHio?nX%|!IKdt<Q'
+                        'Q{0G~@UdgW<?G%qhG%fUf9u&n+TE*6rqZdSmUVUJ3LT-biIq4mFSYs2*#0ff?N+RyQb(xI3l'
+                        '8#FWoe4$+G+Euo{$Eg1;^|eM2z7Z}pe2OAqgZsZ|0Or6tMTUc&iv;IRJYzv^|PbB@6bb?%6)'
+                        '|cVt|3@Nl9fN0n4xY<VscazB+XT(N6VB$d}PChcJqZUcnWaU?wg{Qxip|lMuECY?Kb)l!=SR'
+                        'p??YcG|LU@RQhC%$9WP&Q<iNQ<re5mMKAKAuz;f=H}{Hb<pq5r|E0XT<EcV@DZr$mR5bx`nc'
+                        'Ed@c|QWGsemeMLeTAQHj9%Yt(Bw##tzpaXT$}kTCqnW4$}S~CN1uqHuh4f)4mRSHF`3}sq&h'
+                        '+G-)%fFRmXtL{@s0O2ET)bXvPAM{rbdi0NgZ?b1;P_p++^RwUkn(DOM<OAt7m*`|V|R6d7K1'
+                        '-CRP;(eW`5Wxp{him^{LMOEXf^R|^a!^izFMYP?<q{BLmm|l~QEb69G1NSHt2zA{PKIb{@#M'
+                        '7ZYV(&KG^ftvd`M@=OV?VbW-@=u`+ua|YJo@}6y%hyFj};UXlFzVGSW5hv$#-LJo!=U^qJ<F'
+                        '%Sns);OqIB_n*w&r3V0~ZsK4}?c&4R3s=6D+=b4-S%gO%mK@RTL}n+MZd&x@7vW`ubK(b^sc'
+                        '{j3uK>72Hw`avI1#mUuEB}(OWoUP{z`{sm&)!c{y2Qd&32Tn1A7W=hbXVfAvUd92~`ggHbBo'
+                        'F=>edJ3RT6y3^Mp;OnMh3hl7Xv%o`cC#G|Lxl6CoKyVx(6dD@t3O@9$jU5=-|i>DsOQ`do{j'
+                        'mVI=@s0F7BD8S(e(TEJOnaq{R)R>HP)ts{&$D^lI1^7^j2qYRE%!hoK6x;`@a66KoA<?|4Mg'
+                        '@tJb7kgYx+3QuyE&Y-1xnD{tAXN-5$_%`=n=u?x)%{MNF(YLz9-5!*MWS@C@Gsa!gczkS{7G'
+                        'YYHHCmdms*o_q3W79Mzf;d(sz?=%|Uq_zvEJbwS9#}~eAp8T;jdm5P#H~tk*-iW6_oR9!>ty'
+                        '2%+88PR^lesep<-*k2)~DY$f4tSY`?GNOX-Jdtz1I=-$&Ubqxbdr4{8d^%?losF#Eo;f8z27'
+                        '=E1NUt;>Ow5?K`c{=4ia}4TWT~fnAfC$Ip{ajZafOZpMv^Vz1eF^7nY^C(7yRhcw~%q}1bV+'
+                        '_)M~;`>_j`p@F276vaod2o;JPX0HZ`Zk`t8BZN2MF|4Gw=Vxo*f`#3{&unT`7L@V)`?V1Yrc'
+                        'Q3dGFf7muIof{4X=DFJ@5;=dWLy|Mpj~PUtN)$SBVRA+$(f9p7GvYQYu3ZK7hdyaq@hwB`8o'
+                        'rlUYW3e>LEUP*MINvH|RA7x@7D(drOqC{SDzJK;;76&6i%jJoX>g>!3!k+|8^ZZX6HvSb=mK'
+                        '=QQ7Cn9i0Hn*|=1UKreh%18W2SgZHGlVX+_*h|@*5FUnat-!bT3m@w*{vCITYa2Jb$kB$#t>'
+                        'hx47{c)rc1jRqCcS*X;8Aow`w5bbi<Btuo6jpfPF0JWzKe!9lftE|r9n#fs%Y)Eo~x)PW%Lx'
+                        'hl~ruv_ZY*>y7Z0(<T6SKsV!f4|y36v?43$ARQkt9-kA)VD$|U)>tY=E!Ovh?LFZ?QYvpRp|'
+                        'jypy$m)*yu=k@W9Z(&LgF5!vk;QyId}AII?Tc-ks&FTCt;`Rvh->ogR7|TIup0x*%m$G<vY2'
+                        'Chyg?pr)^XZBwoy-ztxc(_u(av>G2Xt*SVicL@I<DH1kn'
+          ))))
+          assert hashlib.sha256(patch).hexdigest()=='64a9aa676acf147b093081eaf33b648d42496a5a259dba4716d012ec8a249687', 'FAIL_CLOSED: R490 source patch hash'
+          Path('/tmp/r490_patch.py').write_bytes(patch)
+          subprocess.run(['python3','/tmp/r490_patch.py'],check=True)
+          tests=zlib.decompress(base64.b85decode(''.join((
+                        'c-oCr%Z}496y4`5j8}<>lDLob0bYz?KqFNmYDNgDts*yZXRM}46uUD;zygUqd&G(*3qAnxHA'
+                        'ujcU%-!a+Gzz$Huqfn`rdPnldx4))&e{!*F{DID+|lYsQ?>*!I*MN>hv<M<Oa#d&(59_LA@v'
+                        '%(G5#U{+N-AqU3_59;f-jx*|15Wgme9Yq2g;@RD*n0VEY`k`F;FYF1ph380&brh;bMCFfOD)'
+                        '3huyrsmtG9^-A93s;P<h)6HNwApmP^H?U^3I{q5^x*p#z0vfmlFMdSl;a6Rp^rl7!dBq70vS'
+                        '=uM=ceRi9iFOSAKtc-|T_!Z{Gop`+gs~00yR90@E(+_+bamtVLOaC1AyFCb+F<<7G_d!k#Q='
+                        '4!DOw!E&vMOYKs{@|gadWQusVCm*Ef3?vxz6zU>mmQX`fE7It76NgQlPBjR-e%Lj7wfwe`9i'
+                        'Zm9aYL`{E0Q$+sRcJ$79{6X-g8PTaV$u+vxz%*RLhBND6654E0a(sp-zH5EIo(vHu}(+9a7+'
+                        'eq)VFF>#CylkhpnyE#rLa?SE%)M{C?RxV^`zr`+;;hQ}Ty&9%W~NBqwGFg{@S7i;0(ok(IgM'
+                        '(>W^>0}GejxEuSB+8Az^B$rgI3!<F^*^vpNArF1;qG0Wxki<`ccV+S_hbh_Six=h^W*1VpT7'
+                        'S1@&P)xrLscUaNHRLNfafc(-&utPDaW3X?z|h(McTRsjaK!yJP(U0R~y='
+          ))))
+          assert hashlib.sha256(tests).hexdigest()=='58da52dd4feba46013b90e826113824cdb4c455466cf971a2a25cb357475e8ce', 'FAIL_CLOSED: R490 tests hash'
+          Path('/tmp/main.swift').write_bytes(tests)
+          base=Path('ios/ChampionsOnDevice')
+          files=sorted(base.glob('*.swift'))
+          assert len(files)==44, 'FAIL_CLOSED: R490 source count drift'
+          subprocess.run(['swiftc','-O',str(base/'ResearchSpatialROIGate.swift'),'/tmp/main.swift','-o','/tmp/r490_pp_test'],check=True)
+          subprocess.run(['/tmp/r490_pp_test'],check=True)
+          for item in files: subprocess.run(['swiftc','-frontend','-parse',str(item)],check=True)
+          print('R490_SWIFT_PARSE_PASS=44',flush=True)
+          prev=(Path(os.environ['RUNNER_TEMP'])/'r489_build.sh').read_text()
+          for old,new in [('r27489','r27490'),('R489','R490'),("'489'","'490'"),("'0.4.89'","'0.4.90'")]:
+              assert old in prev,'FAIL_CLOSED: expected build token '+old
+              prev=prev.replace(old,new)
+          assert 'dist/R490.ipa' in prev
+          assert "info['CFBundleVersion']='490'" in prev
+          p=Path(os.environ['RUNNER_TEMP'])/'r490_build.sh'
+          p.write_text(prev)
+          subprocess.run(['bash','-n',str(p)],check=True)
+          print('R490_PATCH_INTEGRATION=PASS',flush=True)
+          PYCODE
+          bash "$RUNNER_TEMP/r490_build.sh"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R490_UNSIGNED_IPA
+          path: dist/R490.ipa
+          if-no-files-found: error
+          retention-days: 3
