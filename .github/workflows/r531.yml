@@ -1,0 +1,130 @@
+name: R531 First Pass OCR ROI Unsigned IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Verify pinned R529 and build R530 patch integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY531'
+          import ast,base64,hashlib,lzma,re,subprocess,textwrap,urllib.request
+          from pathlib import Path
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/44023d5487d6368caa3c1302290a0f11658abd84/.github/workflows/r529.yml'
+          with urllib.request.urlopen(url,timeout=60) as response:
+              raw=response.read(30000)
+          git_blob=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+          assert git_blob=='0a5a70bf5b2c87ac87165733741c0f830bf7fae2','R529_PINNED_BLOB_MISMATCH'
+          match=re.search(rb"          python3 - <<'PYCODE'\n([\s\S]*?)\n          PYCODE\n",raw)
+          assert match,'R529_EMBEDDED_PYTHON_MISSING'
+          code=textwrap.dedent(match.group(1).decode())
+          assert code.startswith('import os,re,json,hashlib,lzma,base64,urllib.request,subprocess,ast,zipfile,plistlib\n')
+          assert code.count('app.write_text(s)\n')==1
+          assert code.count("assert len(swift)==81,'R529_SWIFT_COUNT'")==1
+          r530_patch="""
+          {Wp48S^xk9=GL@E0stWa8~^|S5YJf5;3(D&gk1m@=mZQR@)_o$9W?N4*YMDtY8u{hQt8i0+zZP4UX$mIb1}PYKuAmV^w
+          @WX#c2RF|E$j5=$lh=Rb7uSfei1$FatF{7jc&Rx%_u70A9^edn3pY)m2@uCj9nxdNo;l{sPDM<<)8tKjr1iTzu=pncY!
+          5GrMQcD#l_`rIUmB`rK}ZYg+~KPvA?Ex7mdA+J@B}NeI3GQuZDOg}V^1C7A#+_z*>idg>mn&<q{n=Ql~qLYlVq4({iJa
+          N7*+PvITkvWs%McIWa|o7%wW1VM%7zSl^&Q0-x%x(xkTvTV=-Ks82gc?~1ykXs{)b}<$0^EX0-aUacm%_-=R;VBQLiLk
+          ~UZeg!G4H<u(qW^cTGXh~^7vx8VxlfJ8PS-<&zF+M==iBOwU57pOthQZ=4CaKyd#Opwp*uoj;ZFd;TaDZY$HRt(l?!!E
+          Z|$^Sv<pCFFsOfrsqN|(ipgt-N5V;%y_ay>IitrLeL>%SM|cM`nKrug!^q<&ARh;4eHi-LJKCckVS~NQHLGIIb516wX@
+          qqI=cf3}2h7(shk>~g@qSL4Pf|P`t$}zTLixyWg-n^ha83{>+j_*_edGnx(~rx4S;Rnp6*SeC00f#p-`j3FAM*+bA0k^
+          avCjUH97IE%-6RI8bJ`5l)V=efe1PF2_PMtQOlROgz(PFnvc@-BrgU${cA#neN@{;>C=^EsthS9;!0SZ%<cQ<ATeY+N1
+          *Lax!mHA`5^R8uJUh-(5isJuMxmhx)GS<ndg$=W)5-zeD7in}mA@Zo$TATCH?oKCIr6UwAEXLVMX}O9{+c}LTE?wJ!1S
+          )e0lCS?*yyK_UZz*Zg+dFp80g=7Zb=5OK-JP}d{Qf#+s4C>nzXlkuZ}221$SPW+%HcN^>P&S;HR%olTSAftngmmTMa}<
+          p%1i;ZjbL)$#e0~E3We>$QQ+_5cC!sa}ew_LOn|_$dMgw%HN7Ee<qWo1}sYy1XMM_YTxxMz>i4u)EtP04sea1tfXs#`5
+          |21z})abF4)8~0$0;J0y5kkT4XA~CY6-agnSzBx+FF3t>gc37gWKEC8X!*#}u$7W;Y|V!y0T;79|Fh;*#{BhjbhCt1%W
+          CShai&;D_xzayj(-3Czo1qOOK-Ye!iY+{scHLSJ0Z-n2r*A2s$$Xo=nAC8#Jg{c5h1aWdKlC3WXoQuD)8EiYEG!qwUnC
+          w~@{SBL0B@QWHr@xtNVWjv4m%b_0HH!!GqBQ*Mk0lyPi;$D<#DFulA<JvCm#?XS%pMS#RwL~48fMi*y{K5*qtPY}M9Vh
+          dev`ap;X5C<a*VCg@IEh`d2BlhZ4_4|zug?Ne^blt4UoPG_%_}IXu4hNd6@(6L*&^2yGao=c6fV18YblL87erAE9#XDu
+          nmfI!n>x38u=#`xlaKg*m)7xm01p5=vSl@!ChoM*IA!(+5u*PBkGt2q-PSg`|CbITL<v#>Ruk@ToK+_-qq79@Z$OJ0rp
+          ev73W;Gm#fb?Xe3h}Y;0lxb1QjW!sywKcYp3X{>|<lWnK4CMU;x>=w=Y(ZSPpWIxT+>MsFzPg<;C!G_1Gi7|5xd$%5gq
+          f$R5=$ZIh2&`(@e{ZL3Bk;_6eqV^am_o#I{M|BwgYN#Vum8~s25A-?1<K>EZ_yAfY>8H3n+qDXFc<DcRHYllenly*;Lc
+          DEO5E?GK9?FE{@fsa%9mMdI-<!*z%kl2?1lF)m{<uRF~bZe3YMc$23ETKjd$@-Z?#tv0-e}z~3FBr>k6=14(x9^hwGvx
+          V03XFh?dWsA3CrMFH6+Z)he)N1#V!*&aH=!_}jJZ*l$xf0*kpzQBk}@3ba3=a=KG(EPE5c6ZTC&cHe(?B^DBK=I`j}RN
+          a>-<qe9iYvXoS%#K2|$%Y*KCfhh1}?p@4c;&4yzP-uS5y{lQ56CD%Y^k(FsOi8mB|Eat6NVN1*^#F2?}?}k|#qVA*BcF
+          E}gsnwzkmM2)3dKE+>SfS&i44w*)R9ikBuhq!dI33?{K*o^vq?Rj9DXsFiULDKiYH8;BHP+*MMKEVzl2(kSPIu<&NrKr
+          98E!EKr<QR-QWj$&iKa6g2xB}2H|YwD&xW3U2YxTxnL+bk_d#+I+GbmXUKn98OTkFO;663g)?7uhnkeXZPBa<Tyxi0^%
+          #TqOXt|$mxs@w=*09ZR$%k>uDTQI`1-b&0?ZLT3Y^!V%l3l8@(ZcyQUN1ccY+mYk+d{<V?lU&8UgV#mGQs%Z1sTR)hZG
+          j+0cb@V>w6wQI9?8dd1KoCTo|HyaD>wEHF^xA1<xdK7#cKBB1oMY7BBmZ{d#4M4&ZB++Eql7@_k}eUaL&Z*DoKxA_&8l
+          ESq~p;=wt?ZnwLEyje-abQX`-TNg<y342X0*(|0~O=vvP#fF_o1Fa;MEJ_3m;7~hKzkq2%_Ii2BJQKkej%_*y)~aZgKi
+          U4wmOi#R8&*Q|d!=H%W!X8<Vtlv;)UB<Aw+oxE(I~Rc)V<mpAW3fq>ueMS4G8dnZ%MEz7`-v?ft07G1ugG~p0}NFI@67
+          9(z8_7ujUT0paz(j7}Hi9LwT)QDtEwov95b!5slxi>dz2U-+`iTCnE`IrclJ#9z^?W`w@K4h7p;v^5QVP6>lQX!vyy%b
+          DyuN*QYcTb490hdp});U=7l&-SLyi#-R&E>dFtwbxG~_`4#!6qgRMz&vziHsJyu~3AlsSvi4eXex+odY<uAhpo-aadFJ
+          yv$I!e|1vIkN`{!M@Xt4!qqrPq?tbcl_i;tDgEY|J~Rl^b^{?whD!_c)jr6^`3i?$eQB~2wHW_9^0YS;;-Q_OXVo-ST5
+          xPAtqwsduoG5fFE)0UCCAAI3v)KB?RYNn@)KU!}6&Pg(4u<)pi7(`!3ACTvo6AAvTc*a%C1@fA?!j%_6xv+Qw|FqfYGC
+          H1f*Zi^YsT{OHxZ$I7mOEt!a@fqVk7i|0X|HcUC>{phNRTNy-DY;Glp8ca%f>u1#;b1$x8yr|0oW<y>+`GMVgUBd=uIC
+          $%si7l8C&f#fl=e%x2$}%FcfvahMWCXmpro9f6PCnW?GkieJ^<B<E`$}!F6>SHMrR?E11V~4USxpg5y-JCzqr`l{80I7
+          Uyjg_eBRQoS28IR`?*|+z|c{fn`5fZo3oHLZ(LSV>4JV^p942*L%daoM3zrFf&@l!}YFlIi*5Z_NCJ6WVae;jIi-wg<R
+          BRTlxK38N4UtyB4jaz&Ai+{=|jM-b#j+#c3zqs=v7Jsze1z*&bLKsRCu1I&EDTpL@5^5ykN+b4CiBnnj@wXb=uaiGm3%
+          vWqsr0EmpZ{teK}p*zcTk$O$lEiHx3WT|jPhiMSOGCyu5rIpgC-??l_H<;Mgp4;-Sd`C^}(uq*8z+7kZTD=^7d;*q!58
+          {`*+EvT`5l_|{eNDZTT**$Qp$s}IG8Fc&VS@<A+kjsqRN#;QuLWLRsA~D-t=$IKw@qaNZs(zS3s9Vt^(?I{m~C)P4XLd
+          *iA7*~Ydj4IoJNZ`MZ^Vu@^B;{x0c%dGN3?b05hnk2FUSaVeIiAofG0&Da@YKfGZ(Ed)_~_GD)p~c9E-~epZqce*|G+Y
+          0>2!AYi&tHNm5IMk+{Z>)O#yAmdnC1i-;HCOw97TN^bh9x;Zhg)`zaj$5hF!dbtR!VzhZY5v4MjCNW~i6hj>4}&W!8Lx
+          Jp$4rN;Y<h@gP`p5C1dQUD<H+z@1&##pB#^7)AcQD?IiWC)ymgupcqyAl-OSw&<aT&yw<NuiG(<F;AVhyjSesv2i+;cH
+          1u&3&N8SbAiyt!lA(?}N?<jaS1-$iMz-5u~`%nzF$kp5cd7c=}3z6{`h;lsbEz)wA>>Pot{;rXL^V4D+r(*g59mNZAJm
+          ;i-feVOyKseY`8_k|2>bX^066*<o^k^Hg4RPCiT0urPAY1(fKNbK(!XRy%#CRWW7LH3iuL2hILB(Mf-?k&X#|7sXkyhd
+          BIk`u>ml%4sl2w%MVIqZz@*3~STLlbwLhx|ijz1>8(1V$`Ky={wBgqm!>cTn}L>Xk7u+V3UK%Ptczqa74Po=HV(Z;Dp*
+          YqCv2NJM3c&&;hHxt7_XW|;TE$M!*eqN2@amiS-TO%|;D@^q0HQA5*`6PPHfnLk5FXMj9^?rVSYh!Qc^{gU(pAWi5T@N
+          }N(SaOXg_BQHJ=BxgRcSV7y5!dKklV=BoPsK74$)SfjnplYy581S$QeHWI-8#>b&<BlhoFF=g{yZdo?j_C1+w6{d$>m~
+          3Bp$wUF?aL#-o)pssc4Zv5WX9i92=Pb!R&9#8{y#T`gj-(mN!$(ca#t6U{_45z0Rs>qL>n`^T2~i>B$Tw`B_yab8j&$u
+          xAD5x)FRwC)SQztJ#b9CYqZuqxEZV63b^AV)H`Ju937DhWO;-Zslczic{Y946{_&FWxN^UYQxnN}nPHIxd(o#KBJO$)x
+          M&%7?Iwiww!=2{MkZ$>sxEw%b#k=XUDW4*@(Ox^(i2O(tNLOsKt00E#I*HHif2d0D@vBYQl0ssI200dcD
+          """
+          r530_patch=lzma.decompress(base64.b85decode(''.join(r530_patch.split())))
+          assert hashlib.sha256(r530_patch).hexdigest()=='1298fab54477cb012d17c8f6efe7d4755ce5afeba4e907795aac19274d08433b','R530_DIFF_SHA_MISMATCH'
+          expected={
+              'CaptureCoordinator.swift':'916d4faf546d379a40e99a773498c4f18684cc4f851398eb1cea6d9558acb8bb',
+              'ResearchBattleVision.swift':'dee69e88185da9c5137d68aa1b4b836ab19894bbe2e616809183554c3a3fb416',
+              'ResearchBattleWire.swift':'2cc9b088800159d4d0c37a0d67a5c821ba63610c183899d0c3590c87196cf4f3',
+              'TP521VisionCollisionFence.swift':'3a5359141d2f72ad3bda2d2745e907f65a6ba879e3747ce2d8dd80e926f616d6',
+              'TP530VisionRect.swift':'2b1957f84569d817adffd9993e3032db35cc6d0704786ab29e724ed260199882'
+          }
+          insertion="""
+          assert len(list(files.glob('*.swift')))==81,'R528_PRE_PATCH_COUNT'
+          assert not (files/'TP530VisionRect.swift').exists(),'R530_ALREADY_PRESENT'
+          patch_file=Path('r530.patch')
+          patch_file.write_bytes(r530_patch)
+          subprocess.run(['git','apply','--check',str(patch_file.resolve())],cwd='ios',check=True)
+          subprocess.run(['git','apply',str(patch_file.resolve())],cwd='ios',check=True)
+          for n,sha in expected.items():
+              assert hashlib.sha256((files/n).read_bytes()).hexdigest()==sha,'R530_SOURCE_CHANGED_'+n
+          assert len(list(files.glob('*.swift')))==82,'R531_PREBUILD_SOURCE_COUNT'
+          print('R531_R530_DIFF_82_FILES_PASS',flush=True)
+          """
+          code=code.replace('app.write_text(s)\n','app.write_text(s)\n'+insertion,1)
+          code=code.replace("assert len(swift)==81,'R529_SWIFT_COUNT'","assert len(swift)==82,'R529_SWIFT_COUNT'",1)
+          code=code.replace('R529','R531').replace('r27529','r27531').replace("'529'","'531'").replace("'0.5.29'","'0.5.31'")
+          assert "('r27521','r27531')" in code
+          assert "assert len(swift)==82,'R531_SWIFT_COUNT'" in code
+          assert 'dist/R531.ipa' in code
+          assert "info.get('CFBundleVersion')=='531'" in code
+          assert "info.get('CFBundleShortVersionString')=='0.5.31'" in code
+          ast.parse(code)
+          exec(compile(code,'R531_VERIFIED_BUILD','exec'))
+          PY531
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: R531_UNSIGNED_IPA_AND_AUDIT
+          path: |
+            dist/R531.ipa
+            dist/R531_BUILD_INPUT_AUDIT.json
+          if-no-files-found: error
+          retention-days: 3
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: R531_BUILD_AUDIT_ON_FAILURE
+          path: dist/R531_BUILD_INPUT_AUDIT.json
+          if-no-files-found: warn
+          retention-days: 3
