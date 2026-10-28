@@ -1,0 +1,45 @@
+name: R525 Quick ROI Mega Safety No Checkout
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Pinned R521 provenance and R525 safety smoke (no checkout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 3 --connect-timeout 10 -fsSL \
+            https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/3471aa30712542c625ee5b2f7f7b344c320d6556/.github/workflows/v.yml \
+            -o r521.yml
+          python3 - <<'PY'
+          import pathlib,re,base64,lzma,hashlib,ast
+          s=pathlib.Path('r521.yml').read_text()
+          m=re.search(r'encoded\s*=\s*"""([\s\S]*?)"""',s)
+          assert m, 'original builder missing'
+          b=lzma.decompress(base64.b85decode(''.join(m[1].split())))
+          assert hashlib.sha256(b).hexdigest()==('cb0991081a81cde7974ba0a690f69ea3'
+                                               '9a729e1bbe1267b7a86ee9dab94eff8e')
+          ast.parse(b.decode())
+          w,h=1290,2796
+          for x,y in [(0,0),(1289,0),(0,2795),(1289,2795),(423,1560)]:
+              u,v=y,w-1-x
+              assert 0<=u<h and 0<=v<w
+              assert (w-1-v,u)==(x,y)
+          def mega_evidence(source,owner,identity,fresh,certified):
+              return (source in ('certified_mega_event','certified_mega_marker')
+                      and all((owner,identity,fresh,certified)))
+          for source in ('sandstorm','species_ocr','sprite_guess','manual_label'):
+              assert not mega_evidence(source,True,True,True,True)
+          assert not mega_evidence('certified_mega_marker',False,True,True,True)
+          assert mega_evidence('certified_mega_marker',True,True,True,True)
+          print('PASS R525: pinned SHA, rotation, no animation-only dependency, fail closed')
+          print('NOT CERTIFIED: live ROI/OCR/Mega recognition; advice HOLD; NO IPA')
+          PY
