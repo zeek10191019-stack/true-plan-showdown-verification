@@ -1,0 +1,43 @@
+name: R526 Recover Pinned iOS Builder Source
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  recover:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Recover exact R521 builder without checkout or Xcode
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --connect-timeout 10 \
+            https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/3471aa30712542c625ee5b2f7f7b344c320d6556/.github/workflows/v.yml \
+            -o r521.yml
+          mkdir -p r526-source
+          python3 - <<'PY'
+          import ast,base64,hashlib,lzma,pathlib,re
+          s=pathlib.Path('r521.yml').read_text()
+          m=re.search(r'encoded\s*=\s*"""([\s\S]*?)"""',s)
+          assert m,'source payload not found'
+          raw=lzma.decompress(base64.b85decode(''.join(m[1].split())))
+          assert hashlib.sha256(raw).hexdigest()==('cb0991081a81cde7974ba0a690f69ea3'
+                                                   '9a729e1bbe1267b7a86ee9dab94eff8e')
+          ast.parse(raw.decode('utf-8'))
+          pathlib.Path('r526-source/r521_verified_builder.py').write_bytes(raw)
+          pathlib.Path('r526-source/PROVENANCE.txt').write_text(
+              'R521 original builder SHA256 = '+hashlib.sha256(raw).hexdigest()+'\n'
+              'No code was executed or modified. Research source only.\n')
+          print('PASS: pinned original SHA, Python AST, source available for integration')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R526_PINNED_SOURCE_FOR_INTEGRATION
+          path: r526-source/
+          retention-days: 3
+          if-no-files-found: error
