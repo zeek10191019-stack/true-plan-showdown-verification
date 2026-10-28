@@ -1,0 +1,52 @@
+name: R524 ROI rotation smoke test
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check R521 source and R524 ROI rotation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import ast, base64, hashlib, lzma, re
+
+          src = Path('.github/workflows/v.yml').read_text()
+          match = re.search(r'encoded\s*=\s*"""([\s\S]*?)"""', src)
+          assert match, 'R521 builder missing'
+          builder = lzma.decompress(base64.b85decode(''.join(match[1].split())))
+          assert hashlib.sha256(builder).hexdigest() == (
+              'cb0991081a81cde7974ba0a690f69ea3'
+              '9a729e1bbe1267b7a86ee9dab94eff8e'
+          ), 'R521 integrity failed'
+          ast.parse(builder.decode())
+
+          # Rotate source portrait 1290x2796 left 90 degrees.
+          w, h = 1290, 2796
+          to_landscape = lambda x,y: (y, w - 1 - x)
+          back_to_source = lambda x,y: (w - 1 - y, x)
+          for x,y in ((0,0), (w-1,0), (0,h-1), (w-1,h-1), (423,1560)):
+              u,v = to_landscape(x,y)
+              assert 0 <= u < h and 0 <= v < w
+              assert back_to_source(u,v) == (x,y)
+          # A rectangle is usable only if fully inside the image.
+          valid = lambda x,y,rw,rh: rw>0 and rh>0 and x>=0 and y>=0 and x+rw<=h and y+rh<=w
+          assert valid(2050,510,560,110)
+          assert not valid(2700,500,560,110)
+          assert not valid(-1,500,560,110)
+          # Nothing here certifies Mega recognition, OCR, or battle advice.
+          mega_certified = False
+          advice_enabled = False
+          assert not mega_certified and not advice_enabled
+          print('PASS: R521 SHA/syntax, ROI rotation and bounds; battle advice HOLD')
+          PY
