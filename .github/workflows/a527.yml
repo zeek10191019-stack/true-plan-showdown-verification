@@ -1,0 +1,50 @@
+name: R527 Export 75 Swift Files
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  export:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Recover pinned R521 sources without checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast,base64,hashlib,lzma,re,tarfile,urllib.request
+          from pathlib import Path
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/3471aa30712542c625ee5b2f7f7b344c320d6556/.github/workflows/v.yml'
+          with urllib.request.urlopen(url,timeout=60) as r:
+              y=r.read(30000).decode()
+          m=re.search(r'encoded\s*=\s*"""([\s\S]*?)"""',y)
+          assert m,'BUILDER_NOT_FOUND'
+          b=lzma.decompress(base64.b85decode(''.join(m.group(1).split())))
+          assert hashlib.sha256(b).hexdigest()=='cb0991081a81cde7974ba0a690f69ea39a729e1bbe1267b7a86ee9dab94eff8e','BUILDER_HASH_MISMATCH'
+          end=b"sp.run(['bash','-e','-o','pipefail',str(out)],check=True)"
+          assert b.rstrip().endswith(end),'BOUNDARY_MISMATCH'
+          s=b.rstrip()[:-len(end)].decode()
+          ast.parse(s)
+          exec(compile(s,'R521_PINNED_PREBUILD','exec'))
+          root=Path('ios/ChampionsOnDevice')
+          swift=sorted(root.glob('*.swift'))
+          assert len(swift)==75,('FILE_COUNT',len(swift))
+          assert (root/'ChampionsOnDeviceApp.swift').exists()
+          assert (root/'CaptureCoordinator.swift').exists()
+          Path('out').mkdir(exist_ok=True)
+          with tarfile.open('out/R521_SWIFT_SOURCES.tar.gz','w:gz') as t:
+              t.add(root,arcname='ChampionsOnDevice')
+          Path('out/RESULT.txt').write_text('R527: 75 Swift sources exported; no IPA; no runtime verification.\n')
+          print('PASS:R527_SWIFT_SOURCES=75')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R527_75_SWIFT_SOURCES
+          path: out/
+          retention-days: 3
+          if-no-files-found: error
