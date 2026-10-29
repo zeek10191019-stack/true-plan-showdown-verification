@@ -1,0 +1,44 @@
+name: R536 R535 Export Build Hotfix
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - name: Rebuild R535 with compiler-hook shadow fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY536'
+          import urllib.request,re,hashlib,textwrap,ast
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/f18ccfbe3e3134304a28225123de69b136356563/.github/workflows/r535.yml'
+          with urllib.request.urlopen(url,timeout=60) as f:
+              raw=f.read(20000)
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()=='e1d7d4ae209b766fb444fe887d748cd4d37f528d','R535_WORKFLOW_CHANGED'
+          m=re.search(rb"          python3 - <<'PY535'\n([\s\S]*?)\n          PY535",raw)
+          assert m,'R535_RUNNER_NOT_FOUND'
+          s=textwrap.dedent(m.group(1).decode())
+          fixes={'original=builtins.compile': "# Compiler is captured in hook keyword default (never share 'original' global)", 'def compile_with_r535(code,filename,mode,*args,**kwargs):': 'def compile_with_r535(code,filename,mode,*args,_r535_original_compile=builtins.compile,**kwargs):', 'return original(code,filename,mode,*args,**kwargs)': 'return _r535_original_compile(code,filename,mode,*args,**kwargs)', "exec(original(runner,'R534_PINNED_WRAPPER','exec'))": "exec(compile_with_r535.__kwdefaults__['_r535_original_compile'](runner,'R534_PINNED_WRAPPER','exec'))", 'builtins.compile=original': "builtins.compile=compile_with_r535.__kwdefaults__['_r535_original_compile']"}
+          for old,new in fixes.items():
+              assert s.count(old)==1,('R535_FIX_ANCHOR_CHANGED',old)
+              s=s.replace(old,new,1)
+          assert hashlib.sha256(s.encode()).hexdigest()=='8d8a4accfcf40b0046cf186b74e17140cd590ade78caa06110723324d9aab663','R536_FIXED_SCRIPT_SHA_MISMATCH'
+          ast.parse(s)
+          print('PASS_R536_R535_BUILDER_FIX_VERIFIED',flush=True)
+          exec(compile(s,'R536_FIXED_R535_WRAPPER','exec'))
+          PY536
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R536_FIXED_R535_IPA_AND_AUDIT
+          path: |
+            dist/R535.ipa
+            dist/R535_BUILD_INPUT_AUDIT.json
+          retention-days: 3
+          if-no-files-found: error
