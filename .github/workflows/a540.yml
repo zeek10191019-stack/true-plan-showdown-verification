@@ -1,0 +1,101 @@
+name: R540 Direct Evidence Source Build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - name: Build from pinned R536 with direct precompile R540 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY540'
+          import urllib.request,re,hashlib,textwrap,ast,base64,lzma,builtins,subprocess,zipfile,plistlib,json
+          from pathlib import Path
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/a64062e81a8fdb2f41d1a859c7f4d9bf846b953d/.github/workflows/a536.yml'
+          with urllib.request.urlopen(url,timeout=60) as response: raw=response.read(10000)
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()=='6d9313daec5d190badea21c7c85312111dd5a3ab','R536_WORKFLOW_PIN_MISMATCH'
+          m=re.search(rb"          python3 - <<'PY536'\n([\s\S]*?)\n          PY536",raw)
+          assert m,'R536_BUILDER_NOT_FOUND'
+          builder=textwrap.dedent(m.group(1).decode())
+          assert hashlib.sha256(builder.encode()).hexdigest()=='a6fcb4cb64d29ca74e6fdb16564d7aa81a49fa6296082f1528ac297032c7588b','R536_BUILDER_CHANGED'
+          r540_insertion='# R540: apply two pinned source deltas once, BEFORE Swift compilation.\nimport urllib.request as _u540, re as _re540, hashlib as _h540, lzma as _lz540, base64 as _b540, subprocess as _sp540\nfrom pathlib import Path as _P540\n\ndef _tree540():\n    fs=sorted(files.glob(\'*.swift\'))\n    assert len(fs)==85,\'R540_SWIFT_FILE_COUNT_CHANGED\'\n    return _h540.sha256(\'\'.join(f.name+_h540.sha256(f.read_bytes()).hexdigest() for f in fs).encode()).hexdigest()\n\ndef _get540(url,blob,limit=20000):\n    with _u540.urlopen(url,timeout=60) as resp: raw=resp.read(limit)\n    assert _h540.sha1(b\'blob \'+str(len(raw)).encode()+b\'\\0\'+raw).hexdigest()==blob,\'R540_SOURCE_BLOB_MISMATCH\'\n    return raw\n\nassert _tree540()==\'61290227aa989884797245891522ec635bc227c3d5cf63272e6f51b6b776c94c\',\'R540_BASE_SOURCE_CHANGED\'\nraw=_get540(\'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/4b659d86267bc0a3ba5a6b592179ee4df71d2e98/.github/workflows/r537s.yml\',\'02fc26a2792280efc8c08f7e2a66e1d9c19f61f7\')\nm=_re540.search(rb\'patch_b85="""([\\s\\S]*?)"""\',raw)\nassert m,\'R540_R537_PATCH_NOT_FOUND\'\np1=_lz540.decompress(_b540.b85decode(b\'\'.join(m.group(1).split())))\nassert _h540.sha256(p1).hexdigest()==\'18b0ce9883128cfd2202ba3273f1e41a20b257e00cc83b59863ea5ad59bedc60\',\'R540_R537_DELTA_CHANGED\'\np=_P540(\'r540_r537.patch\').resolve();p.write_bytes(p1)\n_sp540.run([\'git\',\'apply\',\'--check\',str(p)],cwd=\'ios\',check=True)\n_sp540.run([\'git\',\'apply\',str(p)],cwd=\'ios\',check=True)\nassert _tree540()==\'dbe17e917072a10a1d26e9c81f1ed9e5e509536d0aeaffe26252c1458ad84191\',\'R540_R537_TREE_CHANGED\'\nraw=_get540(\'https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/968180642e0328e8444e81becebf8a0270f822b5/.github/workflows/a539.yml\',\'d209db2752283fc0d18af0fcdbc4d0b74df8b5ea\')\nm=_re540.search(rb\'payload = """([\\s\\S]*?)"""\',raw)\nassert m,\'R540_R539_BUILDER_NOT_FOUND\'\nbuilder=_lz540.decompress(_b540.b85decode(b\'\'.join(m.group(1).split())))\nassert _h540.sha256(builder).hexdigest()==\'fe9650e08df9f0b16fc5cbb323037dfa2e0b4ea4ecdf2132053614eb69a6a6ac\',\'R540_R539_BUILDER_CHANGED\'\nm=_re540.search(rb\'R539_PAYLOAD="""([\\s\\S]*?)"""\',builder)\nassert m,\'R540_R538_DELTA_NOT_FOUND\'\np2=_lz540.decompress(_b540.b85decode(b\'\'.join(m.group(1).split())))\nassert _h540.sha256(p2).hexdigest()==\'9098cff5c9d49aae4dc937ba10c92acee6d24e7aba3bce814d4e71992fc24af2\',\'R540_R538_DELTA_CHANGED\'\np=_P540(\'r540_r538.patch\').resolve();p.write_bytes(p2)\n_sp540.run([\'git\',\'apply\',\'--check\',str(p)],cwd=\'ios\',check=True)\n_sp540.run([\'git\',\'apply\',str(p)],cwd=\'ios\',check=True)\nassert _tree540()==\'5ad6ece6942e2eb4edef6e79376f214f411b2ac478d78b49591f9c61dbcf2757\',\'R540_FINAL_TREE_CHANGED\'\nfor name,digest in {\'CaptureCoordinator.swift\': \'d581097b6167ecd60be5ffdf5e3f4312abec2b34c11bd5b2df30ff5d9d09f75b\', \'ChampionsOnDeviceApp.swift\': \'2db5e33fa0c4a1976b6caab080ae80132bef5a6ba678726042cfe5251cbef6e5\', \'FrameEvidenceExportGate.swift\': \'a04db671310ede6b0e281deadb03740c71a454ceac0a2e246592d2a5ca014c6e\', \'R535EvidenceShareView.swift\': \'46531cc221c438a893a929c1a27c2c7e74e16b03895d59bf7146e7c064f3fe9c\', \'R535UnifiedEvidenceGate.swift\': \'9447fac55a90864bb33825334a86499cde6d0469b5736836b00c90ce4c4c5227\'}.items():\n    assert _h540.sha256((files/name).read_bytes()).hexdigest()==digest,\'R540_CHANGED_FILE_SHA_\'+name\nprint(\'PASS_R540_85_INTEGRATED_SWIFT_FILES_EXACT\',flush=True)\n'
+          expected_input='4c6458f626188ee66a0d61534a02ebd3851e2dc416944afbaed39d54379c84fb'
+          original_compile=builtins.compile
+          original_run=subprocess.run
+          hits=[0];tests=[0]
+          def compile_r540(code,filename,mode,*args,**kwargs):
+              if isinstance(code,str) and filename=='R534_VERIFIED_BUILD' and mode=='exec':
+                  assert hits[0]==0,'R540_DUPLICATE_SOURCE_INTEGRATION'
+                  assert hashlib.sha256(code.encode()).hexdigest()==expected_input,'R540_PARENT_BUILD_CHANGED'
+                  marker="swift=sorted(files.glob('*.swift'))"
+                  assert code.count(marker)==1,'R540_SOURCE_INJECTION_ANCHOR_CHANGED'
+                  code=code.replace(marker,r540_insertion+'\n'+marker,1)
+                  ast.parse(code)
+                  hits[0]+=1
+                  print('PASS_R540_SOURCE_STAGE_INJECTION_VERIFIED',flush=True)
+              return original_compile(code,filename,mode,*args,**kwargs)
+          def run_r540(cmd,*args,**kwargs):
+              if (isinstance(cmd,(list,tuple)) and cmd and cmd[0]=='swiftc' and '-O' in cmd
+                  and any(str(x).endswith('r518_tests.swift') for x in cmd)):
+                  assert tests[0]==0,'R540_R518_TEST_PATCH_DUPLICATED'
+                  choices=[Path(str(x)) for x in cmd if str(x).endswith('r518_tests.swift')]
+                  assert len(choices)==1
+                  f=choices[0];source=f.read_text()
+                  assert hashlib.sha256(source.encode()).hexdigest()=='8da820afefbbf749de7533283d3c081b70df27beb26d9389f33b76490c344b5a','R518_TEST_SOURCE_CHANGED'
+                  old='  Thread.sleep(forTimeInterval:0.11)\n  let fresh=TP518VisionBudgetGate.inspect(wire:"new",budgetMs:100){result("accepted")}'
+                  new='  // R539: wait for an observed completion, not a fixed scheduling interval.\n  // The original work sleeps for 85 ms, but an overloaded CI runner can delay\n  // execution even after the nominal 110 ms test sleep has elapsed.\n  let deadline=Date().addingTimeInterval(2.0)\n  while TP518VisionBudgetGate.counters().completed < before.completed+1 && Date()<deadline {\n    Thread.sleep(forTimeInterval:0.005)\n  }\n  guard TP518VisionBudgetGate.counters().completed >= before.completed+1 else { fatalError("R518 fail \\(t): bounded worker completion") }\n  let fresh=TP518VisionBudgetGate.inspect(wire:"new",budgetMs:100){result("accepted")}'
+                  assert source.count(old)==1,'R518_TEST_ANCHOR_CHANGED'
+                  revised=source.replace(old,new,1)
+                  assert hashlib.sha256(revised.encode()).hexdigest()=='16405e52743e5318fa60d8396234f71011049df53895867554d9ac7d54c8b3b4','R518_TEST_FIX_SHA_CHANGED'
+                  f.write_text(revised);tests[0]+=1
+                  print('PASS_R540_R518_ASYNC_TEST_FIX',flush=True)
+              return original_run(cmd,*args,**kwargs)
+          builtins.compile=compile_r540
+          subprocess.run=run_r540
+          try:
+              exec(original_compile(builder,'R536_PINNED_BUILD','exec'))
+          finally:
+              subprocess.run=original_run
+              builtins.compile=original_compile
+          assert hits[0]==1,'R540_SOURCE_INTEGRATION_MISSING'
+          assert tests[0]==1,'R540_R518_TEST_STABILIZATION_MISSING'
+          source=Path('dist/R535.ipa');target=Path('dist/R540.ipa')
+          assert source.is_file(),'R540_IPA_BASE_NOT_BUILT'
+          replaced=0
+          with zipfile.ZipFile(source) as src,zipfile.ZipFile(target,'w') as out:
+              for entry in src.infolist():
+                  content=src.read(entry.filename)
+                  if entry.filename.startswith('Payload/') and entry.filename.endswith('.app/Info.plist'):
+                      info=plistlib.loads(content)
+                      assert info['CFBundleVersion']=='535' and info['CFBundleShortVersionString']=='0.5.35'
+                      info['CFBundleVersion']='540';info['CFBundleShortVersionString']='0.5.40'
+                      content=plistlib.dumps(info,fmt=plistlib.FMT_BINARY);replaced+=1
+                  out.writestr(entry,content)
+          assert replaced==1,'R540_BUNDLE_METADATA_REWRITE_INVALID'
+          with zipfile.ZipFile(target) as z:
+              assert z.testzip() is None
+              names=z.namelist()
+              executable=[n for n in names if n.endswith('.app/ChampionsOnDeviceResearch')]
+              assert len(executable)==1,'R540_MACHO_NOT_FOUND'
+              assert z.read(executable[0]).startswith(b'\xcf\xfa\xed\xfe'),'R540_ARM64_MACHO_HEADER_NOT_OBSERVED'
+          record={'release':'R540','base':'R536_FIXED_R535','source_count':85,'source_tree_sha256':'5ad6ece6942e2eb4edef6e79376f214f411b2ac478d78b49591f9c61dbcf2757','patch_sha256':'bdcbf0ef81509939aea18d8db7a6b20470b4e5e9c000b9998d624cb99724a182','r518_async_test':'PASS','ipa_sha256':hashlib.sha256(target.read_bytes()).hexdigest(),'ios_xcode_build':'PASS','signed_ipa':False,'real_device_export_certified':False,'battle_advice_authorized':False}
+          Path('dist/R540_BUILD_AUDIT.json').write_text(json.dumps(record,indent=2))
+          print('PASS_R540_UNSIGNED_IPA_BUILD',target.stat().st_size,flush=True)
+          
+          PY540
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R540_UNSIGNED_IPA_AND_AUDIT
+          path: |
+            dist/R540.ipa
+            dist/R540_BUILD_AUDIT.json
+          retention-days: 3
+          if-no-files-found: error
