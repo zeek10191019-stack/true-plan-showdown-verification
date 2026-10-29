@@ -1,0 +1,46 @@
+name: R537 Save Fix Build
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - name: Build R537 with duplicate shell invocation guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import urllib.request,hashlib,re,base64,lzma,ast
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/4b659d86267bc0a3ba5a6b592179ee4df71d2e98/.github/workflows/r537s.yml'
+          with urllib.request.urlopen(url,timeout=60) as f: raw=f.read(16000)
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()=='02fc26a2792280efc8c08f7e2a66e1d9c19f61f7'
+          payload=re.search(rb'patch_b85="""([\s\S]*?)"""',raw)
+          build=re.search(rb'code_b85="""([\s\S]*?)"""',raw)
+          assert payload and build,'SOURCE_NOT_FOUND'
+          encoded=payload.group(1).decode()
+          code=lzma.decompress(base64.b85decode(b''.join(build.group(1).split()))).decode()
+          assert hashlib.sha256(code.encode()).hexdigest()=='a96b57f178d4e5f4432c58f55093fc02a1ef39224135ec8cd2e68712c778d5a1','SOURCE_CHANGED'
+          anchor="        assert applied[0]==0,'DUPLICATE_BUILD'"
+          replacement="        if applied[0] != 0:\n            # A nested wrapper invokes bash twice. Only patch the sources once,\n            # but verify the exact patched tree on every subsequent invocation.\n            root=Path('ios/ChampionsOnDevice')\n            sources=sorted(root.glob('*.swift'))\n            assert len(sources)==85,'POST_PATCH_FILE_COUNT_CHANGED'\n            tree=''.join(f.name+hashlib.sha256(f.read_bytes()).hexdigest() for f in sources)\n            assert hashlib.sha256(tree.encode()).hexdigest()=='dbe17e917072a10a1d26e9c81f1ed9e5e509536d0aeaffe26252c1458ad84191','POST_PATCH_TREE_CHANGED'\n            return _original(cmd,*args,**kwargs)"
+          assert code.count(anchor)==1,'HOOK_ANCHOR_CHANGED'
+          code=code.replace(anchor,replacement,1)
+          assert hashlib.sha256(code.encode()).hexdigest()=='091b0a909c4c233d1b5b0e9c531f28cf2adab65ea82447b5a1c245af67b83789','FIXED_CODE_HASH'
+          ast.parse(code)
+          print('PASS_R537_NESTED_SHELL_HOOK_VERIFIED',flush=True)
+          exec(compile(code,'R537_SINGLE_PATCH_REPLAY','exec'),{'encoded':encoded})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R537_FIXED_UNSIGNED_IPA
+          path: |
+            dist/R537.ipa
+            dist/R537_BUILD_AUDIT.json
+          retention-days: 3
+          if-no-files-found: error
