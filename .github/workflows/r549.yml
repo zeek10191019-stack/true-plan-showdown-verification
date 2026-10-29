@@ -1,0 +1,158 @@
+name: R549 ZIP Readback and Mega OCR Strict Gate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  r549-isolated-and-source-audit:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - name: Extract integrity-pinned R549 source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY549'
+          import base64,lzma,io,tarfile,hashlib
+          from pathlib import Path
+          payload = (
+            '{Wp48S^xk9=GL@E0stWa8~^|S5YJf5;CKHPn_U1G3)}>NP%<X&9eo?~^2;;q?D#kE>ehRB4_H=u2>q2e4e=@lut}UO{Ax%q&AFUdYlyxQ'
+            'Vw=&K{pt<E?<iI9-h<DXa1VT{PM104&L^&6x=?+hOSnM|aHdLV9Jy=|Y>fyK%6D7O#XB8CZZ`T)tX0u}wgFv~`|DL-LmGR{@FQF*Az6E+'
+            '98cp}fdUFSjutS{(v)s#T!7EyX05VpzWP4g1~9^#h0FK9fnD*#Cq|(6W?`i-f(jB1l6@)FTtlpZ7#-0syr?nwI3|qquc+WRUlgYp-YKcE'
+            'U}S&~DyG15n_8=TvUO)qJ;k-Kb#wx@=?t|p4zUN>Au1^Mj;b-bsltj&6M|NtBKA4{H@2$6g{ZSA6xK7C5uRp&1OYto{?`ER#TT%gKT&RO'
+            '9Ws{eO&1sUSd11c+DiL3z`%yK=JDT3(guO10khlcA9X_4O&qWE)2qsh;a6o`mHcO)^ri9N>#OK3#KQGcj@eyYqmo)!BTY{0T!jb4rJ)a?'
+            'v1lHiHmsABD?)W{)ThZWE3`VLkOa4L0swQI*_L-0Yh9R;z`Hvf0|D!QK(d~H56$~>?X7F=6oq>qH}R#mI3t59i85YrL9+dIm4&}hAo}>w'
+            'i$yBkix#Ulm~@+!bY6SC86kJOJxFWfMevxVYXF{7oWz@9^Z{R5!V~T8rnmoP9TYBSZLEuukvjK-;jSh|n7;s+eziuR=bD8N;MW)|{D8dG'
+            '=W8`$1|weV!!B8Mv-Emj<T{V->Wi-Vnx+OMu)xrF?s>Ru*1!!E{-T50{sw0jQUE0BQ(}h_I?=laxjfN(wNwW0A#au;*C4mcqSPv~!&CA?'
+            'm+`|T77<4wL?$!^FOJbK8Z~OF4*ToBeh;4}iFt7z&P5>&;Jm*+Bdi8qeA>ZYxy1$jxCzhLF-^br|H8$<TCRL=HzNc-3Q)eL;O!%H;(8u}'
+            '0kPmLiPRnN1v~*__AV#~X3atTHhVS3p3+?Lerp#%>!?qu99w#(m&r9WfFGRb#f!4>r6pHvAS2wS4y#_!>jy^%Dx1#s2jWIlfCB-@iL8<z'
+            '-q6J*e}^7q`qbOBgC7?*h<Opf>J7?-<dD2Umol-eCK-K{i0X)nL<SfX6!J=*9ZKRCX9O4*XztksB)yptG}3gqTbMQ{4Q=rB<-ydkr$wj;'
+            'D?CKI_A3i!tX!0Cr}ZTGKSEE5v<G^H!JLw_NqqqfN@@O`Vv=(c)!Dv5Rt9kJaOprTz#e<l0U-KCUJ<MAi!vQQ%kS+fFcPmLb1#@*c}+-`'
+            'J?oIKkARB5G!zEM*Uib>=t@R&<bBgyg9*}f2wN>&7HIz7L{zTwLE&5{(5xToB0%?w8~P|{ChkQ-JQ4d?+iCrVRU1=wLPf!R;;DOBNWNRC'
+            'NCyEMM%X18hgQR8<V9&Y3PBsFazPlunKy{{Gu2G;t5dAW+fC-FX9{`SQoQ#>hR_rRFigkNUeDgSiqo1<!sfHDSJm{qU9zeVo%&sLHe^Nx'
+            'uZu%2ef02RBU1_jOgNc9tz8~dJwzd@xvxO_62;7e)vN4ew%eyLDOP)<N83YOQB=6+YMkRwlVL=W5g=?RNc#j{KAI)vuK-iA5WZsm3rQSK'
+            '&9Y0pUhb(WA{#T_N8|%~7PFLCJ2U;*ubYhdtnnfSVu^zOHZn$D%^H$6e%E`ADd;zOy{$oIL9fJy<zRG=ogL<^BIvXCveV3^IDhk5`7<ak'
+            'o(3yNipVR$1H&DBzW1-TK3E;Xjwyyn{6rjCl$-Hyh6M|c_jl>D0qEw9ALyn_p0K_LCwB5ZK!LlvHMN$e8@PK!q=qDeu1FJ=Yt-V+aJ(E*'
+            'mDD4pGd=plga%|IUPPCBBpZzt?PJ-HVOpSW7(d%2<rf)oRVlolF)2!&R+pwYLvEiB5!?v#LB&n<MaFDlw;D;Iif1NB?ykEWv-sVL3~<fU'
+            'w@wd~l<_og74MJ_3Jvt@RDS}5&a;lROMG>$@`|BnQbHRxF}2VhA$5vCD9WcDb1=gHR;$sQ9rl2V7U&tIzlsLk9FfRGo`~uN;BSG`RwRJr'
+            'wxx8$RDrfp$t`1i=kHs9H{zcbW@VA>x0N+kb=@T{$?Flz5)|SF)L>|~H7u^<MUnTh@!b+<|1jFL>Z-5;&94$Q5ES_=HPyPK{TXorMy^lS'
+            '^=a`OuYj;Km76Lryaz<*4J<mXqE)!+XN-p1qs9N1+h_)dX*=YXn@9FecS1aG<C2RYKFxP~6OAaLt1b@)Elkz6@ylyJO@k5!aPb}lA3fE0'
+            'CTgJGicM}DSeiFwg*sgIheLx8!R#UvKwq-g0Y^DRj=CPt21_%p^mzII-6Ws;)z6+N5fM(DF{SCmDn%4)JS#6AqPgA2mYJ1%acoM&2!roR'
+            '*r$iGd~gp&IRc1QbHA|6)j2g>%it7CAJygIGCWI4l=aqIG;@|Q(Cj@9RL!KFwr``XropEFYG4zB#}M;z)vTz-0b&o^5h0wm4wzRHzw3fO'
+            'J2pj9UXAWPUA*3|?gb~siVEy(gBrNpIZ4zUxVh83E~w&=S#(D$o=nghG{DVCv~xV+&MW4_lh~Nul2_<zKxrO=5d6o8&a?Lz$4Z~SlHJMR'
+            '6g5Eo!>(HV3HPSzXIwU4uQY1{r4c5pMPhkO!;YmdUs8A7&pCp*6!k%L{2OziB1-E0CnY9#MDz2JyV4$FMN~zgXECFKh~rn<$Hb@qxyo3F'
+            'tn`^0In2bVf~U=)Nv^?Iz8fw8V{5=5z-?bXT)?L+9oL7U__ET!HZ<g*ta*P2SfUx=*HUcoKfdj>t#>MY{D%IqeGJ#GvL&ZI%xfFV8eYI}'
+            'Wkt(zHJHu<(6k6ujgST8-_hc{D#E}!h=AFSP}Ic4nHpF{MMIjXR*qt$!E&XlZqwD#<8GT;sr}G|<q7CcFOdP+yW&K$g@Y)xTnHat+lE$I'
+            'a+dJnt&Oid^QSSXFFe&wpgrGXj%gt(G<c=JzBfTFot+ybhEi-3Tv&WKL~p&DouI(R8~v=mUl)tCPOErasW|j)8#GxqVe4@3bfCStJi1=u'
+            '_aqk|zzh_KZZ57MK=X}f6E<*2l?p`(XZQR^u_v(PH9n?eEqYoUq5ygocjhh(PF<UnToM|<C`!<X^bDJPxIn8$lKcuF86M?HND~r_*+@UI'
+            'xmeXqFOKsS1?1k5sQ-|(qt1tmlNt!e+FS1dl7O&~3Ct_C9^n%zi5GI`sPDL|hKYVFOdwutj|S!p%1Qe2BG4mkM<?7Qw<${R%<8#A4kl{d'
+            '_k7ao!t3``de!BhZ(0qs+1OiG4eySxcP=5TbW~O(=$|m4*<`;qt}W@$Hk($jHx7rs@Hw{p3x9R<sbhr$MpC3}+*2$nG}gk3NI*IpctM#q'
+            'JXP%lmGad33OEOtr5H{Vcm#nf)Nx0u4xH)f$-vw|{_j*GT^}_hv^>FXwbSNVr`Q`K&Rb;l%~emMWa&^56XTMdWWog?N&7EIcd;3t0)wnX'
+            'B~CanrSEiTnifQ8GfDbE)I*yVh9o#PA{ei;H&yKiIpWE#5Kie&Hhy?N(vHi3i%2_bI<1;mFWLe_`wl!&F^ggLUp-KCze`(^E{tB7ZN}OT'
+            'xJeKl$;N~>_R4$_kaeyn1MX|Ev0x1T^E(x$NP2g?opB>oY!Vu90qYyL{ZvZV2y2rG9+s=X?R{yh15-_(N3w1ed|*YJ5jgn4MTtBqLuc3_'
+            'ukAbCYqSkjConyP?~^j$u5+V#c2cm&F4-wycoOy2a;p4_oRmFFrobc;Mcz?4jDH93Ffa&d-1wO_UQvqCquMU{VZ;cw2ip0VO==hc-LOUm'
+            'rj>m;p`WN)v{Dq{(g}}xCA<ndup^Q!*_ooRlS{;@S2x5v{nSRZ&H%D4aaYVA;b)ELC0d~~P=<ZQaQfr<yj@9c@s~c)bl|tIEHg3Tnj{q='
+            'XOiUb&8n?*#%_x<#^MKuuS6OHoV)kquO*o)w1Ow0{36SfN;IF<rim<8@^=yNl7_?DmLtzae`wyc)FllSCkH0JGjlweR0hMU=KRX!_(ge9'
+            'Dj&ipP+!Fk|GO`(bW?pI*jTu9#JvXw1rgS%gcs#05Gf3jgX6>_;eb;iQ6Uh{Te&uQ+X9gna&2a0N*tXHpNQbKUgJqxUHvx8>18gH-t;YW'
+            'l}(-zM@aFY+(9GP3q?oKF!&#zPM;&Y!WCE(*W}i4`a%e))~|6pOdaMIL$eh;1;>CIGhw9{#4xJ-&qtz{im@QjSn^V?bC~pkp2Ywx(pC}@'
+            '(sEA0Uv1#W%gGP5p)_KFK9%^4IApn2>?m;PyP9FxAVe{jNp^Zf7?Ex#s(W96h7k-wWpa&Ysr7Z7YHX1SBJCIkM+NI}_)mf&3K`FjCc`_4'
+            '-Yc_*!Lq@XC66fRN0z4**g4mvktLLF0%e244fX?$d5U$8B`aQ+qp<y>X%j&QAozMgX9S7SGSevIi2PSPTpQ+6QP$+RhupKxpwi<Y*E@5)'
+            'AP<-9$ZK^!sHv@?7{^$R5#}!<&2|tNAe|)vPzTV^Tb0Gqhqt!LXo+czmGoyb@w-;CvTjConMM|mHx2p<`g($q<2cWvy%+J+2V<BN(&6><'
+            'vI@4|4tqNH+%KYV3sM7Qf|y4ISt{6ijb}6H;)3&Jb;x?bT`o&PnZe%g+t<~$9olN*jm8klURNK2LHz&XWn+QiVKD(z>Dkti8cKoAZewZc'
+            '{HpSVxzp>$i15Yym2$KVWf$!t*wc#@fgJPEc#&K=vzv?=!`M%`@q6MNhZ)X7&Ri()T-i$1Y$pWHi29K;yt7|7q2lWmM$0<ZRCPH);a4Pr'
+            '4UMzuz>F&$0)*`&4d%b8?nYz?FFp<>Q>DWeW^(8w4Z%F$8`)5+iRCFxZV<op+gsKBNi7NrZwqifr<^hmkT;1sBM|Xrw_DS*RApGM_PmG}'
+            'Kp0a__S$jiFZ(VDMh0_@5kQwNE5XCe?W<U8ls|vA27>1<;)ZDAb9MpPsD*>?6V7y<`1V)5Q~f=6L$45YLeQqYJu7h&95fm`DG>=pt><6|'
+            '*@}D%1V(pdQtg3LG+8aScBmW{Q>VG#9zkj{jfWsneP)>_Ke<Q}f{rLlm4W!7;Q5$X)CSz>khbMU1a^EsPwRWU(iT$~PJbbWkY0zr5ObO-'
+            '54=P$mnnVm0;uQ<-y@&1BJffFI1o}!psCkne@SJfoUJrGn0TQV2S959=jW<WIO;R$@@k}dC4Mr5e6n{}HeAE~>H-?l>I;T!bo_JGzFjNc'
+            'dXU(8xTzWXx%x~SnIppDn-4fZlJ<A77~8T8su<GeQ6&KkQ~evy(C<-ZxbNK=)m%<C1Rz%lwFL+UsZA&>msuzxZm}Eh9K4hE$0Kkz4_w$|'
+            'jsZLz8}w37KrO+z=#b2cJW&k~&`z<V`GL0P+LK$8b1A6?Kt_@A<3)rbTXvC5Ez?Kr@XioBXN1JaNwX(K=E=;Niz{gf`K+jCo-G@mUP{Jw'
+            'wTN9MmyHz6qLTs}Q7#+}qxt0__J3HatAiSG4%KL&po}DY(u~Nd2g@N`o}SbPMnsMhkZZGR%jAU>m0|%l*3Vhxs`Wb-TYe8Mr*d#p|F#hU'
+            '^)$_J=|_QqzJ+%)G<IT5{`Oo`qY8k-M1X)R@-ri)xKZ*hzX|F0`4OeT<Y2^zQp0{*ZnWqj(1WxVT!L}z$Vszr#w{_V+r+sOPnN$b-|%}?'
+            's$asSI>i_|I5@CV&x&DTJ>9U*oNpk6$|-5Rxp^tt1;8tECqI8X<F6KtY#PY0v#%9;jVhl)2Q^gr62vO9klbL;vZQs8z1i&QW!|(8!tH}!'
+            'kqgXEGX`XSrDwxl-l1Dr)5uV{Xn@~_xugcW9$S*20*6eorUc&@oN7^_fa*qBkU_G}O1hCxIGoi&%2UCRc&kpZ88zCum9ewWYgX>rhx>yn'
+            '-2`(GRwpg!D&QIer9PM;gRgrW@Q^KAH1?s8_I$np`n(WA*F=3nW04w&-eLSw1NIQoc90ksNSo}@QMICHWs|-%VP{%G&Q3l{?Xe0iF<X|6'
+            '6h^aRikkm1b+L+K+uyuZo;_9ADTsV)V)K1YR7VS+YCJ_^%*%%>p_MlbiIL1;9RMDi*O7m7I)pQOt@?!sjkXFTg^}!#z7b&vU^A-n@A6}Z'
+            'wJ9cP{8vbSfio#-e>~DgPh!TMF>P0Q_4}UTP8B$DnTE7v?ns{IVSTT61y7tTZ@{>N25~ZoX2%t9RfwfvTj~pql~=(6ZceHw|IYJ!w&%0e'
+            '9mO@K?z#orgr_~4`VbL=g%`rA5wjPmx+V>O4Hu4+mI)c1&f@x=XbMS-VU)$y;gb&s6qH9d#9+Avs?JJrvs{e@61fMZBKh}47)_QC`ELf&'
+            'cOes(O|5N<7+sLS>C@`Tfyq6eHN)ukqz>4EcKpiq^PB)1TmV75`;zqt21A^;w`)k8);J<+K23dH)h||<jOd^}*Mo|eD_3{OIXrTjfiWY('
+            'ZMsJgbMRCRK*Es04;9+?&W*2|a*1`v9Y-Gprz^qznd=<tmOs$)&+rZG`_g#{eT^^346ZA+>)a&p_Zdy}u{RBjT3ZtTvgA|$CPyF18L>46'
+            'lgNjpYoQ@w@OboTRxcr4d8XhEK-;iQ7yxpAp73o8MB|Im4l8`AzxAbn2GB+brwU#@Mu((=Yaa7rOIhGbomD5&i~DGR`;}y_8V@gZupvPL'
+            'PL3-3V#_qGVO+SLR*uk!QJC?h)Y;T;4mvR-+d*~-_~NO8yCw8&!$NcG)2;sS^cPVIh;u9bK(e{x7Q}H~`Tbhkc^n`JRk~gq$oUO>;iPX$'
+            '0TM#J1?o6(6T~X9b#s`QDJF$g3IKdEeuvlay}5y0N@EaU$t``Kq@5EP_suE7hSj6#xQLj+cETLjy&p)KhnBsT#ta8+ghP!eWq_Uq3xFlS'
+            'O>uJJ5D3juXH@}Q&6Tn_Vt`m8LpS<lU9WY-H1&@&(b6j{q4dnM0B&R{vb5}~UX{dGXRV-n?GpS{ETvUwm}*omY+cKS)uf$wpEyWiiro-A'
+            'p(^~+^(KM5b64&4&5i=;Kfgdg-Nubg+!c8mQ5^*Zu(G2Rk>lKt5JTG~9&nx*ckH}RuguIf1LEqvA}xs)ew&V#-$Vh=Ahu{WkE!%99A0Yb'
+            'SJTBMWbdWbeFFRH_9W3C^EZ<=*EX%vOZN5K6xtoSRFiOg1`yeP)1`(WU=T3ORq*)-bop)PoajNl(YWV$^K;6}_FB2gxyVexB~*{;S8;*2'
+            '*qU|R6nkg~M0<rKR8znt8GXQJrqGruZ$9p;jsvucuCpv%5noamd5|cblz*<7r!G*<u~kVKR8Vs!w%IOmQ{3Jjhl$V>%9mr8_#AY@o}kae'
+            'rzp>HPwBJT%LgI##@SfOsDW))zByk@3QDMPTx9=}=X|$V5SdM^9v$=|<QAi3%Clv6J#w>dL?b}VO-BKCb9H~9+O@2<iY`4WSy$5FYBz%#'
+            'YTZ($*>RPP3ZvDw@$f*4L%>^kn(2Gw@0#Kj7=ddu=-{X^{IGDhRM8iM?`q>9_F)0){-H7M)e>^A07Hd33)XV=TMS1+@!*`4Um%!Usw*wC'
+            'o{uo(IJRlJe%8GP=68_!;GF93m;e9(w*b`&@e1bQ00FlxfbanT59m$2vBYQl0ssI200dcD'
+          )
+          archive=lzma.decompress(base64.b85decode(payload))
+          out=Path('r549');out.mkdir(exist_ok=True)
+          with tarfile.open(fileobj=io.BytesIO(archive)) as tf:
+              approved={'R549ZipReadback.swift','R549MegaOCR.swift','R549VerifyHarness.swift','make_fixtures.py','local_preflight.py'}
+              assert {n.name for n in tf.getmembers()}==approved
+              for obj in tf.getmembers():
+                  assert obj.isfile() and obj.name in approved and obj.size<200000
+                  (out/obj.name).write_bytes(tf.extractfile(obj).read())
+          print('R549_BUNDLE_SHA256',hashlib.sha256(archive).hexdigest())
+          PY549
+      - name: Swift Apple SDK typechecks and strict ZIP 13 tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 r549/make_fixtures.py
+          python3 r549/local_preflight.py
+          swiftc -typecheck r549/R549MegaOCR.swift
+          swiftc r549/R549ZipReadback.swift r549/R549VerifyHarness.swift -o /tmp/R549ZipReadbackTests
+          /tmp/R549ZipReadbackTests r549/fixtures
+          echo PASS_R549_ISOLATED_COMPILE_AND_13_ZIP_TESTS
+      - name: Reproduce exact R548 and collect real Swift connection points
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY549_PARENT'
+          from pathlib import Path
+          import hashlib, urllib.request, re, textwrap, json, shutil
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/main/.github/workflows/r548.yml'
+          raw=urllib.request.urlopen(url,timeout=60).read(20000)
+          blob=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+          assert blob=='ce370df369f5b2e3b366235e6ab9a0d6dc85c99a','R548_PARENT_CHANGED'
+          m=re.search(rb"          python3 - <<'PY548'\n([\s\S]*?)\n          PY548",raw)
+          assert m,'NO_R548_VERIFIED_SCRIPT'
+          original=textwrap.dedent(m.group(1).decode())
+          exec(compile(original,'R549_PINNED_R548_REPLAY','exec'))
+          source=Path('dist/R548.ipa')
+          assert source.is_file() and source.stat().st_size>0,'R548_IPA_NOT_REBUILT'
+          root=Path('r549/source_evidence');root.mkdir(parents=True,exist_ok=True)
+          expected={'R548ResearchArchive.swift':'83c9a32ac0309809c0cc6b8103c786c28f716e821385d4cafc7534e30e300604',
+                    'R548MegaSceneProbe.swift':'c4e1aef7305e9c7b4355a424fcb432a1127e8696800b91d0ca66c670d01bb522'}
+          found={}
+          for name,sha in expected.items():
+              matches=[x for x in Path('.').rglob(name) if not ('source_evidence' in x.parts)]
+              assert len(matches)==1,(name, [str(x) for x in matches])
+              actual=hashlib.sha256(matches[0].read_bytes()).hexdigest()
+              assert actual==sha,(name,'R548_SOURCE_HASH_CHANGED',actual)
+              shutil.copyfile(matches[0],root/name)
+              found[name]={'path':str(matches[0]),'sha256':actual,'lines':len(matches[0].read_text().splitlines())}
+          report={'release':'R549_AUDIT_ONLY','baseline':'R548','R548_run':40870434305,
+                  'r548_replayed':True,'r548_swift_sources_pinned':True,
+                  'r549_swift_typecheck':True,'r549_isolated_zip_tests':13,
+                  'r549_zip_hook_integrated':False,'r549_mega_probe_hook_integrated':False,
+                  'ipa_build_R549':False,'iphone_gate':'HOLD','sources':found}
+          (root/'R549_AUDIT_STATUS.json').write_text(json.dumps(report,indent=2))
+          print('PASS_R549_R548_EXACT_SOURCE_EXTRACT',json.dumps(found,ensure_ascii=False))
+          PY549_PARENT
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: R549_ISOLATED_TESTS_AND_R548_SWIFT_SOURCE_AUDIT
+          path: |
+            r549/*.swift
+            r549/*.py
+            r549/source_evidence/*
+          retention-days: 3
