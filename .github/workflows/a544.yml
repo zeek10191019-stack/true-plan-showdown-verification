@@ -1,0 +1,55 @@
+name: R544 OCR Geometry Recovery and Field Evidence IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - name: Verify pinned sources, fix R543 file-count bug, add R544 diagnostics, build IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY544'
+          import urllib.request,hashlib,re,textwrap,ast,base64,lzma,json
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/33f612b03a90ff39a9d0087f07ee3c831b54b9f1/.github/workflows/a543.yml'
+          with urllib.request.urlopen(url,timeout=60) as f: raw=f.read(12000)
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()=='f9648a70bbc223c939c6006cbb8e703f59b8e792','R543_WORKFLOW_CHANGED'
+          m=re.search(rb"          python3 - <<'PY543'\n([\s\S]*?)\n          PY543",raw)
+          assert m,'R543_BUILDER_LOADER_MISSING'
+          source=textwrap.dedent(m.group(1).decode())
+          marker="exec(compile(builder,'R543_BUILDER','exec'))"
+          assert source.count(marker)==1,'R543_CAPTURE_ANCHOR_CHANGED'
+          source=source.replace(marker,'__capture(builder)',1)
+          builders=[]
+          exec(compile(source,'R544_PINNED_PARENT_REPLAY','exec'),{'__capture':builders.append})
+          assert len(builders)==1,'R543_PARENT_SCRIPT_NOT_CAPTURED'
+          original=builders[0]
+          assert hashlib.sha256(original.encode()).hexdigest()=='446406075e3e9ffeb0076db666f9282d6aacc5f508f6b0e54dc163f49a00a1c4','R543_PARENT_SHA_CHANGED'
+          patch=lzma.decompress(base64.b85decode('{Wp48S^xk9=GL@E0stWa8~^|S5YJf5;2by-m|XxZ;KK!wfIJ}dRn<CzK3%!Na+7gHq4cq-?Yu+Kx;os+6y?sPsaHS&-tTr-`e^I84Ab}hMwR(8dz)ksnH`CR{6a3I8U&ktN&f?aMXVNP30rrLb+|;K3}us+7!*|_Kz<d|;6=|#lJR_XIL<ygO~{?gKG0KedldI5E2oFw_@Q(fVuQJrc0M=HH%+qsBg5i7Wj$jt)SanlkzW~}qRU1I<vlporOY}XRH!RxzIJ-L!Td<g?(sZBq#_fxhcu7!P1VVx6#X{sey7gB=AuCo?fyd9PxZ?FcK!O0kdVkaLgE|T?#{~knt@IjD;QZQ%KlTpzP3vA7crE8O^g7~U}Z(IvkizK+GS2QjZi<LT(s2peyI<vc*<m>vXDrb!j(2b#JB+aSi=nO?4#z<YaE+O-Uj#}6p|u)Q8MKjg%;Cn3_o@skP7V#!uC7;EGRjNDuj45RA}&F^%58WOe?J(tO%&lz3pWH!(|)em1*6<LPq0(=>DFZp05xi{WHXg5;-^m6%qUj2u05hAdN0S&o{LosC@`Z#vXWl$<BtxxXG40N^~k)jC%(y2K^F5JgNL2$=MjY<}}nbqc-;Uc3nIKFsvipCKVmZb2?!gCMqhhT$&q2E&r)jwnDzksqCz;n6jBwd7a0oHENdCzOJWj6YYsrhG_DNZXmqWXD(zKHf#Vw|3f{Y(kisJJV%xYZ~pV({DzZoUj!O4<igA1!0wdKfQ)1FKj0y=9>4o%LK%9;U(+Jv91Gpr00G={`*D!F$L?P<R><1jXR*M$H`WrIF!{RCyB9KZm)hkpF<f8P(e^oSw@g7j_D;rbj$GsS^~xsa#U6faF(Ug{5GM~32-os7?DV<X1OuFG=R@pAh1qgy62JZPsd!34MldnKkYahoX|XkXP1(CY+a|jmF#8#ZlW|&aDx5xOkJrDG6(@-)A%jWJKi8z|8e<0aPp%*~Y$rd{u{D^rm=A!OoR{}UN&eX`k5=%zL0E@HC?^R)D5<T2HgB~=Gh#=+JvK>C2^gsryJNsM9Jez~L8Co7F-BM!M$-K8b73LD<=<!(dAI20SuRed84{;S0jF*?!ngsd^C3EPplCnTIt70=D~km<#W&6UYn>3lPJP0NG)`uj^F9?!`tGZVBiok@Ge_l0si_kDp+A3QCTNk!sk(8Qe4?H6NZggOwP$}uxUYJ#fu|NPuUNppP7BJ`8ni#5Al0~S)Z)A<kt2Q{@Dt!jtXs0~3;Aq%)L|ODU#1fq2#1WzkxdpaN9G>fd{>Q9S(l=g03ZF%b%9mTz#i*c#=)rT%3b|xpQxXC9J^|lpjdsk<UK<Kb@JqD)UihbD#`#Y<vPy_NW9ADb9&G5#$C_}B(9k7>vTrsB+ktpy8dDb+GPueNC14i?(Bd0HGP#R0@soO7KLi&xbT;J+5i0)GhQ6~;}$=u3~m;Yt3vr<f~_U$P&?qWkwnm2uYjqTy=CIhlT#{>f?81O-+%4hDe2&|MBfIf3GCb2<J2@JGsr=3-ta2^KO4qMmS`=PNgGhk16_6eio3>zj>@I|TBh7sy_(|6d4ofFar=rtH(MGNYme_puk<iB2F#bvqk!RUxOJG|bagWGOs0Ca-5MrI($&8`am>tK6>AZ15IF?+6Y1=uBx0?^xD#adAy*WrrFF1>xA^>u#{=|qkrBn}3Kol2VwNm%g5<HD*W7j-$!oS?7Q^Xn&ZefW_VzK~HM!!FGM4!_{hT7FIt<w2N`uA3?s${|$hB^^20^w=>kHeX_NrlJq}GhS;(L<0?0w|v8MSFu*@iu@SSMmDZFAhT4(1%>>w(#}^+q!|d?xeb{{RSpNoM=xboMQNNdhYyvf7_xd-Cx0ReL3Ui3uB15>zCsjWP+SfJplE)sy=wmhU)MRKE9eA5%o!?Jj&(C{c!h>O?J`hJVxY;eq)J*4cM}pmQ`#fSc`8?E#J+p)9e+my`47B92o{JXaz`9={@nPlHd?HLT05VHUiU$tF5z1Z<|UzQ_01$6M=YOtIVA(j&$u#oetOd=jFGL3Uw{a(&>XVvnh3&`j5=k|LZZW06v5nR{S@vb7Xj>f9J2c9@dPd1jxl<b3+dA$JBf*Ke#Njdq<02!o9_oJRkH@m3$pNsmvsW;*=+W%cdV)QiIj`c>O0wQ|rW<4WnQdjW1w+{taie>qlUJ2K!c+bM8$Y;E^g+AzzXL??)e&LAi<IW?s5>K6&+o)jGAA%ePF1>bVgT~$AD8el<ztALvhhmbT&e>l+M=_vJ`JjE~dmK4DHnCIx+oU-1gPTp+g{aB%sLN1U;{)~?<L>^t|*QH&{1O79N9$~+Ma~J4t&3Nu)1$<7NTgD#QAEy6RpOVN0DV6#QXqG9Bw+{gWv%uDb6lHe@i0(%P4Nae|e~k^3q-GxZ1-ge+k**WP*{fsBZr-9l->gaEaP40WJHVvRm!3a!iy`1U1}5+fxl>SC#H*;A_|^SxKE<lIc2ng`WY;hIkzgEu^i{BK0X0X5-+nTrd#&6O6V3iXYq<t$)wiU^njw!JLvn2vOFwTnU7WAY``wGY9f7o4Rh860Y_x_6IyUozSE^+8VI^TqUzL*lVv$=O1{8n7bwxO}>%{)6@33-0E!V}#NEUxd<oecsNoK<9Uls9&Iw#TXB6JpxH&telim+Jdedc`tpI2rpNegY8#W3Pw^8MMJHwM5qY@=G+fK4q}^pU3e4W$g7Ph!S792Bl~+4>-q2~m5f4!71di}fYk5L(1ut+x<-9&~Ou*;vfWAWc`Av;iUb=&C#(oOsBMIPy0t=kIM>*QLs!?!lTRnt}hEgBXei7)&7)G4HB2Ir>gH|K8*8osvy_9B@9QFZx7*1jx_9a)XcfkRVIkmUcrj5oa-uROoUUN-j2TL0l2ZnLqy!Fb<7s%SCdg0zh*K@KaG~gYevgRn&xLXV8K_EaYfptFS#9OAe*-+%?q%n|C)EhgDiGW`nGq?$b!vD~(U4;!#*|)6PsHjTtm6ncEua>#+c`lLSPFms{l;P>XoXQ-4{(JZrgL({mQ!CLuVXF}^cPphBc+oYQIZ5&1y^OrG`G-iT1Qo6S>py!lAu!mskN?y{|k9?Pk|rc;4>&d_g3>A6ORA?c|V8y>%~0rR+kb@EYfEK#~rv1fO;Q(J0jU_;NaI=KzY?UKlU`TNL{1YQJ6LR_U=T6&h|(7v)As9aYNJ4mk;CVY9~sPN1D0AG~n^&y^bkXcw|l*bIWQnX}9UIV2DCT{jeUE?^6vL@kem+pJ=HNVVpFx}=uM^TqGAdB1@@!MN_rN#EQf08kXbB^h4zLdUje>K3PQb0bJt@j7O(%mTp-4axV@R9QLFRp-R!23S93CX6(E0Dk@?jjAQq{LCSo|}3$UWIrGUFj$3=T*wW6Y~qg!2s^YgqO}VNqpvYNA7JG0|||_+Djb5%Ji$WB$(|k8NH}=7TdOhY|Bw8X{aKQBYT3-H~t8dUHId#|K`y|X!Wd-m6{>gXAFXoszNT2J48TW=S-6HZP{nfw?;{|(m1Hen~1Mp*L6Y-={k_jTlF9aYZ`61$^5H!LjS_0PxV`dx4BbkuCfR><chJ0^+F-qy7G7U;C%yuOxrZnWZ4<3Wdq=mlNpE;^Fz?xHfwo*o-zWsA;PowEayn00+v3gr}nf+m;EQH0Wcpk!JkGJgB5m+`((9yos!B|U^<xqi2dgT`hU3OvpkgJ=~(leYv(p8T46iKKxY-mpNR>{o~B~<=v!XDYZ^64uS2o`9~HlgHP~Ps-01nSw|cA!yx08NWIL$uO@u|2HLK`#jOC3s%KIhVJN_AaQhGRrm~<9&XDv~g9-wnZn4);yOg1?X&$5%wA^|o#1k%Tt;Bx6Wc!)i)2YPaq*RbWD{@MFPIziZ$5zlV<x6?`n?A~%nFTC*Hg1dV%2U6DL3~SON67&`?H9s0m!?NB;ch3@#MKn*@H#D6*BtZC6U6qpzky;Hdk|#*)NU4~%LnT8asT3*Kc%tXkm0dS-!ZU4R4k+>xaVsaD+qXdzwQPGd_s@EZjy`Mlck!F1^1y!)PXVb60fz9gMRkb2(Q+;}eUwI@TnE)jST3Zvff69@?nsM55c$)6EcydectQvA@&RlZiQ)LpYbr^rRKKQDMq1;G9l(G$h`m5QuJ%9*9J&0HT&MG1zlM7kd+F;$@k{5uUEYF`gkA5V#soh!()@Bx95TXyp(oLUgoK>4Z=@IXvX@crH$LWh2s7d9!k&g@<(3zkcWCCp+VyXd_1;1PJ7wA&`JwLaD;&JX4}Yiz=Z=qc9S54%2~O-_U`wt%AzMLvUyqECd|TDnExfNYvsMPcV!?N7_+DcB8(JM4&Pa4~i^(|9GljVGD4+cb6B0|z2@^e{nyc&z_2gDoKA)ZM1i-IVYa<pS@%nZNFY=d)JoR2zK^CB*5;=6)JYO!eE<WT3Plqsj5db58T%*4RZ!7as-%_9&rqU`aeXDF((aM_-x|Y}}OOtuVg-R$HNDPEa)Lc@FWs-IS<Qls=Z`?2?PysBZ3cp3_FTwkA(MsuOj{qUH<LjI*$SWfrtHJyXZPKLp)cp<u!UW=nwUw?RqtzXU6eBw1;RRd+w4(Te9ZQOjCcPLS>8nl&x;UlJc&v7faIcT<Q0saUsgCgd;<47i%Wq;<?Xz<OZPVGih?WEe9khq&3uTKhK=f`^Dt<zCP7ms21_)MDJ<+wMLF$@TVcT$x;VDgW!qOGjWvc<)q|~obzHUJc_Tb;yLjhQOfo4B4n7H53QFb1re@)j+&)l~mWiu}ownP*<gMh#d9)pwz@u;=;q;}TM*~JL^tO|||)@qy25rl4=J-aOZ=u(p#%C4%#Ynp?>Jz}uIfE~LXhRpdWY=)h91;R}rZSmA~!kbmI5Vz~R-wEqUAChHvCfIdg>vkj~2KT-ep%=&38U>WLeG|pRgRk2$^%)YEeNOExi5Z8vEN01VodDH&HC^%;QIek1f_2I7=#HMv@}u25+q5DpkR$dX%t|IrjISn>IuG#0Yy))0=NAx12--}EBP<*idy)-UDXB_{ABc>5t^(ByS|fPoMgw<SH{&QA9ymwXmBEfzhr(Mbxa1!hU>Cc%=d`SbNsP$?d6)jfxGsN+h!Eu4r_%1$g|9w<M{`DJ2%=pUC;h#nz|8Ak)TEFIg?0SfD}B!kg5M6!@z!-Z%!%oB8(sA%0dAKm3_o)zJ?dr0c2Fz2yaM_XSWF$agbnj7ZKiSRr*dZi$ykw2o?%!``5#s$B;Ldgwn01YuZIP2UI#y+;~fdHCeNzmaB=AeRC6}5o$#KNrGhZPSQj`qmNI`?8?ss)pYgD^LHC`7g-#Mft2`Pgo>|iMT-Z!aJFRt;d5_8t1>SQn>=BN2QfH%|iDdAoFluEaA1?5`wa5@lceWf1K&WI!XLCa^n3umi&SDM3Z&z@?b0cYA?aD*qXY~W)>EC%up_qHg6epqLpK@S_ensN-eDfy*or)#S<jg&%M(ykii42&Zj+Pn`+}Wp@{YVKfiBf9mC@`k0jC(TT-?_;8pDLfsnlm0n4SLPaT037;P&ywtv+@VzGWUIc-zTJ1q7KMj0m;{!Hu}@@(y(+s2AlflhI>mHvaa}#(b)zw4Fvh~<m<*j1fzwjxsBfHScRO$B<bl{PJWQDU1TA`Ys!}hJu<9KD;mUNacvCW>vn$vd!aWZdg@!w-aXYzWfAPTI|RRjhtc4IQgPmVd{vN+>MfO!oBProh55Sm>-yVo2>c`nq?OTXa7N`4uokA~H)zS8n-UmD?~3XN`INHFY`DSe#AGb<QAGMumgY<(!aWHxdBl<g__;ZcF84hi=r3`p(2}G=bYvZYCf+{=N|UFWdkty=kBpw2fC<K*Vg_0~M&#}6P10y|5q?i?p*y3Z7=&EQ5!LGVuE@>+xPwhn?)(h`XgJi^$3v<wbc(tYPrc=HpXW&5CYq)2@C*X*Gis>o_*ZFTifGu%VpprhG)*w8^IQszi(jCqT>!#@{dR&izty)+!P>yd%f@{O+0qoSKiz4)f^Hmf)r)ZTau|s!2<P-rnFZ8(-`J&O)X`)eL|b;bbV?O!XG@pp8|`Z>*5==`NQQSoDWTUXewSI!beiE9y`Ptl5tWWyFo^BCaZvyNW&7J!$_7Wd79<}4o$=<uG}BLC00Fcmxi|m-@{lb7vBYQl0ssI200dcD'))
+          assert hashlib.sha256(patch).hexdigest()=='7ea4d8997772b45e0efa38208d4bbaf1074bc0c9f0015febf6e64e21d80c9fe7','R544_PATCH_DESCRIPTOR_CHANGED'
+          changes=json.loads(patch)
+          lines=original.splitlines()
+          for lo,hi,repl in reversed(changes):
+              assert 0<=lo<=hi<=len(lines),'R544_EDIT_RANGE_INVALID'
+              lines[lo:hi]=repl
+          result='\n'.join(lines)
+          assert hashlib.sha256(result.encode()).hexdigest()=='a11a401d46f756d7235286683d15d45cdc7bc80399165243832654b3f6ae4d05','R544_FINAL_BUILDER_CHANGED'
+          ast.parse(result)
+          print('PASS_R544_R543_BUILD_COUNT_FIX_AND_PINNED_DELTAS',flush=True)
+          exec(compile(result,'R544_VERIFIED_BUILDER','exec'))
+          PY544
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R544_UNSIGNED_IPA_AND_AUDIT
+          path: |
+            dist/R544.ipa
+            dist/R544_BUILD_AUDIT.json
+          retention-days: 3
+          if-no-files-found: error
