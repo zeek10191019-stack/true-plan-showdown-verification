@@ -1,0 +1,56 @@
+name: R544 Fully Repaired Pinned IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - name: Rebuild R544 with pinned hash and source guard repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYFIX'
+          import urllib.request,hashlib,textwrap,re,ast
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/97f48402ffa51b2087298508d8e4e34741f225b3/.github/workflows/a544.yml'
+          with urllib.request.urlopen(url,timeout=60) as f: raw=f.read(15000)
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()=='761ab34125af0d1d5499e8ad9fb3b9495f0ed61d','R544_PARENT_BLOB_CHANGED'
+          m=re.search(rb"          python3 - <<'PY544'\n([\s\S]*?)\n          PY544",raw)
+          assert m,'R544_PINNED_BUILDER_NOT_FOUND'
+          source=textwrap.dedent(m.group(1).decode())
+          anchor="exec(compile(result,'R544_VERIFIED_BUILDER','exec'))"
+          assert source.count(anchor)==1,'R544_CAPTURE_ANCHOR_CHANGED'
+          source=source.replace(anchor,'__capture(result)',1)
+          captured=[]
+          exec(compile(source,'R544_PARENT_SOURCE','exec'),{'__capture':captured.append})
+          assert len(captured)==1,'R544_BUILDER_NOT_CAPTURED'
+          builder=captured[0]
+          assert hashlib.sha256(builder.encode()).hexdigest()=='a11a401d46f756d7235286683d15d45cdc7bc80399165243832654b3f6ae4d05','R544_BUILDER_CHANGED'
+          old="return _h543.sha256(''.join(f.name+_h543.sha256(f.read_bytes()).hexdigest() for f in _fs).encode()).hexdigest()"
+          new="return _h540.sha256(''.join(f.name+_h540.sha256(f.read_bytes()).hexdigest() for f in _fs).encode()).hexdigest()"
+          assert builder.count(old)==1,'TREE_HASH_HELPER_ANCHOR_CHANGED'
+          fixed=builder.replace(old,new,1)
+          assert hashlib.sha256(fixed.encode()).hexdigest()=='518adf5ae53dc588f8e91854908d411a2e40b0b2731e592a494516a665fe860a','FIXED_BUILDER_SHA_CHANGED'
+          expected_old="assert hashlib.sha256(source.encode()).hexdigest()=='18150496d16df28f254e0a57d59ff69ab19a7ac4896bd6fe98215a7fcc20fe68','R544_BUILD_SOURCE_CHANGED'"
+          expected_new="assert hashlib.sha256(source.encode()).hexdigest()=='c9dd7e29cd0fb7023289194dd8f7ef79a64d6c629c30fa679ebc36d6f2d706de','R544_BUILD_SOURCE_CHANGED'"
+          assert fixed.count(expected_old)==1,'R544_NESTED_SHA_ANCHOR_CHANGED'
+          fixed=fixed.replace(expected_old,expected_new,1)
+          assert hashlib.sha256(fixed.encode()).hexdigest()=='717cffdcae42a10be0b8412e651f0ee06d9dc34e00cba4b6dc15b4d06dda4751','R544_FULLY_FIXED_BUILDER_CHANGED'
+          ast.parse(fixed)
+          print('PASS_R544_PINNED_TREE_AND_NESTED_HASH_FIX',flush=True)
+          exec(compile(fixed,'R544_FIXED_VERIFIED_BUILDER','exec'))
+          PYFIX
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R544_FIXED_UNSIGNED_IPA_AND_AUDIT
+          path: |
+            dist/R544.ipa
+            dist/R544_BUILD_AUDIT.json
+          retention-days: 3
+          if-no-files-found: error
