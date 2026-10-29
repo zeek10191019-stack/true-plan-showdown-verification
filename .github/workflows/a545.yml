@@ -1,0 +1,57 @@
+name: R545 Four-Source Evidence Readiness IPA
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - name: Verify pinned R544 and compile R545
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY545'
+          import urllib.request,re,hashlib,ast,textwrap
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/97ee90dcdbe8ff25c7a39ad54becf2e7043700d3/.github/workflows/c544.yml'
+          with urllib.request.urlopen(url,timeout=60) as f: raw=f.read(10000)
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()=='b150945a544f67fbd4843ec4647d7bac9634a7d0','R544_WORKFLOW_CHANGED'
+          m=re.search(rb"          python3 - <<'PYFIX'\n([\s\S]*?)\n          PYFIX",raw)
+          assert m,'R544_WRAPPER_MISSING'
+          code=textwrap.dedent(m.group(1).decode())
+          endpoint="exec(compile(fixed,'R544_FIXED_VERIFIED_BUILDER','exec'))"
+          assert code.count(endpoint)==1,'R544_SCRIPT_ANCHOR_CHANGED'
+          code=code.replace(endpoint,'__capture(fixed)',1)
+          captured=[]
+          exec(compile(code,'R544_WRAPPER_CAPTURE','exec'),{'__capture':captured.append})
+          assert len(captured)==1,'R544_BUILDER_MISSING'
+          builder=captured[0]
+          assert hashlib.sha256(builder.encode()).hexdigest()=='717cffdcae42a10be0b8412e651f0ee06d9dc34e00cba4b6dc15b4d06dda4751','R544_BUILDER_CHANGED'
+          anchor='assert source.count("expected_input=\'4c6458f626188ee66a0d61534a02ebd3851e2dc416944afbaed39d54379c84fb\'")==1'
+          assert builder.count(anchor)==1,'R545_INSERTION_ANCHOR_CHANGED'
+          builder=builder.replace(anchor,"extra += "+'"\\n# R545: fail-closed evidence inventory with mandatory four diagnostic sources.\\nimport hashlib as _h545, base64 as _b545, lzma as _l545, subprocess as _s545\\nfrom pathlib import Path as _P545\\nassert _tree544()==\'c5a81798f32296e52ce96da2ad84c06aa9c1a07ccde791d12211130e58e1a433\',\'R545_PARENT_SOURCE_TREE_CHANGED\'\\n_r545_payload=\'{Wp48S^xk9=GL@E0stWa8~^|S5YJf5;2m%Yb6o%y=mZQR@)_o$9W?N4*YMDtY8u{hQt8i0+zZP4UX$mIb1}PYKuAmV^w@WX#c2RF|E$j5=$lh=Rb7uKjW6yM_YgcY)Y8(fv|Jw`4Oq%~=0AJMp}$x*pD7u{$^jH37jVic!r|_lCY<Z`z@KMv@&A#DvCz0kY3Bl^t1W~(7}px!@0f8HzSY)wZwK(;Pt=SoAJMSH0kI9}%8aeFbxn9VL~D`}IEcwI-|FP+l3QTQeBnR_M5e8dK$^O__F4(6>a;Y3X3&EIKt-WL!d{xiHt)OjgR?Av7&b!+jsujCNvp~*Y&ttuScJEldFVa221?ieErk&-YfPQQ<yF5C$mk3n=UV>1r{t4V#O3%MJ*i5@rsF~YagXz7pTC4VtUR1%rcrRk1#3Mgc)gc)04op6Z1tvZ!9B*HIKnG{EO^yi6sx3m^fL>0*m>1pA7P3QCRvbCy07HuCBt_Z`ln3`-tzgXc$P%VNW5SV6oc@@9|+EGnN5}Q<nMmH&*Cu}Xio`Q0zPK`zum@QS4!mUt3Lq5isyvA%^@)*!hJx>nv0<7*1d`ZaLAeZp<}?|?koSs41iY!I4yL?+pr^<!&k#nv9~@XHk^L`Jr!+UEA0Xi)EdF;D7^WJbZwB-MG8zgK`I2vm9I<XIV(hUC?W}oK@!jYdYP>+>tGaIDt$-nF)3&;FME-G<$I5J0P&>w%2csNYD8OiZpQdKoj00o*+_C4<om6Vff#j99COs?o4FR7xFj6&9=L?Yh+isIa;Ew^JN0YL8t<4$F}3G9q?XsyA(!}>wU>zj7JKPO`jIk>Fh-;sC}M3n-*k9kHcV=S+O4!DmnKij*MY?TC^<1ZhJ65YV-EZL2Bm<l27$va`08E~wt2?A@g^->+oo8_^#^YQb*v|PCRC3OLFV7xHOY3Yfxd07&dJHMsowJ>b=SNc+ij##A~Gr@)Is?dbO1t1%$~=U+iS0EMcT?m?Q`QBMx~0)dh4@NMppM8#OKnbZ&`Z9ilH_6ev^}C5Nt5enw$I-q1B*c;Jl()qvvsIdMPjA28gQ>0n;5h0|tW?deSZroxd*unYVo`oJ>EeK}vI$)6>19YhttU61fu>!~-IVkP%1{VZ&88YX3eDAT}uF*a3K^H+noWQ1(ZKADX?@xP0L?&`I{}OXl*TF}$3pxZc^dZaoaA0FWjc?r|A1htx|ioz!dHj>|q&7GLE5P4&Le9W;E47{xPbx6-xhaNMWslz<tCEh?4vYXeU%Nw6<K367=-m7VY_Wj59*mdSH_poC6OF_b!)KjQ1N5oEz%mBUXc5Ow&e!Y)CkK&>wjFm&n7v?^h5zBwG&`HTRaR+=r_2PE)E65-08D~EAf$w~e8^#txCcNXdCRq>^O#F#pvZ1UIG%_NRfSyLAxdC_}BvbQhx+mZ}Pnv8VjA|dVB`Wid<q6fh9cLS4z>N=-*dB*Pd;Hp`b_x22M#Zn7QrP~Y)Yo2C9RVkJsvSSDgG=Zmkg`F6gN(UZ?V-PGtXrzQ)M7lzUMn!Eylq{_x7hpyG@0mPiMFDCM)YjNyOtzm9>D&ufB5gh|%8B5mxFEL~J-#i>Eh#;@gIAgpmutv#P9pDXMU^fuAsYB&*a1oc6X-h2*c&r>WzJN~!@W}PNuNvwkckmA(huiVI_D4j4Vz&+n;*ZHY+-+wh+}ox8;(f(4_j?NTS)E`&ERZNEKl~;7vHcpB!c$scVsp~jP9W2Ts(pM70~+|@h}0chDJC(=jdX`a2?Lx%2XiYNlY(tL-&&<da`edsE(;-O2c2iEF54*MvfU#v)Ck7SF|QwbsJRdEAI~ZC2z1X7+$M8AWORKUej%+DNP4m**0rSIU0WP<IkrekQ~qQHm|f1BL4%mLu)-+Ss$lO%~h6B{2(wpb;u$bAo=G7=HIq`tNexNd5~j(f03^cxC=-H;ssw<H129{ofgMQvk3!V5W?1OAjywTK9#@7hP1QpNi?eH9K~oV?+LIW4()6YT3{T^qj!p&zO_lBPL0ev>USW=nO0`s2+u&Y8r^l*f~XvniTIR=ns&PV)Kiv6!*bKC`RZ4?#-luyIa`J6rX7B=E6b*+VlrZmNFQCApPrd(ZoWY((Y6q4ub7GZCNHFv(9a8lfr9ILs5!wJcc#c{3=+>7ZLz(Wr^yS9@0t`I37jR$HE=#y6w)2{*p=y4_Fn3uU&my$M-PjyL2KVELg&{+(9B<a=AxG%y?xYwlJDpm3^>dl4k+@XJ;;#c18sC(U*obq9aM{E^cjzoLndi-8zVX;_mx-d;FSY?wrIh?*SgXn#e>nWq&q<)iVuOBZ>)+?rM(%gnc{O~5;IArlaGs@xhuSsr%8~nyS<gSzI`^#ri(x2&>oFGtjD8EB%h38p1Y~j7a~EC!>I+1U@0Fws<3)96PD{Mg8}chF4Zc=`>dmE9q9;poOe(Al-RfXq-qGKA|y#YizZyCua*wiiNKd;lx}z3cGrXx@3hF@ZRsbwcJYdSq?pBBiwRY+o3(|7X*9OwscgliGJdBn07PZT|K;NCxFERM-35s5U~OsZ)PX^{$G9bdp%I*UjjH6_^CwwxSnc6RzxTVw%w$s*v}fHzBrw|S6j}9x3Pd3%_ac<HNzCVJo1gB~ytJJ4@6fO0&Ix%{6bX~Z;8RgXxLxu6h$2&8n!fuO-17*kte$|i*m8(Ggy(YK4HDa};sX84L6=OamY-}!%Fl+3vR^4(@OsJ~J{`@OCv7+x_B-5x?oKR>U~;16*!xra)$p0hsDKX4o@cJYB?Fx%Hyc<ieS#-H01avE{vYkL*=SjTpWW*l-aS5ZCWt0&&M|z>R~AO<qJrkkeo`tQ+C4_{%ter>4+J^1d2*N1$WsVL@497i+gPfhbCOWN7;-I51mFKn(s#--A(+0mSlw*{iXTrzE^*Kt_(v2P!lDY?8K}ahfjzc6Uy(b?i^O&|dWv&q$tHT}O455^f|xWF$ickKU2gVxkyPl>7s|N6$*#UUwj2!S*5kc^Qq%M_8rN5DnbS&j=fAQ|<h<Lu->k846mtH0eGOEfPh;n;<|0`ncNVA>@eYE~-BN7&>mC~H-hMxSTy^sEtOm;8lR92lJs}9{S-i=XGP$bss-3C3C8z)Z?jq%%1N6N!00EB^@j3ti29DJnvBYQl0ssI200dcD\'\\n_r545_patch=_l545.decompress(_b545.b85decode(_r545_payload))\\nassert _h545.sha256(_r545_patch).hexdigest()==\'e6c60eddf3fb391c072b376f9aa8bcdb28cf7487fadbde9ce6e5233fa4c2fcfd\',\'R545_PATCH_CHANGED\'\\n_r545_file=_P545(\'r545_evidence_readiness.patch\').resolve()\\n_r545_file.write_bytes(_r545_patch)\\n_s545.run([\'git\',\'apply\',\'--check\',str(_r545_file)],cwd=\'ios\',check=True)\\n_s545.run([\'git\',\'apply\',str(_r545_file)],cwd=\'ios\',check=True)\\nassert len(list(files.glob(\'*.swift\')))==89,\'R545_SWIFT_COUNT_CHANGED\'\\nassert _tree544()==\'52b205ca9343c512b021f41099fd9dba54282bd1d46b9aa1be59afe74fbcbdd0\',\'R545_SOURCE_TREE_CHANGED\'\\nfor _n545,_d545 in {\'CaptureCoordinator.swift\': \'4a1ac3e3c551830a5d54889fea981c6679bcf3ee97210002bd2f2864c3dc059e\', \'R545EvidenceReadiness.swift\': \'1a27fa6dc16854e285aae273d4b9fcb1386015028e7dad237d32ae594e15d43d\'}.items():\\n    assert _h545.sha256((files/_n545).read_bytes()).hexdigest()==_d545,\'R545_FILE_SHA_MISMATCH_\'+_n545\\nprint(\'PASS_R545_89_SOURCE_FILES_AND_METRICS_READINESS\',flush=True)\\n"'+"\n"+anchor,1)
+          changes=[("target=Path('dist/R544.ipa')", "target=Path('dist/R545.ipa')"), ("info['CFBundleVersion']='544';info['CFBundleShortVersionString']='0.5.44'", "info['CFBundleVersion']='545';info['CFBundleShortVersionString']='0.5.45'"), ("record={'release':'R544'", "record={'release':'R545'"), ("'source_tree_sha256':'c5a81798f32296e52ce96da2ad84c06aa9c1a07ccde791d12211130e58e1a433'", "'source_tree_sha256':'52b205ca9343c512b021f41099fd9dba54282bd1d46b9aa1be59afe74fbcbdd0'"), ("Path('dist/R544_BUILD_AUDIT.json')", "Path('dist/R545_BUILD_AUDIT.json')"), ("print('PASS_R544_UNSIGNED_IPA_BUILD'", "print('PASS_R545_UNSIGNED_IPA_BUILD'"), ("assert len(swift)==88,'R544_SWIFT_COUNT'", "assert len(swift)==89,'R545_SWIFT_COUNT'"), ("'source_count':88", "'source_count':89")]
+          for old,new in changes:
+              assert builder.count(old)==1,('R545_PATCH_ANCHOR_CHANGED',old)
+              builder=builder.replace(old,new,1)
+          oldhash="assert hashlib.sha256(source.encode()).hexdigest()=='c9dd7e29cd0fb7023289194dd8f7ef79a64d6c629c30fa679ebc36d6f2d706de','R544_BUILD_SOURCE_CHANGED'"
+          assert builder.count(oldhash)==1,'R545_PREVIOUS_HASH_GUARD_CHANGED'
+          builder=builder.replace(oldhash,"assert hashlib.sha256(source.encode()).hexdigest()=="+repr('9a5cb51955f863e8c7d6c74f75a4fa52d5e21ae2d03740ae88dcd4598c6ac163')+",'R545_BUILD_SOURCE_CHANGED'",1)
+          assert hashlib.sha256(builder.encode()).hexdigest()=='11873c72bf427061cb76a9807f1685875b59e0c1f25ba142c7234435aa940292','R545_BUILDER_SHA_CHANGED'
+          ast.parse(builder)
+          print('PASS_R545_SOURCE_PATCH_PREBUILD',flush=True)
+          exec(compile(builder,'R545_PINNED_BUILD','exec'))
+          PY545
+      - uses: actions/upload-artifact@v4
+        with:
+          name: R545_UNSIGNED_IPA_AND_AUDIT
+          path: |
+            dist/R545.ipa
+            dist/R545_BUILD_AUDIT.json
+          retention-days: 3
+          if-no-files-found: error
