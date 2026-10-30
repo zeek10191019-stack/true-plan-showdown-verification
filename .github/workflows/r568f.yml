@@ -1,0 +1,69 @@
+name: R568 Safe Pinned Replay - No IPA
+"on":
+  push:
+    branches: [main]
+    paths: [.github/workflows/r568f.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: xcode-27
+            role: IOS27_BUILD
+          - runner: macos-26-intel
+            role: MACOS26_OCR
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      SCREEN_READ_R568_ROLE: ${{ matrix.role }}
+    steps:
+      - name: Verify and replay the exact pinned R568 source and Apple checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import subprocess
+          import urllib.request
+          from pathlib import Path
+          repo='zeek10191019-stack/true-plan-showdown-verification'
+          commit='5b52009b612713ac06001328465083a4dfdc871a'
+          url=f'https://raw.githubusercontent.com/{repo}/{commit}/.github/workflows/v568.yml'
+          raw=urllib.request.urlopen(url, timeout=90).read()
+          expected='c1264e39784c7811d8aa5858fe96689df5fc27084711f6569f31700da437cd32'
+          assert len(raw)==28062 and hashlib.sha256(raw).hexdigest()==expected, 'PINNED_R568_MISMATCH'
+          lines=raw.decode('utf-8').splitlines()
+          blocks=[]
+          for i,line in enumerate(lines):
+              if line!='        run: |':
+                  continue
+              out=[]
+              for following in lines[i+1:]:
+                  if following.startswith('      - ') or (following.strip() and not following.startswith('          ')):
+                      break
+                  out.append(following[10:] if following.startswith('          ') else '')
+              blocks.append('\n'.join(out)+'\n')
+          assert len(blocks)==2, 'RUN_BLOCK_SET_CHANGED'
+          assert 'PASS_R568_PINNED_REPLAY_INTEGRITY_AND_97_SWIFT_TESTS' in blocks[0]
+          assert 'PASS_R568_IOS27_APP_BUILD_ONLY_NO_IPA' in blocks[1]
+          assert 'PASS_R568_MACOS26_SYNTHETIC_VISION_NO_GAME_CERTIFICATION' in blocks[1]
+          for i,script in enumerate(blocks,1):
+              print(f'R568_PINNED_SCRIPT_{i}_BEGIN', flush=True)
+              subprocess.run(['bash','-e','-u','-o','pipefail','-c',script],check=True)
+          print('R568_FIXED_PINNED_WORKFLOW_SUCCESS',flush=True)
+          PY
+      - name: Retain source verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R568_SAFE_REPLAY_${{ matrix.role }}
+          path: R568_CI_REPORT.json
+          if-no-files-found: warn
+          retention-days: 3
