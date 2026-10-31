@@ -1,0 +1,85 @@
+name: R582 Auto Frame Coverage & Corrected R581 Replay (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths: [.github/workflows/r582.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 35
+    env:
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+      PYTHONOPTIMIZE: "0"
+    steps:
+      - name: Reconstruct R579 and R581 by immutable commits and exact source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R582_REPLAY'
+          import ast,base64,hashlib,json,lzma,re,textwrap,urllib.request
+          from pathlib import Path
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          repo='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/'
+          parent=urllib.request.urlopen(repo+'8241f2285e644af7796cadb47cd2ba6912bec5ec/.github/workflows/r579.yml',timeout=90).read().decode()
+          m=re.search(r"python3 - <<'R579_REPLAY'\n(.*?)\n\s+R579_REPLAY",parent,re.S)
+          assert m,'R582_R579_MISSING'
+          source=textwrap.dedent(m.group(1));ast.parse(source)
+          exec(compile(source,'R579_PINNED_SCRIPT','exec'))
+          print('R582_R579_PARENT_REPLAY_PASS')
+          r581=urllib.request.urlopen(repo+'1749b26185431048c4067a4ee056207305c3a0c4/.github/workflows/r581.yml',timeout=90).read().decode()
+          m=re.search(r"python3 - <<'R581_REPLAY'\n(.*?)\n\s+R581_REPLAY",r581,re.S)
+          assert m,'R582_R581_MISSING'
+          r581source=textwrap.dedent(m.group(1))
+          ix=r581source.index('rows=json.loads(')
+          r581patch=r581source[ix:]
+          ast.parse(r581patch)
+          exec(compile(r581patch,'R581_SOURCE_ONLY_WITH_PARENT_SHA','exec'))
+          print('R582_R581_PARENT_REPLAY_PASS')
+          rows582=json.loads(lzma.decompress(base64.b64decode("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")))
+          assert len(rows582)==3
+          for r in rows582:
+           p=Path(r['path']);old=p.read_bytes() if p.exists() else b''
+           assert (sha(old) if old else None)==r['old_sha'],('R582_WRONG_R581_PARENT',r['path'])
+          for r in rows582:
+           p=Path(r['path']);old=p.read_bytes() if p.exists() else b''
+           lines=old.splitlines(keepends=True)
+           for h in reversed(r['hunks']):
+            lines[h['start']:h['start']+h['delete']]=base64.b64decode(h['insert']).splitlines(keepends=True)
+           data=b''.join(lines)
+           assert len(data)==r['len'] and sha(data)==r['new_sha'],('R582_PATCH_SHA_MISMATCH',r['path'])
+           p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
+          assert len(list(Path('app/ios/ChampionsOnDevice').glob('*.swift')))==124
+          print('R582_ALL_SOURCE_SHA_PASS')
+          R582_REPLAY
+      - name: R581 coverage plus R582 automatic frame ledger native Swift tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          swiftc -parse-as-library app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift tests/R581CoverageHarness.swift -o "$RUNNER_TEMP/r581-test"
+          "$RUNNER_TEMP/r581-test"
+          swiftc -parse-as-library app/ios/ChampionsOnDevice/R582AutoCaptureCoverage.swift tests/R582AutoCaptureCoverageHarness.swift -o "$RUNNER_TEMP/r582-test"
+          "$RUNNER_TEMP/r582-test"
+      - name: Full Apple iPhoneOS build and Vision regressions without IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python3 tools/run_r571_native.py; then
+            echo 'R582_APPLE_BUILD_OR_OCR_FAILED'
+            for log in reports/xcode_iphoneos_build.log reports/r574_png_replay_compile.log; do
+              if [ -f "$log" ]; then
+                grep -nE 'error:|fatal error|BUILD FAILED' "$log" | tail -n 65 || true
+                tail -n 30 "$log" || true
+              fi
+            done
+            exit 1
+          fi
+      - name: Certification limits
+        if: always()
+        run: echo 'Automatic frame metadata only, bounded snapshots, no full video archive, no real-screen 79/79 certification, no IPA.'
