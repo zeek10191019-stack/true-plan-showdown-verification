@@ -1,0 +1,99 @@
+name: R608.1 Auto - Repair R608 Python Import And Verify Apple Native (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths: [.github/workflows/bd.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: trueplan-r6081-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: "0"
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+      - name: Replay immutable R608 and repair only test import path
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R6081_REPLAY'
+          import hashlib, textwrap, urllib.request
+          from pathlib import Path
+          url = (
+            'https://raw.githubusercontent.com/'
+            'zeek10191019-stack/true-plan-showdown-verification/'
+            '6f0f419a73f48d0c965a9eb052c17f5960720e31/'
+            '.github/workflows/bc.yml'
+          )
+          raw = urllib.request.urlopen(url, timeout=90).read()
+          assert len(raw) == 13457, 'R608_PARENT_SIZE_DRIFT'
+          assert hashlib.sha256(raw).hexdigest() == (
+            '43fd937b864e5aff6868a955a229fa4876dd5f2470b264a2dbd1da3e8e1ed79e'
+          ), 'R608_PARENT_SHA_DRIFT'
+          data = raw.decode('utf-8')
+          begin = "          python3 - <<'R608_REPLAY'\n"
+          end = "\n          R608_REPLAY"
+          assert data.count(begin) == 1 and data.count(end) == 1
+          block = textwrap.dedent(data.split(begin,1)[1].split(end,1)[0])
+          exec(compile(block, 'R608_PINNED_SOURCE_REPLAY','exec'),
+               {'__name__':'__main__'})
+          p = Path('tests/test_r608_patch.py')
+          original = p.read_bytes()
+          assert len(original) == 1380
+          assert hashlib.sha256(original).hexdigest() == (
+            'c8ab0850dc2cd5f19cd1d2a5cb1df34cb6c40f7932992d3472ba9347fec0f135'
+          ), 'TEST_ORIGINAL_SHA_DRIFT'
+          old = b'from r608_patch import patch, TARGET'
+          new = b'from tools.r608_patch import patch, TARGET'
+          assert original.count(old) == 1, 'EXPECTED_SINGLE_IMPORT'
+          assert Path('tools/r608_patch.py').is_file()
+          patched = original.replace(old, new)
+          assert hashlib.sha256(patched).hexdigest() == (
+            '7d2d014339775921e003e621a5a11e5d86d254cd253b41f50e3f504a91fd3a4c'
+          ), 'PATCHED_TEST_SHA_DRIFT'
+          p.write_bytes(patched)
+          assert p.read_bytes() == patched
+          assert len(list(Path('app/ios/ChampionsOnDevice').glob('*.swift'))) == 148
+          print('R6081_PARENT_PINNED_AND_ONLY_TEST_IMPORT_REPAIRED')
+          R6081_REPLAY
+      - name: Run all prior Python regressions and R608 Swift harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH=.
+          python3 -m unittest discover -s tests -p 'test_r605_*.py' -v
+          python3 -m unittest discover -s tests -p 'test_r607_*.py' -v
+          python3 -m unittest discover -s tests -p 'test_r608_*.py' -v
+          swiftc -parse-as-library \
+            tests/R605StandaloneStub.swift \
+            app/ios/ChampionsOnDevice/R605ExactFrameBinding.swift \
+            app/ios/ChampionsOnDevice/R607FrameProvenanceAudit.swift \
+            tests/R607ProvenanceHarness.swift \
+            -o "$RUNNER_TEMP/r607"
+          "$RUNNER_TEMP/r607"
+          swiftc -parse-as-library \
+            app/ios/ChampionsOnDevice/R608FramePixelEvidence.swift \
+            tests/R608Harness.swift -o "$RUNNER_TEMP/r608"
+          "$RUNNER_TEMP/r608"
+      - name: Parse all Swift files and build native iPhoneOS target
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          python3 tools/run_r571_native.py || {
+            for f in reports/xcode_iphoneos_build.log \
+                     reports/r574_png_replay_compile.log; do
+              test ! -f "$f" || grep -nE 'error:|BUILD FAILED' "$f" | tail -n 55 || true
+            done
+            exit 1
+          }
+          echo 'R6081_APPLE_CI_PASS_PNG_GEOMETRY_ONLY_NOT_GAME_HUD_CERTIFIED'
