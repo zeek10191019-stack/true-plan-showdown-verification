@@ -1,0 +1,96 @@
+name: R575 R574 PNG Replay Int64-Int CI Repair (NO IPA)
+"on":
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/r575.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: xcode-27
+            role: IOS27_NATIVE
+          - runner: macos-26-intel
+            role: PORTABLE_OCR
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      SCREEN_READ_CI_ROLE: ${{ matrix.role }}
+      PYTHONOPTIMIZE: "0"
+    steps:
+      - name: Restore exactly pinned R574 and apply one-line type correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'RESTORE_R575'
+          import ast,base64,hashlib,io,lzma,re,tarfile,textwrap,urllib.request
+          from pathlib import Path,PurePosixPath
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/967966437e7d3f45f0454b54d740c3dba63bdabb/.github/workflows/r574.yml'
+          raw=urllib.request.urlopen(url,timeout=90).read()
+          assert len(raw)==483631 and hashlib.sha256(raw).hexdigest()=='58f63c8483e69dec577963895e5afea6e583ad18beba73dd26f23d7109172119','R574_SOURCE_PIN_VIOLATED'
+          s=raw.decode('utf8')
+          parts=re.findall(r"python3 - <<'PAYLOAD_PART'\n(.*?)\n\s+PAYLOAD_PART",s,re.S)
+          assert len(parts)==32,'R574_MISSING_PARTS'
+          folder=Path('.screen_read_ci_payload');folder.mkdir(exist_ok=False)
+          for index,part in enumerate(parts):
+              code=textwrap.dedent(part)
+              ast.parse(code)
+              exec(compile(code,'R574_PINNED_PART_'+str(index),'exec'))
+          names=[f'part_{i:04d}.b64' for i in range(32)]
+          assert sorted(p.name for p in folder.iterdir())==names,'R574_PART_SET'
+          encoded=''.join((folder/n).read_text(encoding='ascii') for n in names)
+          data=lzma.decompress(base64.b64decode(encoded,validate=True))
+          assert len(data)==1832960 and hashlib.sha256(data).hexdigest()=='189d62903d27636f0a0838b85caa54561b944010d9db95da0226dc34b7fcb1c2','R574_TAR_PIN'
+          root=Path.cwd().resolve()
+          with tarfile.open(fileobj=io.BytesIO(data),mode='r:') as archive:
+              members=archive.getmembers();seen=set()
+              assert len(members)==244,'SOURCE_MEMBER_COUNT'
+              for m in members:
+                  path=PurePosixPath(m.name)
+                  assert m.name and not path.is_absolute() and '..' not in path.parts and '\\' not in m.name and path.as_posix()==m.name
+                  assert m.isfile() and 0<=m.size<200000 and m.name.casefold() not in seen
+                  seen.add(m.name.casefold())
+                  destination=(root/m.name).resolve()
+                  assert destination!=root and destination.is_relative_to(root),'SOURCE_PATH_ESCAPE'
+              for m in members:
+                  p=root/m.name;p.parent.mkdir(parents=True,exist_ok=True)
+                  with p.open('xb') as f:f.write(archive.extractfile(m).read())
+          assert len(list(Path('app/ios/ChampionsOnDevice').glob('*.swift')))==117
+          p=Path('tools/R574PNGReplay.swift')
+          old='var packet=ResearchBattlePacket(battle_id:session,epoch:epoch,frame_id:frame,turn:nil,observed_at_ms:observed,'
+          new='var packet=ResearchBattlePacket(battle_id:session,epoch:Int(epoch),frame_id:Int(frame),turn:nil,observed_at_ms:observed,'
+          src=p.read_text()
+          assert src.count(old)==1 and src.count(new)==0,'R574_FIX_EXPECTED_SOURCE_NOT_FOUND'
+          p.write_text(src.replace(old,new))
+          assert hashlib.sha256(p.read_bytes()).hexdigest()=='1d357f5d29129205b375a571a64ce0f4b66a4729f136169dffab41f430f57178','R575_1d357f5d29129205b375a571a64ce0f4b66a4729f136169dffab41f430f57178_MISMATCH'
+          # Keep R574 app release/engine version and explicit offline scope unchanged.
+          print('PASS_R575_PINNED_R574_REPLAY_244_FILES_SWIFT117_AND_EXACT_TYPE_FIX',flush=True)
+          RESTORE_R575
+      - name: Run same current native regressions and SDK/Vision checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/run_r571_native.py
+      - name: Print validation evidence state
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'REPORT_R575'
+          from pathlib import Path
+          import json
+          for name in ['R574_NATIVE_SOURCE_CONTRACTS.json','R574_MACOS_CHECKS.json','R574_CI_REPORT.json']:
+              p=Path('reports')/name
+              if p.is_file():
+                  report=json.loads(p.read_text())
+                  print(name,json.dumps({'status':report.get('status'),'current_phase':report.get('current_phase'),'validation_scope':report.get('validation_scope'),'failure_reason':report.get('failure_reason')},ensure_ascii=False))
+          print('R575_APPLE_CI_REQUIRES_BOTH_MATRIX_SUCCESS; GAME_ACCURACY_NOT_CERTIFIED; NO_IPA')
+          REPORT_R575
