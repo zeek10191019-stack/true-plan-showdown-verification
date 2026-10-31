@@ -1,0 +1,173 @@
+name: R603 Auto - One Tap Readiness and Feature Source Trace (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/aw.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository ==
+      'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: "0"
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+      - name: Restore pinned R602 and patch actual collector once
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R603_REPLAY'
+          import ast,base64,hashlib,lzma,re,textwrap,urllib.request
+          from pathlib import Path
+          url=('https://raw.githubusercontent.com/'
+               'zeek10191019-stack/true-plan-showdown-verification/'
+               'fddccd062ee939c77f3c64aa5a2b7c12abec6f6f/'
+               '.github/workflows/av.yml')
+          parent_raw=urllib.request.urlopen(url,timeout=90).read()
+          blob=hashlib.sha1(b'blob '+str(len(parent_raw)).encode()+b'\0'+parent_raw).hexdigest()
+          assert len(parent_raw)==11802 and blob=='4478118aba0a8fab1f3983a453a334ec10a1ca15'
+          pat=r"python3 - <<'R602_REPLAY'\n(.*?)\n\s+R602_REPLAY(?=\n|$)"
+          match=re.search(pat,parent_raw.decode('utf-8'),re.S)
+          assert match,'R602_REPLAY_SCRIPT_NOT_FOUND'
+          parent_script=textwrap.dedent(match.group(1))
+          ast.parse(parent_script)
+          exec(compile(parent_script,'R602_PINNED_REPLAY','exec'),{})
+          root=Path('app/ios/ChampionsOnDevice')
+          assert len(list(root.glob('*.swift')))==142,'R602_RESTORATION_INCOMPLETE'
+          blob=''.join('''
+          {Wp48S^xk9=GL@E0stWa8~^|S5YJf5;4|(JEL{LJn@VT6Qap2kgL-R<OQUBu7VJ*#)Ru4j+r(9>fWcPM<yuY}=E-fP;
+          Q5<D4d~7tKW{9Z@KDr$0wMCi0R372hPk|n3dL+`x7gOHzSUnAgC~pInT@lLNGY>WPzQ_sht)z|WQY?^t&p3m=>gd8qh
+          1gGamx(_Fc{UU@m3V#!IU$(9DFzPqj(^CTOLBt)gGLwO^Fa}$bv4l;3mfN<FbIa_%t*RHtLZQ<i0Jezr7(X^DkZ2`9G
+          9h3tn2N&#)Y=jikkb3lFr%e1R5BxDOU+#-kJB7e-f-Y3uw4QAB|N_KmJtv?KRjGK#&s)O>5%$vw)Ne&==fiRjmSi-oc
+          Gq|?zb^3e<|gaj(+y4SDKOHKu$Y2cUXQaAV4UNd+!gCA;BIqUQVxkDaTt5a~F2K!YS&ESK9oS)HSAK;d?XmW`*rGDx6
+          vCv4g@{Pttj$SO%2DEyff_+ix;2T<c$b$?tJ;6W>a{rFh&*H|q*<eKWb@vy}XupGiF%UNRQ&TkzH9PnJ;RD?`n77d6N
+          2{KElUQ`Vy3+~RW`Ago@Y}o}H6G3zfy9-6v<9r0xWVb<30!;Vih65%TPjBC?|=EXU8;JDyd|=d{vgR+Ua&L^PcrqJx`
+          oyYt9rJ=F|UQ}p+aNnMugA)cd%jNyM=u+Krzq1oOAb9L#cd}yPAdZe##7?)UFO{47@(KV)w__GzqXsi$=O?{!F03f0t
+          >l1_!)+Sm`KzxX}gz>s7+kNS@M3s#~^7m<vwXy1EZU{}$0hV-)NL<rabgn-yrDZ5>{%`UQ>RFkJcYZ_ORVz-tFlU<@@
+          3-r&=_&TyOG=8e<i#ePkhxsZ;z)PCqFBUQ&Wpp@U__-(ELbePlQ53*?@EVet^8=;=iK@{ZHd7EIoPy+$bcxM5k-Awn>
+          nGs!YSL>Q&-Kd62acdnnoxt~@9b06`mC5PBZC}fPl%k(%XGNiNJm>Y-XbgCSk+K83Yc9>z>20lF0aE%UCcKJVD7t3az
+          3Smd5m~Ufo^5Wo0*zKxN?B5cEjx$9cJG6sL7NM^p7#hkpifZga)y26LJbD44e|X9R-?3v&UK+!iQhvHd;B9WLd@%+9N
+          5<aspwx>e<P=%MT`O4Z|LeYLY?%qE(M{0FC;Kd{s_rjKDl)F_Z;CI{VagWskAu!?q$s^3SB~*jVeSI<6=pW7;ohDgyy
+          6W#$v&~p~eqeCyV7_`GihRvBPi=7EMp)o^GAqJd9gA1Y=V@=X*r!!i6VUwkMYbRvj@q9wZ4-_Oaa4<16!lh{j7cB9Tj
+          hGe^<-LR*>rOveB$r)Bs41u2Y)QsMb4;G2R;cMF0ktfEmC_0am+q_aHJN*|2vS24QS3`wLUT4fFgApDC|Od>?V@f9$a
+          Ki2OMtgemZMY(61Y2{4e_{M7?Py@%Bt~!3<P2+-nQmq7T=v|O@PT16o!SYC6xr?4~Uj**)2)i^yjp_Z!iv+F)D%vP$X
+          Qk+q<sqwn0X|f^v3hQ)!JE;LU>2>SF@wQHYpvDZiudCj*!!60M+Ypb-X-u!nLRmNT@>VRwzLu!FvMag@jZjdkA(*v!M
+          $8&DNMCL`hf{@rmv+WDFi*ncY9Q_Vaok*k@!M<+r1@BKf0Tx#O-iy&lKo)e_QzI5znDAm$qwk8@La(J&YPXSx;yU-x$
+          !Eacw!&HeSrs`+4MGgPJ+(olj5!lw`FPfutl>Mdu^Eo7oesaj|erQ-Tj<G<uYNw$<nX<LCZL?}>O%BdE6wCP7b?(UeJ
+          2|Gm<1S(4-_DFHJBF|0)?Qu6DEoKJPSh51wtztRq8Rvk6&Ds&gmWLY*PyLuO04slI8;yf{#!=3@BS2wfzNh`c9JQF*M
+          TkQ(|CFzEc*8~TCBjNm5`5LP$vWg0)5BJ;0-urr68T>1YQN)S@W4OK(qe(8Z*p^5r7edneeSP?~ayozo&R({s8GaDfY
+          ;2oZ>a7mf6g}W6d^&?1C-7v4AjymqfD@kgVzdY=U2Jyfy}J>>{+P@v?Ws{JL}d;vb#=@Bgo%=;@n?$CtJQIL-wU)wb)
+          ?f=@x6+a`NU<X0-Y&y!R#QF=sv}mts*_%3!lr>(Wpt{*Qwmr<}oF&DrP%cZUFN$@1jJ$Do)aASXL1=@g_J5WY^*lPP>
+          <Gk@7E{j!K+;=tm;0Vvg~FsrUGQ#!%0m^znTXGZRA)$~EYPj6cG;^E5ks_ZTlsc$Haf_OGDYFaEv}L~s}I7q;^w5rKE
+          #0ERZSATP%A+mS=rZ;k)|X*)f|ly2rO9_<+q0FCd8UzcH{4m_zw>gs5Lq2y65`qz~b|Mj+&i@n;Bn}4egi)Hg(5)jo`
+          OVFGZJ=VNU&Qs>nozD`e67A0>XDMu+-&$w8AQ~&}{hREkuatn|(CG{Ye8(E5BWdHd9$H^qe_{7VfU|eT+pFL*Xq!1wM
+          7lZwSryq~>aaHoPYxzSb*2^l#@qd8X-XjL>eEY|{6!h8={TIIg%|%R1ssFvOwslrPS0KFhijt$$1M3P9Y_5j`kOiy^i
+          4bfc18ZvN;zh5P}$#0p1+AeAdAo*C&qNtjF)K~x*;48H)WUBiY0Mt&Irba==1=1dl8caXj*G4=qy`TObeKdm4K6Qk?E
+          3)zHEP)36}p4;1{pA>3?H&T=Kq3-`vw0(`#qZqq&Rz5N%LB$tWW2n~yOe<xH9@*^lU&B1oO2zhv4jx1tytP+*_J;W=F
+          |yVl)&ci$57!8A7dnX4qlCN|s9rj>0jRq(pJ_Kb#<A;}i%*uQ@Z2(t?AP%Nh2pmZh%o%0fgl3VVFir+ml1u=AW=JkjJ
+          @&CvTRNoQ(w?UM$HV|?b%Zf$L58*1wQj>rhd#K^$e<_*FJh)$5zq#CbdVjP)Q|!9W2l}U9R=VwuYDn2x4eIHIa2wnat
+          g~CunQ~W}`C-n@&J#t?&MPX99reW1K^VG*=e-RVL}y~?UT^)-AG}QYY{DArYnsd?gHjTi$6nZF-=OfhYf*zsonhir2<
+          OZ#L#*%t7q5#nPMFddsD%v8H4^^AmBRK)GQOfw;MO}fP9|f{=j66xK@(gE-0-u;k5s7c#u5iSrrvCx;DE!hnA}Bt@Hq
+          b<R8l4RYX$SC#&JHAiUK>(%~KM#+>YyajNOHAtO)!#bdMG2zZFT}TKKpDOgaI*bxdyp&?WEq)-5<@1BI*f?WO9_`PGh
+          pP}_@=<$JYedCXKd^1c9YLAmYvoNqX)mI)(uCtDC7#2~2_4x8EWmdH!6BqLTRgx+S5EIwg6dMqwDxu`3-sW?2HHO)=2
+          ;>^ws|EUU;r0a;IWQbX;qtQ@}Vo>lGQQt}PE)-NiVDxV@S$I$Em=Q@T;l`0m1v60sMu0gP|0dhpYQ*<67y#-5x6ApG1
+          )l`K(VQ|EfmiST7mc4=B>R9eT>RL5>R}Hy!XRh0^CgbE(sbdQu#;h{)Ra)6vjr$?z6xma>-w_US0r@_(#c$DNP3fRDg
+          MA-Rr>gel17PE5$<hzbvdi<Of{78(h=ZdON;$I^nbI}ZnA_@*iwJWcJ(vqzjHuS%!ZzRz!3IzcwIv=%!2TsTc|2`QP0
+          WZ#o`H5>2<9>4fi*{an$QvZou>G6ouZwDqde|{=Ziv+?cMm1{J99hrlgJ7~<`UY?IpJ%Z#D9_M7M~@HtphbQE9Zkq}j
+          |Eg<~1z>t(s>Us*w%4sIoL8~I%l)Pk{tRH(;-I-y|r(o9eF4)pUre0J|O`5)|fkMl^U)n88y}u$5-Z!{~$Er91oe3!p
+          iKqD{*UWQYZUIxb`zjyMz!{r!F@^LLFdgarvsL3iXH?6$#~r>gmnhExL$`dJ6y>HF(q?L#aSk)QdH~m$#m0wUHoQ6<I
+          gvIY>P_VV>i0vNWmNxRx(P*OwZ_TkVVPvTPX>I>v+7}Nv-^!hnC2=qtjJ{=r<eY&Cj>wBTKuDDE#J#|qmyWe<ci{8Wc
+          #_-k{#O2Z-|*@#VmjshOVAiNKpbV4uoECjMEZ;KF^?`k`{vOWgvdfK6AfqA~HgbNm<+u4}QfJfLebFI|)Na98`Qvz_e
+          _uSBe14h@bVTSkeYYR2k|*LPC`0k5-i@X-Cv8GhEMuma{?itJ$$Qk;xXi!EJos@QgyYdvx=R{v%lYEM7BdqfJ3+oVX<
+          e9r2ASo7IdF9}gO4o21-+6XdS>Sr0^U-Z2Xp;*u(hn=-$4$Tk(sFr)zglxG31-HR%Y4&awbsji((KLcdw0Z*t;IQW>o
+          j3AAO60ruPaT_mh*iv?u^kL%BL79OCjMHvf4y25_=!5+oNLc1^?~25eT#DPWmi-u9@u0_maaW;K4AOVn#Du*5+Z+1Qz
+          0Zfsq>{a|N*WL&mL9-i69&MEmZDFAJr-Xvwf<=;WdU#6_$PG?!|0x67Zs_sXQrhnN<IAJVxk3i?Ds5)L0fvIdOFI}XO
+          okjI4Uh>B^^9@#Xt>HLA>Yq1wjZFnl&fShp2p9hkvwwJR6SbtLUP4yvxu?jQhCSfOlB7!Xss!!FtA)MpLVc)(}B+P-F
+          Fd#M8Q_29sehBr@=`8@u!GE#N>9pqbV_CpOI{GA$#Yl5m5esaZVfCPxUyUkN+^yZ4cL&NUBlfe*TtW5fylDS0f1T0rS
+          yX;B7Lo`N|;{*b_8Ge2KWneumH=z}gGrOTu;C?no1WdW&tWKRpBac%R&dz?HkV|)N_FQMdu7K@pX@^dFh-Vgu7H{SuJ
+          *X1Qk)H$d3aL(dBcgan!^E!c&kk17B87<1*Bh#ROjCN&opE(4SZ3{$XEnAXmFk#+7(W)a@@ieoUDf#Il6CE&Ik|j%n;
+          vT2NV;psH-l?A`I+EsB$ZV95vdtqdQu)Qdq{!iBpT-zP4XfhQ?73gI;9cBnc@dkaVk~kq{HGggNl*Kdg+PW!gLkxO&%
+          %qZTDAyxHdqkSyTr9}o1>Q}&1{u)8H&l+(kVI>0_FX7NWaqy7p^d)Dt5dX^7og@mf_!+6pX>~?W&k=@kwlw(aBV=116
+          yL$`$vBw4j;5?<0|4<;tJ!OX5^p^eYrhtTY2vfU~qr^K6>LL=lGl<Ym)Hq^Llp=d=ND)On&`{aXEE%A}(s^F<d0M}Sd
+          UA?Fos?o%RqZ^rYa{ziB;y_bUIdF>sjM_@u3YIymn%Yq6$ktMx`fJK;X8;L3%PcFEZs;)7#JWSqiC6^A@1E6(ywW3Fx
+          F00-8nMo1A%7|Ha0%`Y_P+r3kb1b&0R;bKC2q4GNgo-P(+%3TpF&{nw0-D4~<Z0$R+gp@DapuYIMC9!Vq4DxSwXhqEe
+          v6f;TbA_~W^tG)O2X4H*9CrHT&Y4r-+q@G8GGVz>;U7!tT+YqzD6lqiamX!{c!@Qw0>841a@K$qt)Hq*IvvC?!S%7vh
+          yd<;K3O73poiqirDg^_9*D2b0Yo#xIU9~8Lx<g00GD#?`Hr2%j>H=vBYQl0ssI200dcD
+          '''.split())
+          compressed=base64.b85decode(blob)
+          assert hashlib.sha256(compressed).hexdigest()=='d70ee10f4ffb920d29ae3798f6c4674f373c0c5563ae8c2aff0885fbf4048dd9'
+          buffer=lzma.decompress(compressed)
+          files=[
+              ('app/ios/ChampionsOnDevice/R603FormReadiness.swift',
+               2549,
+               '8558019225ae05b7305543d5fcb014077c3ba0d6ee8682f63ca1ccdd01017f30'),
+              ('tests/R603FormReadinessHarness.swift',
+               3549,
+               '3c7a7120afa21b47b71ce09eace24d7d178c8220adbea85d1b5651468482dc22'),
+              ('tools/r603_patch.py',
+               1468,
+               'b3140f28b279114c1a6e8d45f8f9a61aae684935e0e0034b77cf2aed8900dc12'),
+              ('tools/r603_source_audit.py',
+               2931,
+               '61028ca96e79ba136c5b1da9de196b9fa407c5403516e8672c3c2ce2a7495b56'),
+              ('tests/test_r603_patch.py',
+               1728,
+               '7635b50c9a039e7fbd00cba26b5f71b1ba9eb2c54c1d3c242977023197c428cc'),
+              ('tests/test_r603_source_audit.py',
+               1070,
+               'c5e2bf31210e0cd8aaf03b46c38576722397fc7a0dcc6d44d3ceea6f256729b3'),
+          ]
+          offset=0
+          for path,size,sha in files:
+            b=buffer[offset:offset+size];offset+=size
+            assert len(b)==size and hashlib.sha256(b).hexdigest()==sha,path
+            target=Path(path)
+            assert not target.exists() and not target.is_symlink(),path
+            target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_bytes(b)
+          assert offset==len(buffer)
+          from tools.r603_patch import patch
+          patch('.')
+          assert len(list(root.glob('*.swift')))==143
+          print('R603_EXACT_PINNED_R602_AND_6_ADDITIONS_PASS')
+          R603_REPLAY
+      - name: Source trace and native regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH=.
+          python3 tools/r603_source_audit.py
+          python3 -m unittest discover -s tests -p 'test_r603_*.py' -v
+          swiftc -parse-as-library \
+            app/ios/ChampionsOnDevice/R603FormReadiness.swift \
+            tests/R603FormReadinessHarness.swift \
+            -o "$RUNNER_TEMP/r603"
+          "$RUNNER_TEMP/r603"
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          swiftc -parse-as-library \
+            app/ios/ChampionsOnDevice/R596FormCatalog.swift \
+            app/ios/ChampionsOnDevice/R597FormEvidenceBridge.swift \
+            app/ios/ChampionsOnDevice/R598OneButtonFormAttachment.swift \
+            app/ios/ChampionsOnDevice/R599BoundOneButton.swift \
+            app/ios/ChampionsOnDevice/R600CollectorHandshake.swift \
+            app/ios/ChampionsOnDevice/R602OneTapFormArchive.swift \
+            tests/R602OneTapFormArchiveHarness.swift \
+            -o "$RUNNER_TEMP/r602"
+          "$RUNNER_TEMP/r602"
+          python3 -m unittest discover -s tests -p 'test_r602_patch.py' -v
+          python3 tools/run_r571_native.py || {
+            for f in reports/xcode_iphoneos_build.log \
+                     reports/r574_png_replay_compile.log; do
+              test ! -f "$f" || grep -nE 'error:|BUILD FAILED' "$f" | tail -n 60 || true
+            done
+            exit 1
+          }
+          echo 'R603_APPLE_BUILD_TESTED_NOT_REAL_FEATURE_PARITY_OR_MEGA_CERTIFICATION'
