@@ -1,0 +1,170 @@
+name: R601 Auto - Repair Replay and Locate Collector (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/au.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository ==
+      'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: "0"
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+      - name: Rebuild R595, verify and apply independent R596-R600 delta bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R601_REBUILD'
+          import ast,base64,hashlib,lzma,re,textwrap,urllib.request
+          from pathlib import Path
+          code=''.join('''
+          {Wp48S^xk9=GL@E0stWa8~^|S5YJf5;2%y4;9UR_Xb^_O0h=#cnft3&%%E9%`Cw>-d$lbz+G%J$pDf)_cSxXIFQZxZTx-*
+          ?7{As+C|VlsAG3(<0qyuwU1|3CDTN0TY|Rmt%gXTQWGj-jn$pLNZx7#Q*6to*WmhjNvBe@7ofi!#0vQ}{46v_pc+|n3Th>
+          1e9xo(NL9>?jVX&x$7ZhKj{#j?bzvCP!^tZM^24$PI-p69C)FiQ0bE2dSuU3TfQEU;L@DuR{|9j~owRn%L4+65ilG!0`zs
+          -OErkU{Hv1TLyU7vr(meyz2wA3~rK+Ih^t^fm9*J3fHiVA&z0w<gXQApNqO3v2?52rSORzvBrQQt{;1DY<(Fs&82?s)e+6
+          R{-46rw*v)6|0nQ>~%=q}Km81DJrsc0Mq^J{zxT1Wd{pyNWVhDYuinAO5|IAFA^^yFG(WSP`rxa%TZMZO<v9$YjBxB$H0(
+          >1J0SJ_`~t6OTD|<9gi`EDIp=eltFcv+F*EGN->xN2cRZiQ)XEls0r5I5N+AE)>|2KfTnqa&aqU3sRqvU`c76wl)|s9xAv
+          sE$Bad9v5;X*DK4S3D)-DO0wO+mr%z)fxz|)RKr?a#4`?;$__Jj-R9V*BZ&GD(ICyzK7CfY3!5`*eUTIyDg~%DJ}mh0#!_
+          m{Bz<yMU-#1)S#*XJ;#TuidJ;EAROrL#ND7;#6etX?j#ddIQQ$l=;{vQ_4rhZh3G}c&sc=`Swh)yQE1`y(G4P#zlt{i4id
+          (g(xuj_bJDX2{4NbT*&yF`r{bclKQ@zj2@1bTMlg1G`L16BYhTTPK&2F;`${%vYTF$p}ZudXox26eerMbcF;?lfZe=_P((
+          $bPjPK*&*HZ6Rm_VNFtl{#<*GMPqcwR%bc7id#yf~_;6;^bg4vZ8Wqi@iv)4&P3By`rynmXx!;%u}HfewC(lk)&hyW|;)G
+          tD0t{90+89HsI|w;7Oa4L^(fp?g>V}B$6&Xg)BasrEr06I9+BdK_w^L`ZdL%4@5jrp5dQF@OiNc5dO=Vs$^0#9gCmk7p2w
+          *q39?cx(tH=c`gQel2wI?U!Q!rv3%05C%E5)OIdAUAByQipp^F3^`ElA&6%v<iT~VB!oUO>2QmFYeS&qlUDOJPfs7B<8X;
+          20D#VuDxHhH&#y2UEVUBbMZ?`9m>aRr04N48<LN3u$hf9Vlbw<QIj~^(1EkPmgLXvm6o`%@D6%ucv@&h(4P{%LkjY0Ep`6
+          }7WaY*8IOW3K}CI&l`>7h6Av)L_@3-Zk}_>jFeYKK3|T?DLSOWnyiK8Ms1G{hAdpPq7v2GDHRJD<fo`1ba7u>=p0OUzOma
+          q-5Z5oa3iho4*EZg_EUXI=nE4;Cfw3&THwNDYs*Cy(r^sr93`ni;J+>aQzeI&Eg*ghKoAFAR&hqGm>)@28tB67K%dGPMn=
+          +=>S#cTJ$lSH^}Os}g+-Yc@9GK#ovVvSx?56$ttBTjxlV9jC;V*Jg@EkSeS?VC<D(SsoqR4In_~e4rK-&Mtu<*z+8)LzVY
+          d&f<^SACX@3Br<|pKHT#nG3v=wI9(rC3TSNXUl3<gH%pFSmDWYQd2s+n6F@Bn1OM0~J~1nc0;HF_`-Cm)=Ol?aFJt^1ckt
+          %li5L9$(nzg|44n!u#4#6p5cxR<W<R2o{De2KJSu>$o}24lvQDt$p6lN)1_*{$eHTzB9WdH>KzcHV!T6qJ`o6N|=(YG??j
+          7v;3(CZ#CZh)g{n@pag33YMHlJ{x4HCVQ>;i)$SPe>=|0^rZdb{tVh{GiF_%C_-1BmNt>{#&)TnS9%087tcY}47F^RNdR|
+          1^}V-)Xhw9Vu6NK+Pzr?oDVa?l7};Pq=3CVGRm<{j3@q7}+R`FWxP{gBTyu2{AbQpneiS*2RJGgU?6F?C!w`SNsJrkUlpe
+          tSc4%$JFBsptZ>~(VA68CEOHN$o>T$`<K(QwL;=^^$Z>R^9e%Irv*W^Fdv)?Vcc7>s)>GC7PSP?vrh`DT-6Um6hCBQ4rLH
+          Xw)i+3->Ot;$cIph`cJG-4+Uu1yt9MhZIj@h%~o{-n>5xX1PGlhmqWTz@ufNCqu*Mr(~115!xMLD{h#0GbeDkn;MhDF7&l
+          jywHJ;^j|ykbBk9pj7zMq+An1%8@$h8M+_q621ZThD!yA5qcEDIKg5=&T!ujBN1zGUX(bo-TO+_(uJsg09f#E@7nmh2=vF
+          qp$>XgWb1p9C0cxx?f)s*UYgZXB1m-Drn`>s)G)b5vyDjej%(ROaLLtrR(Jsd|g=W#HpfqBOxXrrZLWtx`IKAZj8+!J9k>
+          ^V<xA)^xXJ>S1s?v<F(p>w~gas83aFGHNO*7NnuMu%&0T7ZKp>Q(SJxtIFQJBIJhlfb_F=JgUULQ^$nRuLS8d5M4cl57-v
+          bKP=;(B6Ow0{e!Ww-t(xG8m&ao|H@u>1LKIU=_040ykY+WkL)&!eBr_rspE8I=a&(D~SKYUl*q!46#V^KSkgyTTSK8a7@6
+          HD$&)FHuB<=siNJNoqEMrBjj7A9SiHF+FpHAR(g3&Hgr$$ONr<SkUFY@8T<4LH?u)M)sE$knH6Lex>u=O({50h57H{Xzgt
+          SkdGf?)bdAJAW~b@owdskQEk~G+BOv{kOw$`D2=bTlab6pCOnKD7uyG6&6#)+|qeDYWjK7<Dm#AWHJu4=0!*0r#Q-A;(gu
+          #z=ME5hZDaSovdZ5pSE$MM_!V4lOX#pMTlmGDtUlNC4A@h3^Mx}>Sq3AhyPx}cl;=Y@B@T5d!F||=+t;LB)2r_I`gmOX{|
+          HAZn6^e{5@Z4Ur7+-lEELmOa2>7L^`nh}>MoPq5Rduh9jcX@Wf@mnPH%E(Wcf%nIO~1#8J1kyI(58?KloqZFnzG1+53EGl
+          wWYdmPh2;0w1)q^0U8#i&t`8+#Q)>Ldd(U_{as<hIARO`vw_n9o;`O}sgI|3Ne3_D)b<rmBrD40Gb%5y>Pt<lAJ>C+yE%M
+          ~xbnoFgf{Z3u3?d&M1|DVr~8at7S4>+U6UGt1gP*Z4BQ}%KOrb@!L(ZsldXI;+u2_>_-r3hg=hb>Z%RP>=12OC<}f<X-an
+          TaewAYqv38x$&9gvUf@?TXGf7V>JUiwPWuOh4t&;?31Zc7x6?45B(Ei7h=7k$gzET#E^I0(;Th<$F&6wCm!Q~h#5?-n68x
+          F<QUiDm`B4k~9V=eDCAgYx7Gs=)7=8S@pb<FJ=qt+EO2LTzC(k!(!KeLYt{9v+^ixHVu50S7L&bN33^_JqB4#VlX!UZVF)
+          eD-m*siWs_D@3q);)v0*x35(SptogmiVVz|24q~w3=n>(oE3Ylw;{XAMl$2s?!*29%eB^*Q|w;E~xTzud<GLcT2QQpv8Mm
+          X&f+VQju8>$d2&ybP)8nrGNh}IYj%Qp-TU_Kp(aTj{p{Y5z=jL`3@xc2K~_{+TNI2+2MANy2=T<xz-{#>g@=bCcp|1eM}a
+          j_Nzn?P=z{BA5X@INR|23T@wfG=hVt5tPC{gYGbEiS)}k1+#YR1KFBQb9r;k%zxQ$PSW#8uY~F?8j>hlVwfga}MJ+IRD(w
+          |Hvlz<V3RfSK8P|%ve<!gxc?jXEwQ4p-VJl=`(qzqZz2OOn13v$6eWHR|kZht%*}%SxywL}fhh7ZAet?^O4Sa{3zkxpQIb
+          U37PdxZ3DSOPGH-%iv<NWFSWYkNlc3s<vw&7A~yUxdEKTJ@JS>Qy7I4x=)Z)~os&{=Z=Oclu80UgIc0eZf0mI|OCN_7(3-
+          LhOxRrF|@5WMiHZUzSg@;E#?p#FmCe{EGyTeZl)h7YOO0DMw$pMs*YH(<_z=z{1$f^j7XWvh1BkLt!<p6Mo$tBHZF9NF$6
+          zuHicIfYwy<cNW&ucZH4TAx!_<YUwXW(t7<3`;)Cf>7c{lYW~n%sD&Yl+&qXERgG>$6Hy0Jt8FCkkkMG@sA8$BCj)X00I0
+          L&prSE=Wrf#vBYQl0ssI200dcD
+          '''.split())
+          packed=base64.b85decode(code)
+          assert hashlib.sha256(packed).hexdigest()=='b544b01758b7de3ff8ba9bd2e226afa3319e71a717bb42be1ca6daecb33a7e37'
+          body=lzma.decompress(packed)
+          rows=[
+              ('r601_replayer.py', 4795, '26bf9a54efb00d2fbf985f87b7d4b5e5505bec83200dfe780e94c11b3cc038c1'),
+              ('r601_source_audit.py', 3220, 'abeb29d64e6e6f5c87f98d0d14a395c54d211e6dc8049965487d12ba1f7f5d09'),
+          ]
+          cursor=0
+          for filename,size,sha in rows:
+              content=body[cursor:cursor+size];cursor+=size
+              assert len(content)==size
+              assert hashlib.sha256(content).hexdigest()==sha
+              Path('tools').mkdir(exist_ok=True)
+              dest=Path('tools')/filename
+              assert not dest.exists()
+              dest.write_bytes(content)
+          assert cursor==len(body)
+          import sys
+          sys.path.insert(0,'tools')
+          from r601_replayer import materialize,PINS
+          base='https://raw.githubusercontent.com/'
+          repo='zeek10191019-stack/true-plan-showdown-verification/'
+          def fetch(commit, filename):
+              url=base+repo+commit+'/.github/workflows/'+filename
+              return urllib.request.urlopen(url,timeout=90).read()
+          ak=fetch('9574aa54b8b84fdb6ee2955064c835a9cf86bc7b','ak.yml')
+          gitsha=hashlib.sha1(b'blob '+str(len(ak)).encode()+b'\0'+ak).hexdigest()
+          assert len(ak)==14641
+          assert gitsha=='6969344be2a1005f4f6ab740630347b2c7ef4a6b'
+          match=re.search(r"python3 - <<'R595_REPLAY'\n(.*?)\n\s+R595_REPLAY",ak.decode(),re.S)
+          assert match,'R595_PARENT_CODE_NOT_FOUND'
+          original=textwrap.dedent(match.group(1))
+          ast.parse(original)
+          exec(compile(original,'R595_PINNED','exec'),{'__builtins__':__builtins__})
+          root=Path('app/ios/ChampionsOnDevice')
+          assert len(list(root.glob('*.swift')))==136,'R595_RESTORATION_NOT_EXACT'
+          versions={
+              'an.yml':'d44731b53f2fb4acd3742b34e46add4ec064b9a5',
+              'ao.yml':'07acbef10b67f1c1ce5ab008a854bdf04dc5dca5',
+              'ar.yml':'324902e567ab8cd4b3680a6b5fb97a0c030bde4f',
+              'as.yml':'69a53bdc66751ee6cde6299ed8e3ac5c98530370',
+              'at.yml':'55f11b34838c47255a911b619e20068796c7f179',
+          }
+          workflows={key:fetch(versions[key],key) for key in PINS}
+          count=materialize(workflows,'.')
+          assert count==24
+          assert len(list(root.glob('*.swift')))==141
+          print('R601_EXACT_PARENT_AND_24_ADDITIONS_PASS')
+          sample=bytearray(workflows['ao.yml']);sample[-8]^=1
+          from r601_replayer import delta_records
+          try:delta_records('ao.yml',bytes(sample))
+          except ValueError:print('R601_CORRUPTION_REJECT_PASS')
+          else:raise AssertionError('CORRUPTION_NOT_REJECTED')
+          R601_REBUILD
+      - name: Source callsites, numeric contract HOLD and native regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/r600_source_trace.py > r600_trace.json
+          python3 tools/r601_source_audit.py > r601_audit.json
+          python3 - <<'PY'
+          import json
+          x=json.load(open('r601_audit.json'))
+          assert x['swift_files']==141
+          assert not x['production_wired']
+          assert not x['numerical_parity_certified']
+          print('R601_PRODUCTION_GATE_HOLD',x['reason'])
+          print('R601_UI_CANDIDATES',x['ui_candidates'][:35])
+          print('R601_ARCHIVE_CANDIDATES',x['archive_candidates'][:50])
+          print('R601_CALL_EDGES',x['callsite_edges'][:70])
+          print('R601_R595_FEATURE_LINES',x['r595_feature_lines'][:85])
+          PY
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          swiftc -parse-as-library \
+            app/ios/ChampionsOnDevice/R596FormCatalog.swift \
+            app/ios/ChampionsOnDevice/R597FormEvidenceBridge.swift \
+            app/ios/ChampionsOnDevice/R598OneButtonFormAttachment.swift \
+            app/ios/ChampionsOnDevice/R599BoundOneButton.swift \
+            app/ios/ChampionsOnDevice/R600CollectorHandshake.swift \
+            tests/R600CollectorHandshakeHarness.swift \
+            -o "$RUNNER_TEMP/r600"
+          "$RUNNER_TEMP/r600"
+          for t in test_r596_catalog_import.py \
+                   test_r597_catalog_audit.py \
+                   test_r598_research_audit.py \
+                   test_r599_source_audit.py; do
+            python3 -m unittest discover -s tests -p "$t" -v
+          done
+          python3 -m unittest discover -s tests -p 'test_r600_*.py' -v
+          python3 tools/run_r571_native.py || {
+            for f in reports/xcode_iphoneos_build.log \
+                     reports/r574_png_replay_compile.log; do
+              test ! -f "$f" || grep -nE 'error:|BUILD FAILED' "$f" | tail -n 50 || true
+            done
+            exit 1
+          }
+          echo 'R601 BUILD PASS IS NOT REAL IMAGE OR ONE BUTTON CERTIFICATION'
