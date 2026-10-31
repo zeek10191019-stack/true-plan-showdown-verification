@@ -1,0 +1,100 @@
+name: R607.1 Fix Source Test Path - Apple CI (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/bb.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: trueplan-r6071-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: "0"
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+      - name: Restore byte-identical R607 and repair test path only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R607_FIX'
+          import hashlib
+          import re
+          import textwrap
+          import urllib.request
+          from pathlib import Path
+
+          url = (
+              'https://raw.githubusercontent.com/'
+              'zeek10191019-stack/true-plan-showdown-verification/'
+              '4684a889cbe3494ac32b956d0b9546e1ecafa6ca/'
+              '.github/workflows/ba.yml'
+          )
+          parent = urllib.request.urlopen(url, timeout=90).read()
+          assert len(parent) == 11971, 'R607_PARENT_SIZE_DRIFT'
+          git_blob = b'blob ' + str(len(parent)).encode() + b'\0' + parent
+          assert hashlib.sha1(git_blob).hexdigest() == (
+              'e05214c8bd02288ce348a96f056b6ad002b9d497'
+          ), 'R607_PARENT_GIT_BLOB_DRIFT'
+          source = parent.decode('utf-8')
+          start = "          python3 - <<'R607_REPLAY'\n"
+          end = '\n          R607_REPLAY'
+          assert source.count(start) == 1, 'R607_REPLAY_BEGIN_COUNT'
+          block = source.split(start, 1)[1]
+          assert block.count(end) == 1, 'R607_REPLAY_END_COUNT'
+          replay = textwrap.dedent(block.split(end, 1)[0])
+          compile(replay, 'R607_SHA_PINNED_REPLAY', 'exec')
+          exec(replay, {'__name__': '__main__'})
+
+          path = Path('tests/test_r607_source.py')
+          before = path.read_bytes()
+          assert len(before) == 975, 'R607_TEST_SIZE_DRIFT'
+          assert hashlib.sha256(before).hexdigest() == (
+              '01bb2165c5ec88cc5d9f76df9702579c5b623e04f113c7a98389b0ff324b291d'
+          ), 'R607_TEST_SHA_DRIFT'
+          old = b'source/R607FrameProvenanceAudit.swift'
+          new = b'app/ios/ChampionsOnDevice/R607FrameProvenanceAudit.swift'
+          assert before.count(old) == 1, 'R607_TEST_EXPECTED_ONE_BAD_PATH'
+          assert Path(new.decode()).is_file(), 'R607_SOURCE_MISSING'
+          path.write_bytes(before.replace(old, new))
+          after = path.read_bytes()
+          assert after.count(new) == 1 and old not in after
+          assert len(list(Path('app/ios/ChampionsOnDevice').glob('*.swift'))) == 147
+          print('R607_SOURCE_RESTORE_PASS_AND_SINGLE_TEST_PATH_REPAIRED')
+          R607_FIX
+      - name: Run R605 and R607 Python and Swift regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH=.
+          python3 -m unittest discover -s tests -p 'test_r605_*.py' -v
+          python3 -m unittest discover -s tests -p 'test_r607_*.py' -v
+          swiftc -parse-as-library \
+            tests/R605StandaloneStub.swift \
+            app/ios/ChampionsOnDevice/R605ExactFrameBinding.swift \
+            app/ios/ChampionsOnDevice/R607FrameProvenanceAudit.swift \
+            tests/R607ProvenanceHarness.swift \
+            -o "$RUNNER_TEMP/r6071"
+          "$RUNNER_TEMP/r6071"
+      - name: Parse full Swift sources and build iPhoneOS target
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          python3 tools/run_r571_native.py || {
+            for f in reports/xcode_iphoneos_build.log \
+                     reports/r574_png_replay_compile.log; do
+              test ! -f "$f" || grep -nE 'error:|BUILD FAILED' "$f" | tail -n 55 || true
+            done
+            exit 1
+          }
+          echo 'R6071_APPLE_CI_PASS_NOT_LIVE_IMAGE_OR_MEGA_CERTIFICATION'
