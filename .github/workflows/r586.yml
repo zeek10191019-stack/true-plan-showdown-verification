@@ -1,0 +1,73 @@
+name: R586 HUD Numeric OCR Region Hypotheses (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths: [.github/workflows/r586.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 35
+    env:
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+      PYTHONOPTIMIZE: "0"
+    steps:
+      - name: Restore exact pinned R585 and SHA-verify R586 changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R586_REPLAY'
+          import hashlib,json,base64,lzma,re,textwrap,ast,urllib.request
+          from pathlib import Path
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/89e0050917bd636d9515b532e7bd141f530b80b2/.github/workflows/r585.yml'
+          raw=urllib.request.urlopen(url,timeout=90).read()
+          assert len(raw)==12850 and sha(raw)=='0427126b2bba9080563ec0bd5c40d6804f632b6eaa02e3e187714866859e2427','R586_R585_GITHUB_PIN_MISMATCH'
+          m=re.search(r"python3 - <<'R585_REPLAY'\n(.*?)\n\s+R585_REPLAY",raw.decode(),re.S)
+          assert m,'R586_PARENT_SCRIPT_NOT_FOUND'
+          previous=textwrap.dedent(m.group(1));ast.parse(previous)
+          exec(compile(previous,'R586_PINNED_R585','exec'))
+          print('PASS_R586_PINNED_R585_REPLAY')
+          rows=json.loads(lzma.decompress(base64.b64decode('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')))
+          assert len(rows)==3
+          for row in rows:
+           p=Path(row['path']);old=p.read_bytes() if p.exists() else b''
+           assert (sha(old) if old else None)==row['old_sha'],('R586_BAD_PARENT',row['path'])
+          for row in rows:
+           p=Path(row['path']);old=p.read_bytes() if p.exists() else b''
+           new=old[:row['prefix']]+base64.b64decode(row['insert'])+old[row['prefix']+row['remove']:]
+           assert len(new)==row['new_len'] and sha(new)==row['new_sha'],('R586_BAD_PATCH',row['path'])
+           p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(new)
+          assert len(list(Path('app/ios/ChampionsOnDevice').glob('*.swift')))==128
+          assert 'historical_hud_region_hypotheses.json' in Path('app/ios/ChampionsOnDevice/CaptureCoordinator.swift').read_text()
+          assert 'maximumMembers = 24' in Path('app/ios/ChampionsOnDevice/R548ResearchArchive.swift').read_text()
+          print('PASS_R586_EXACT_SOURCE_SHA_AND_128_SWIFT')
+          R586_REPLAY
+      - name: Native bounded OCR HUD candidate and provenance tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          swiftc -parse-as-library app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift app/ios/ChampionsOnDevice/R583FrameReadabilityIndex.swift app/ios/ChampionsOnDevice/R585SpatialOCRProjection.swift app/ios/ChampionsOnDevice/R586HUDSpatialCandidates.swift tests/R586HUDSpatialCandidatesHarness.swift -o "$RUNNER_TEMP/r586-hud"
+          "$RUNNER_TEMP/r586-hud"
+          swiftc -parse-as-library app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift app/ios/ChampionsOnDevice/R583FrameReadabilityIndex.swift app/ios/ChampionsOnDevice/R585SpatialOCRProjection.swift tests/R585SpatialOCRProjectionHarness.swift -o "$RUNNER_TEMP/r585-geometry"
+          "$RUNNER_TEMP/r585-geometry"
+      - name: Apple native Vision and iPhoneOS build (No IPA)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python3 tools/run_r571_native.py; then
+            echo 'R586_APPLE_NATIVE_BUILD_OR_VISION_REGRESSION_FAILED'
+            for log in reports/xcode_iphoneos_build.log reports/r574_png_replay_compile.log; do
+              if [ -f "$log" ]; then grep -nE 'error:|fatal error|BUILD FAILED' "$log" | tail -n 70 || true; fi
+            done
+            exit 1
+          fi
+      - name: State uncertified game recognition truth
+        if: always()
+        run: echo 'R586 only makes HUD numeric location hypotheses from historical OCR. Orientation/owner/Mega visual/79-field vision accuracy HOLD. No IPA, no device trial.'
