@@ -1,0 +1,141 @@
+name: R606 Auto - Repair R605 Tests and Audit Actual PNG Binding
+"on":
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/az.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: trueplan-r606-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: >-
+      github.repository ==
+      'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: "0"
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+      - name: Replay exact immutable R605 production source without its failed test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R606_REPLAY'
+          import hashlib, textwrap, urllib.request
+          url = (
+              'https://raw.githubusercontent.com/'
+              'zeek10191019-stack/true-plan-showdown-verification/'
+              '820b0e63db2ce866ffc6b29bdfc78c0316918ba3/'
+              '.github/workflows/ay.yml'
+          )
+          raw = urllib.request.urlopen(url, timeout=90).read()
+          h = hashlib.sha256(raw).hexdigest()
+          assert len(raw) == 11750, 'R605_PARENT_SIZE_MISMATCH'
+          assert h == '83bb3b8bf6be5ccd5a904305cd9a8a0730140cb3b44e37f3b0607f7e293523c3', 'R605_DIGEST_MISMATCH'
+          t = raw.decode('utf-8')
+          begin = "          python3 - <<'R605_REPLAY'\n"
+          end = '\n          R605_REPLAY'
+          assert t.count(begin) == 1, 'R605_PARENT_BEGIN_CHANGED'
+          tail = t.split(begin, 1)[1]
+          assert tail.count(end) == 1, 'R605_PARENT_END_CHANGED'
+          source = textwrap.dedent(tail.split(end, 1)[0])
+          compiled = compile(source, 'R605_PINNED_REPLAY', 'exec')
+          exec(compiled, {'__name__': '__main__'})
+          from pathlib import Path
+          root = Path('app/ios/ChampionsOnDevice')
+          assert len(list(root.glob('*.swift'))) == 146
+          print('R606_PINNED_R605_REPLAY_AND_ALL_SIX_SHA_PASS')
+          R606_REPLAY
+      - name: Repair exact wrong test path with SHA guard and run regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R606_FIX'
+          import hashlib
+          from pathlib import Path
+          test = Path('tests/test_r605_source.py')
+          original = test.read_bytes()
+          assert hashlib.sha256(original).hexdigest() == (
+              '37cff501a4eb899624dd99e3ef3fd82afe590cc2e88d7a7581b5c62ff8aab3c8'
+          ), 'R605_TEST_ORIGINAL_SHA_CHANGED'
+          source = original.decode('utf-8')
+          old = "Path('source/R605ExactFrameBinding.swift')"
+          new = "Path('app/ios/ChampionsOnDevice/R605ExactFrameBinding.swift')"
+          assert source.count(old) == 2, 'R605_EXPECTED_2_BAD_PATHS'
+          assert Path('app/ios/ChampionsOnDevice/R605ExactFrameBinding.swift').is_file()
+          updated = source.replace(old, new)
+          assert old not in updated and updated.count(new) == 2
+          test.write_text(updated)
+          print('R606_R605_TEST_PATH_PATCHED_ONCE')
+          R606_FIX
+          export PYTHONPATH=.
+          python3 -m unittest discover -s tests -p 'test_r605_*.py' -v
+          swiftc -parse-as-library \
+            tests/R605StandaloneStub.swift \
+            app/ios/ChampionsOnDevice/R605ExactFrameBinding.swift \
+            tests/R605ExactFrameBindingHarness.swift \
+            -o "$RUNNER_TEMP/r605_fixed"
+          "$RUNNER_TEMP/r605_fixed"
+          swiftc -parse-as-library \
+            app/ios/ChampionsOnDevice/R594ActorAppearance.swift \
+            app/ios/ChampionsOnDevice/R595FormReferenceMatcher.swift \
+            tests/R595FormReferenceMatcherHarness.swift \
+            -o "$RUNNER_TEMP/r595_golden"
+          "$RUNNER_TEMP/r595_golden"
+      - name: Research provenance audit and iPhoneOS native build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R606_AUDIT'
+          import hashlib, json, re
+          from pathlib import Path
+          app = Path('app/ios/ChampionsOnDevice')
+          c = (app / 'CaptureCoordinator.swift').read_text()
+          x = (app / 'R605ExactFrameBinding.swift').read_text()
+          required = [
+              'R594ActorAppearance.capture(',
+              'R595FormReferenceMatcher.audit(',
+              'R604HistoricalFeatureArchive.beforeZip(',
+              'R605ExactFrameBinding.beforeZip(',
+              'R548ResearchArchive.write(',
+          ]
+          assert all(c.count(t) == 1 for t in required), 'CALLSITE_DRIFT'
+          assert 'HOLD_ORIGINAL_PNG_NOT_IN_ARCHIVE' in x
+          assert 'mega_verified":false' in x
+          assert 'crop_verified":false' in x
+          png_lines = [
+              {'line': n, 'source': line.strip()[:190]}
+              for n, line in enumerate(c.splitlines(), 1)
+              if re.search(r'\.png|rawPNG|pngData|PNGRepresentation', line, re.I)
+          ]
+          report = {
+              'schema': 'trueplan.r606.repair-and-png-source-audit.v1',
+              'r605_test_path_repaired': True,
+              'r605_production_hook_present': True,
+              'r594_r595_callsite_present': True,
+              'r595_numeric_parity': 'SYNTHETIC_TEST_ONLY',
+              'live_owner_roi_verified': False,
+              'live_mega_identity_verified': False,
+              'exact_png_bytes_provenance_certified': False,
+              'png_candidate_lines': png_lines[:50],
+              'png_candidate_total': len(png_lines),
+              'reason': 'NEED_FRAME_ORIGINAL_BYTES_AND_OWNER_ROI_EVIDENCE'
+          }
+          print('R606_PROVENANCE_AUDIT', json.dumps(report, ensure_ascii=False))
+          R606_AUDIT
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          python3 tools/run_r571_native.py || {
+            for f in reports/xcode_iphoneos_build.log \
+                     reports/r574_png_replay_compile.log; do
+              test ! -f "$f" || grep -nE 'error:|BUILD FAILED' "$f" | tail -n 45 || true
+            done
+            exit 1
+          }
+          echo 'R606_NATIVE_BUILD_PASS_NOT_REAL_CAPTURE_OR_MEGA_CERTIFIED'
