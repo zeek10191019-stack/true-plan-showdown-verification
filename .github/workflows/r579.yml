@@ -1,0 +1,97 @@
+name: R579 Swift Offline PNG Diagnostic Compile Repair (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths: [.github/workflows/r579.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: xcode-27
+            role: IOS27_NATIVE
+          - runner: macos-26-intel
+            role: PORTABLE_OCR
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      SCREEN_READ_CI_ROLE: ${{ matrix.role }}
+      PYTHONOPTIMIZE: "0"
+    steps:
+      - name: Pin, reconstruct R578, repair R579 array concat with SHA checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R579_REPLAY'
+          import ast,hashlib,urllib.request,re,textwrap
+          from pathlib import Path
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/47a305f5256bf472e12c685432db3682229f99dd/.github/workflows/r578.yml'
+          raw=urllib.request.urlopen(url,timeout=120).read()
+          assert len(raw)==10777 and sha(raw)=='6b337b88b78b93b99fe2492011d6ed2881ef7b303459efaf1c95f9e68a9f6a66','R579_R578_PIN_INVALID'
+          m=re.search(r"python3 - <<'R578_REPLAY'\n(.*?)\n\s+R578_REPLAY",raw.decode(),re.S)
+          assert m,'R579_PARENT_SCRIPT_MISSING'
+          parent=textwrap.dedent(m.group(1));ast.parse(parent)
+          exec(compile(parent,'R579_REPLAY_PINNED_R578','exec'))
+          p=Path('app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift')
+          assert p.exists() and sha(p.read_bytes())=='308368adf924f7fa908d268edbf5af279b492a06225a699a482b7d70aae243f5','R579_OLD_SOURCE_HASH'
+          old=b'                    self.lines=["\xe5\x90\x8c\xe4\xb8\x80PNG\xe3\x81\x8b\xe3\x82\x89\xe5\x85\xa8Vision\xe5\x80\x99\xe8\xa3\x9c\xe3\x82\x92\xe5\x8f\x96\xe5\xbe\x97\xef\xbc\x88\xe5\xb1\xa5\xe6\xad\xb4\xe3\x81\xae\xe3\x81\xbf\xe3\x83\xbb\xe7\x8f\xbe\xe5\x9c\xa8\xe5\x80\xa4\xe3\x81\xa7\xe3\x81\xaf\xe3\x81\xaa\xe3\x81\x84\xef\xbc\x89"]+\n                        R551ScreenReadState.displayLines(snapshot)'
+          new=b'                    self.lines=["\xe5\x90\x8c\xe4\xb8\x80PNG\xe3\x81\x8b\xe3\x82\x89\xe5\x85\xa8Vision\xe5\x80\x99\xe8\xa3\x9c\xe3\x82\x92\xe5\x8f\x96\xe5\xbe\x97\xef\xbc\x88\xe5\xb1\xa5\xe6\xad\xb4\xe3\x81\xae\xe3\x81\xbf\xe3\x83\xbb\xe7\x8f\xbe\xe5\x9c\xa8\xe5\x80\xa4\xe3\x81\xa7\xe3\x81\xaf\xe3\x81\xaa\xe3\x81\x84\xef\xbc\x89"] + R551ScreenReadState.displayLines(snapshot)'
+          s=p.read_bytes();assert s.count(old)==1,'R579_SOURCE_CONTEXT'
+          a=s.replace(old,new)
+          assert len(a)==12320 and sha(a)=='0aefffb0329b86c9f82874fc56bf59036d807cdb1fc013a216db0962154a79b1','R579_SOURCE_RESULT'
+          p.write_bytes(a)
+          assert len(list(Path('app/ios/ChampionsOnDevice').glob('*.swift')))==122
+          assert b'self.lines=[' in a and b' + R551ScreenReadState.displayLines(snapshot)' in a
+          print('PASS_R579_FIXED_PINNED_SOURCE_AND_SWIFT_EXPRESSION')
+          R579_REPLAY
+      - name: Swift syntax and regression test from R578
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          python3 - <<'CHECK_R579'
+          from pathlib import Path
+          import re
+          s=Path('app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift').read_text()
+          assert re.search(r'self\.lines=\["同一PNG.*?"\] \+ R551ScreenReadState\.displayLines\(snapshot\)',s)
+          assert not re.search(r'self\.lines=\[[^\n]+\]\+\n',s)
+          print('R579_CONCAT_EXPRESSION_GUARD_PASS')
+          CHECK_R579
+          python3 - <<'MAKE_PNG'
+          from pathlib import Path
+          import struct,zlib
+          def block(tag,data):return struct.pack('>I',len(data))+tag+data+struct.pack('>I',zlib.crc32(tag+data)&0xffffffff)
+          w,h=20,10
+          raw=b''.join(b'\x00'+b'\xff'*w*3 for _ in range(h))
+          png=b'\x89PNG\r\n\x1a\n'+block(b'IHDR',struct.pack('>2I5B',w,h,8,2,0,0,0))+block(b'IDAT',zlib.compress(raw))+block(b'IEND',b'')
+          Path('/tmp/r579-test.png').write_bytes(png)
+          MAKE_PNG
+          swiftc -swift-version 5 -parse-as-library app/ios/ChampionsOnDevice/R576OfflinePNGImportGate.swift app/ios/ChampionsOnDevice/R577OfflineEvidenceReport.swift app/ios/ChampionsOnDevice/R578OfflineBundlePolicy.swift tests/R578OfflineBundlePolicyHarness.swift -o "$RUNNER_TEMP/r579-policy"
+          "$RUNNER_TEMP/r579-policy" /tmp/r579-test.png
+      - name: Run inherited native regressions, iPhoneOS build and macOS Vision
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python3 tools/run_r571_native.py; then
+            echo 'R579 CI FAIL: extracting actual compiler errors'
+            for log in reports/xcode_iphoneos_build.log reports/r574_png_replay_compile.log; do
+              if [ -f "$log" ]; then
+                echo "FAILED_BUILD_LOG: $log"
+                grep -nE 'error:|fatal error|BUILD FAILED|SwiftCompile' "$log" | tail -n 60 || true
+                tail -n 40 "$log" || true
+              fi
+            done
+            exit 1
+          fi
+      - name: Non-certification notice
+        if: always()
+        run: |
+          echo 'R579 repaired one Swift expression; real game recognition, Mega visual identity and field accuracy NOT certified. No IPA.'
