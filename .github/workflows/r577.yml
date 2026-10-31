@@ -1,0 +1,84 @@
+name: R577 Unified PNG OCR and Mega Evidence (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths: [.github/workflows/r577.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: xcode-27
+            role: IOS27_NATIVE
+          - runner: macos-26-intel
+            role: PORTABLE_OCR
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      SCREEN_READ_CI_ROLE: ${{ matrix.role }}
+      PYTHONOPTIMIZE: "0"
+    steps:
+      - name: Replay exact R576, apply R577 source with SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'RESTORE_R577'
+          import ast,base64,hashlib,json,lzma,re,textwrap,urllib.request
+          from pathlib import Path
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/311742dc0ba9398254a83f5b083dae2e85cb255f/.github/workflows/r576.yml'
+          raw=urllib.request.urlopen(url,timeout=120).read()
+          assert len(raw)==26402 and sha(raw)=='5b8395bf6dab6550fde6da29359bc702b0249423548e2814aa9e867dfc172a97','R577_PARENT_R576_CHANGED'
+          m=re.search(r"python3 - <<'RESTORE_R576'\n(.*?)\n\s+RESTORE_R576",raw.decode(),re.S)
+          assert m,'R577_PARENT_SCRIPT_MISSING'
+          code=textwrap.dedent(m.group(1));ast.parse(code)
+          exec(compile(code,'R576_PINNED_REPLAY','exec'))
+          blob='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'
+          patch=json.loads(lzma.decompress(base64.b64decode(blob,validate=True)))
+          assert len(patch)==5
+          assert set(patch)==set(['app/ios/ChampionsOnDevice/ChampionsOnDeviceApp.swift', 'app/ios/ChampionsOnDevice/Info.plist', 'app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift', 'app/ios/ChampionsOnDevice/R577OfflineEvidenceReport.swift', 'tests/R577OfflineEvidenceReportHarness.swift'])
+          for name,x in sorted(patch.items()):
+            p=Path(name)
+            if x['old'] is None:
+              assert not p.exists(),('R577_NEW_FILE_ALREADY_EXISTS',name)
+              p.parent.mkdir(parents=True,exist_ok=True)
+              new=x['text'].encode()
+            else:
+              prior=p.read_bytes()
+              assert sha(prior)==x['old'],('R577_PARENT_HASH_MISMATCH',name)
+              lines=prior.decode().splitlines(keepends=True)
+              for lo,hi,text in reversed(x['diff']):
+                assert 0<=lo<=hi<=len(lines)
+                lines[lo:hi]=[text]
+              new=''.join(lines).encode()
+            assert len(new)==x['size'] and sha(new)==x['new'],('R577_PATCH_HASH_MISMATCH',name)
+            p.write_bytes(new)
+          assert len(list(Path('app/ios/ChampionsOnDevice').glob('*.swift')))==120
+          assert 'offlinePNG.inspectAll()' in Path('app/ios/ChampionsOnDevice/ChampionsOnDeviceApp.swift').read_text()
+          assert 'R548MegaSceneProbe.inspect(png,budgetMs:1800)' in Path('app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift').read_text()
+          assert 'R558FullFrameOCR.inspect(decoded:decoded' in Path('app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift').read_text()
+          print('PASS_R577_DIFFERENTIAL_REPLAY_EXACT_SOURCE_SHA')
+          RESTORE_R577
+      - name: Swift syntax and R577 evidence report native regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          swiftc -O -assert-config Debug -swift-version 5 -parse-as-library app/ios/ChampionsOnDevice/R576OfflinePNGImportGate.swift app/ios/ChampionsOnDevice/R577OfflineEvidenceReport.swift tests/R577OfflineEvidenceReportHarness.swift -o "$RUNNER_TEMP/r577-evidence-test"
+          "$RUNNER_TEMP/r577-evidence-test"
+      - name: Existing Apple native regression and iPhoneOS build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/run_r571_native.py
+      - name: Scope notice
+        if: always()
+        run: |
+          echo 'R577 screen-reading only; no IPA; no automatic uploads; owner/mega visual/turn/game accuracy remain uncertified'
