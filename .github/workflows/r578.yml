@@ -1,0 +1,145 @@
+name: R578 Exact PNG and Diagnostic ZIP Pairing (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths: [.github/workflows/r578.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: xcode-27
+            role: IOS27_NATIVE
+          - runner: macos-26-intel
+            role: PORTABLE_OCR
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    env:
+      SCREEN_READ_CI_ROLE: ${{ matrix.role }}
+      PYTHONOPTIMIZE: "0"
+    steps:
+      - name: Restore pinned R577 and verify all R578 overlay bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R578_REPLAY'
+          import base64,hashlib,lzma,json,re,ast,urllib.request,textwrap
+          from pathlib import Path
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/b63e1f04ebd64917ae4cd773ab6bc64e9b92c099/.github/workflows/r577.yml'
+          parent=urllib.request.urlopen(url,timeout=120).read()
+          assert len(parent)==10474 and sha(parent)=='fc203612e6de3791536953cf6434f9985e588bd6c1631272d9f61c41c62d95c0','R578_R577_PIN_CHANGED'
+          script=re.search(r"python3 - <<'RESTORE_R577'\n(.*?)\n\s+RESTORE_R577",parent.decode(),re.S)
+          assert script,'R578_R577_SCRIPT_MISSING'
+          code=textwrap.dedent(script.group(1));ast.parse(code)
+          exec(compile(code,'EXACT_R577_REPLAY','exec'))
+          packed=(
+          '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'
+          )
+          changes=json.loads(lzma.decompress(base64.b64decode(''.join(packed),validate=True)))
+          assert len(changes)==6
+          for name,entry in sorted(changes.items()):
+            p=Path(name)
+            if entry['previous'] is None:
+              assert not p.exists(),('R578_EXISTING_NEW_FILE',name)
+              p.parent.mkdir(parents=True,exist_ok=True)
+              new=entry['text'].encode()
+            else:
+              assert p.exists() and sha(p.read_bytes())==entry['previous'],('R578_PARENT_SHA',name)
+              lines=p.read_text().splitlines(keepends=True)
+              for lo,hi,new_text in reversed(entry['diff']):
+                assert 0<=lo<=hi<=len(lines)
+                lines[lo:hi]=[new_text]
+              new=''.join(lines).encode()
+            assert len(new)==entry['size'] and sha(new)==entry['new'],('R578_PAYLOAD_SHA',name)
+            p.write_bytes(new)
+          assert len(list(Path('app/ios/ChampionsOnDevice').glob('*.swift')))==122
+          assert 'R578OfflineBundleWriter.write(png:png,diagnostic:data' in Path('app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift').read_text()
+          print('PASS_R578_PINNED_R577_REPLAY_AND_SIX_SOURCE_SHA')
+          R578_REPLAY
+      - name: Swift parse and R578 negative cases against synthetic PNG
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+          python3 - <<'MAKE_PNG'
+          from pathlib import Path
+          import struct,zlib
+          def block(tag,data):
+            return struct.pack('>I',len(data))+tag+data+struct.pack('>I',zlib.crc32(tag+data)&0xffffffff)
+          width,height=20,10
+          raw=b''.join(b'\x00'+b'\xff'*width*3 for _ in range(height))
+          encoded=b'\x89PNG\r\n\x1a\n'+block(b'IHDR',struct.pack('>2I5B',width,height,8,2,0,0,0))+block(b'IDAT',zlib.compress(raw))+block(b'IEND',b'')
+          Path('/tmp/r578_test.png').write_bytes(encoded)
+          MAKE_PNG
+          swiftc -swift-version 5 -parse-as-library app/ios/ChampionsOnDevice/R576OfflinePNGImportGate.swift app/ios/ChampionsOnDevice/R577OfflineEvidenceReport.swift app/ios/ChampionsOnDevice/R578OfflineBundlePolicy.swift tests/R578OfflineBundlePolicyHarness.swift -o "$RUNNER_TEMP/r578-policy"
+          "$RUNNER_TEMP/r578-policy" /tmp/r578_test.png
+      - name: Apple native regression, Vision checks and iPhoneOS build
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python3 tools/run_r571_native.py; then
+            echo 'R578 Apple native verification failed; printing direct compiler diagnostics without retry or new billing operation'
+            for log in reports/xcode_iphoneos_build.log reports/r574_png_replay_compile.log; do
+              if [ -f "$log" ]; then
+                echo "FAILED_NATIVE_LOG: $log"
+                grep -nE 'error:|fatal error|BUILD FAILED|SwiftCompile' "$log" | tail -n 45 || true
+                tail -n 35 "$log" || true
+              fi
+            done
+            exit 1
+          fi
+      - name: Certification scope
+        if: always()
+        run: |
+          echo 'No IPA. Historical PNG and OCR matched. Live owner, Mega visual, turn and real-game accuracy NOT certified.'
