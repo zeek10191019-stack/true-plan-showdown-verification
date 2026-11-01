@@ -1,0 +1,118 @@
+name: R633.3 Restore 349 Sources Excluding Test Cache (No IPA)
+"on":
+  push:
+    branches: [main]
+    paths: [.github/workflows/bq.yml]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: r6333-source-only
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Restore immutable R633 artifact without checkout
+        uses: actions/download-artifact@v4
+        with:
+          name: r633-recovered-source-tree
+          run-id: 41272937220
+          repository: zeek10191019-stack/true-plan-showdown-verification
+          github-token: ${{ github.token }}
+          path: recovered
+      - name: Verify original source hashes and identify excluded caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYVERIFY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('recovered')
+          manifest_path = root / 'reports/r633/source_manifest.json'
+          assert manifest_path.is_file() and not manifest_path.is_symlink(), 'MANIFEST_MISSING'
+          manifest = json.loads(manifest_path.read_text())
+          assert manifest.get('schema') == 'trueplan.r633.recovered-source-manifest.v1'
+          assert manifest.get('status') == 'source_build_verified_not_game_hud_certified'
+          assert manifest.get('verified_79_fields') == 0
+          assert manifest.get('owner_hp_mega_certified') is False
+          rows = manifest['files']
+          assert len(rows) == 349, 'SOURCE_FILE_COUNT_DRIFT'
+          assert len(rows) == len({r['path'] for r in rows}), 'DUPLICATE_PATH'
+          record_paths = set()
+          for row in rows:
+              rel = row['path']
+              path = Path(rel)
+              assert path.as_posix() == rel and not path.is_absolute()
+              assert '..' not in path.parts and path.parts[0] in ('app','tests','tools')
+              assert '\\' not in rel and all(ord(c) >= 32 for c in rel)
+              assert path.suffix not in ('.pyc','.pyo') and '__pycache__' not in path.parts
+              data_path = root / path
+              assert data_path.is_file() and not data_path.is_symlink(), rel
+              content = data_path.read_bytes()
+              assert len(content) == row['bytes'] and len(content) <= 8_000_000, rel
+              assert hashlib.sha256(content).hexdigest() == row['sha256'], rel
+              record_paths.add(rel)
+          actual = {f.relative_to(root).as_posix() for d in ('app','tests','tools')
+                    for f in (root/d).rglob('*') if f.is_file()}
+          extra = actual - record_paths
+          missing = record_paths - actual
+          assert not missing, ('MISSING', sorted(missing)[:5])
+          assert extra and all(Path(s).suffix == '.pyc' and '__pycache__' in Path(s).parts for s in extra), (
+              'UNEXPECTED_NON_CACHE_MEMBER', sorted(extra)[:5])
+          assert sum(s.startswith('app/') and s.endswith('.swift') for s in record_paths) >= 155
+          print('R6333_ALL_349_SHA256_VERIFIED', 'EXCLUDED_TEST_CACHES', len(extra))
+          PYVERIFY
+      - name: Publish root source branch without touching main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          remote="https://github.com/${GITHUB_REPOSITORY}.git"
+          branch='r633-recovered-source'
+          test "$GITHUB_REPOSITORY" = 'zeek10191019-stack/true-plan-showdown-verification'
+          if git ls-remote --heads "$remote" "refs/heads/$branch" | grep -q .; then
+            echo 'RECOVERY_BRANCH_ALREADY_EXISTS_DO_NOT_OVERWRITE' >&2
+            exit 1
+          fi
+          python3 - <<'PYCOPY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('recovered')
+          out=Path('published')
+          manifest_bytes=(root/'reports/r633/source_manifest.json').read_bytes()
+          manifest=json.loads(manifest_bytes)
+          for row in manifest['files']:
+              path=Path(row['path'])
+              content=(root/path).read_bytes()
+              assert len(content)==row['bytes'] and hashlib.sha256(content).hexdigest()==row['sha256']
+              dest=out/path
+              dest.parent.mkdir(parents=True,exist_ok=True)
+              dest.write_bytes(content)
+          manifest_out=out/'reports/r633/source_manifest.json'
+          manifest_out.parent.mkdir(parents=True,exist_ok=True)
+          manifest_out.write_bytes(manifest_bytes)
+          assert len([x for x in out.rglob('*') if x.is_file()])==350
+          assert not list(out.rglob('*.pyc'))
+          print('EXACTLY_350_GIT_FILES_WITH_MANIFEST_READY')
+          PYCOPY
+          cd published
+          git init -q -b "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          test "$(git ls-files | wc -l | tr -d ' ')" -eq 350
+          git commit -qm 'R633: restore 349 SHA-pinned iOS source files; exclude test bytecode'
+          git remote add origin "$remote"
+          header=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $header" \
+            push origin "HEAD:refs/heads/$branch"
+          echo "Recovered source branch: $branch" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Original main branch was not modified.' >> "$GITHUB_STEP_SUMMARY"
