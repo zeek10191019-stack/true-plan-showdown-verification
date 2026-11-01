@@ -2000,10 +2000,29 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         // R654: same-species BASE/X/Y/Z comparisons; class
                         // duplicates cannot substitute for negative controls.
                         // Output stays historical, not a live Mega assertion.
-                        visualChanges["r654_megareference_class_safety"] =
-                            R654MegaVisualClassGate.audit(
-                                frames:actorAppearanceSamples,
-                                references:r650LocalReferences)
+                        // R655: detect contradictory Mega labels in the local
+                        // 16x12 reference catalog before class comparisons.
+                        // The catalog's labels are still NOT ground truth.
+                        let r655Integrity=R655MegaReferenceConflictGate.audit(
+                            references:r650LocalReferences)
+                        visualChanges["r655_reference_integrity"] = r655Integrity
+                        if r655Integrity["status"] as? String ==
+                            "REVIEWED_LABEL_CONSISTENCY_ONLY" {
+                            visualChanges["r654_megareference_class_safety"] =
+                                R654MegaVisualClassGate.audit(
+                                    frames:actorAppearanceSamples,
+                                    references:r650LocalReferences)
+                        } else {
+                            visualChanges["r654_megareference_class_safety"] = [
+                                "schema":R654MegaVisualClassGate.schema,
+                                "status":"HOLD_R655_REFERENCE_INTEGRITY",
+                                "owner_certified":false,
+                                "mega_event_certified":false,
+                                "mega_form_certified":false,
+                                "current_state_eligible":false,
+                                "battle_advice_authorized":false
+                            ] as [String:Any]
+                        }
                         let visualChangesData=try JSONSerialization.data(
                             withJSONObject:visualChanges,options:[.sortedKeys,.withoutEscapingSlashes])
                         entries.append(.init(name:"historical_visual_region_changes.json",
