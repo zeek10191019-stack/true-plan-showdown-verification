@@ -1733,6 +1733,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                     R644MoveSlotCoupler.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R645DualHPEvidence.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R646FieldSignalReaders.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
+                    R647MegaSignalBoundary.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
                     let data = try JSONSerialization.data(withJSONObject:bundle,
                         options:[.sortedKeys,.withoutEscapingSlashes])
