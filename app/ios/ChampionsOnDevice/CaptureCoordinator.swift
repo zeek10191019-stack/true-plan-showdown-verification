@@ -1718,6 +1718,10 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         snapshot:bundle["screen_read_state"] as? [String:Any],
                         mega:bundle["r546_mega_evidence_audit"] as? [String:Any],
                         projection:bundle["analysis_projection"] as? [String:Any])
+                    // R634: route all 79 canonical fields to actual evidence sources.
+                    // Only capture receipt metadata can be promoted at this stage.
+                    R634FieldEvidenceRouting.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
+                    R635LayoutToFields.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
                     let data = try JSONSerialization.data(withJSONObject:bundle,
                         options:[.sortedKeys,.withoutEscapingSlashes])

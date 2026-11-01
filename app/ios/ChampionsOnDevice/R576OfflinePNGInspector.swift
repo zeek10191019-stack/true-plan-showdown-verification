@@ -94,6 +94,9 @@ final class R576OfflinePNGInspector: ObservableObject {
                     document["r581_full_read_coverage"] = R581ReadabilityCoverage.make(
                         sourceSHA:decoded.sha256,sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY",
                         snapshot:snapshot,mega:mega)
+                    // Offline PNG must never be represented as current live battle.
+                    R634FieldEvidenceRouting.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
+                    R635LayoutToFields.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
                     guard let data=try? JSONSerialization.data(withJSONObject:document,
                         options:[.sortedKeys,.withoutEscapingSlashes]),
                         data.count <= R577OfflineEvidenceReport.maximumReportBytes else {return nil}
