@@ -1,0 +1,326 @@
+name: R635 Bound Layout Evidence to 79 Fields iOS Build
+'on':
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/bv.yml
+  workflow_dispatch: null
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: >-
+      github.repository ==
+      'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: '0'
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+    - name: Checkout immutable R633 restored source
+      uses: actions/checkout@v4
+      with:
+        ref: e780d9184614bb9fcb3be5d11aa8b94617e75696
+        fetch-depth: 1
+        persist-credentials: true
+    - name: Apply pinned R634 sources without new tar bundle
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PYINSTALL_PARENT'
+        import hashlib,textwrap,urllib.request
+        u=('https://raw.githubusercontent.com/'
+           'zeek10191019-stack/true-plan-showdown-verification/'
+           '8a065859dd7804f3976a2ef2ebba6ce1bd88e639/'
+           '.github/workflows/bs.yml')
+        b=urllib.request.urlopen(u,timeout=90).read()
+        assert len(b)==11151,'PINNED_BS_SIZE_DRIFT'
+        assert hashlib.sha256(b).hexdigest()==(
+         '837806bb7de5f1c72d21bb9caea9d5daa2c460d6fc1b9957c38db546712fb0d4'
+        ),'PINNED_BS_SHA_DRIFT'
+        s=b.decode('utf-8')
+        left="          python3 - <<'PYINSTALL'\n"
+        right="\n          PYINSTALL"
+        assert s.count(left)==1 and s.count(right)==1
+        code=textwrap.dedent(s.split(left,1)[1].split(right,1)[0])
+        exec(compile(code,'PINNED_BS_R634_SOURCE','exec'),{'__name__':'__main__'})
+        PYINSTALL_PARENT
+    - name: Restore R574 complete historical native test prerequisites
+      shell: bash
+      run: |-
+        set -euo pipefail
+        python3 - <<'PYR574'
+        """Recover historical CI assets missing from R633 source.
+
+        Restores exact historical schema/, fixtures/, source/ files from the R574
+        Only pinned tar data; never overwrite recovered source files.
+        """
+        from __future__ import annotations
+        import base64, hashlib, io, lzma, re, tarfile, urllib.request
+        from pathlib import Path, PurePosixPath
+
+        PIN='8a065859dd7804f3976a2ef2ebba6ce1bd88e639'
+        URL=('https://raw.githubusercontent.com/'
+             'zeek10191019-stack/true-plan-showdown-verification/'
+             +PIN+'/.github/workflows/r574.yml')
+        BLOB_SHA='fe58f8da0bd0581b437c6aaf675f9742f928b281'
+        TAR_SHA='189d62903d27636f0a0838b85caa54561b944010d9db95da0226dc34b7fcb1c2'
+        PREFIXES=('schema/','fixtures/','source/')
+
+
+        def recover(yaml:bytes, root:Path)->tuple[int,int]:
+            assert len(yaml)==483631,'R574_FILE_SIZE_DRIFT'
+            blob=b'blob '+str(len(yaml)).encode()+b'\0'+yaml
+            assert hashlib.sha1(blob).hexdigest()==BLOB_SHA, (
+                'R574_GIT_BLOB_SHA_DRIFT')
+            text=yaml.decode('utf-8')
+            parts=[]
+            for n in range(32):
+                needle=f"with (folder/'part_{n:04d}.b64').open('xb') as stream:"
+                assert text.count(needle)==1,('PART_NOT_UNIQUE',n)
+                section=text.split(needle,1)[1].split('PAYLOAD_PART',1)[0]
+                fragments=re.findall(r"(?m)^\s+b'([A-Za-z0-9+/=]+)'$",section)
+                assert fragments,('PART_EMPTY',n)
+                parts.append(''.join(fragments))
+            packed=base64.b64decode(''.join(parts),validate=True)
+            decoded=lzma.decompress(packed)
+            assert len(decoded)==1832960, 'R574_TAR_SIZE_DRIFT'
+            assert hashlib.sha256(decoded).hexdigest()==TAR_SHA, (
+                'R574_TAR_SHA_DRIFT')
+            selected=[]
+            with tarfile.open(fileobj=io.BytesIO(decoded),mode='r:') as archive:
+                seen=set()
+                for member in archive:
+                    path=PurePosixPath(member.name)
+                    assert not path.is_absolute() and '..' not in path.parts
+                    assert path.as_posix()==member.name
+                    assert '\\' not in member.name
+                    assert member.isfile() and 0<member.size<200000
+                    assert member.name not in seen
+                    seen.add(member.name)
+                    if not member.name.startswith(PREFIXES):
+                        continue
+                    file=archive.extractfile(member)
+                    assert file is not None
+                    payload=file.read()
+                    assert len(payload)==member.size
+                    target=root/member.name
+                    assert target.resolve().is_relative_to(root.resolve())
+                    assert not target.exists(),member.name
+                    assert not target.is_symlink(),member.name
+                    selected.append((target,payload))
+            wanted={'schema/screen-read.snapshot.v1.schema.json',
+                    'schema/screen-read.png-replay.v1.schema.json',
+                    'fixtures/r571_source_value_baseline.zip'}
+            names={p.relative_to(root).as_posix() for p,_ in selected}
+            assert wanted<=names and any(s.startswith('fixtures/') for s in names)
+            for path,payload in selected:
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_bytes(payload)
+                assert path.read_bytes()==payload
+            return len(selected),sum(len(b) for _,b in selected)
+
+        if __name__=='__main__':
+            data=urllib.request.urlopen(URL,timeout=120).read()
+            count,size=recover(data,Path.cwd())
+            print('R634_PREREQUISITES_RESTORED',count,size)
+
+        PYR574
+    - name: Add SHA checked R635 layout evidence reader and one-button hooks
+      shell: bash
+      run: |-
+        set -euo pipefail
+        python3 - <<'PYR635'
+        import base64,hashlib,lzma
+        from pathlib import Path
+        H=lambda b:hashlib.sha256(b).hexdigest()
+        files=[
+         ('app/ios/ChampionsOnDevice/R635LayoutToFields.swift',8518,
+          '7a455d67bff4ec5c523a6b25b6b8a0b3cdeb60776e932cade4964ec5fd3f696f'),
+         ('tests/R635LayoutHarness.swift',5191,
+          'c7a5375d4a8e652b652e0b0685341c5f5662253f85dc78464cfb446a6f8468f3'),
+        ]
+        encoded=''.join([
+         '{Wp48S^xk9=GL@E0stWa8~^|S5YJf5;5Cd6a9sd2n@VT6Qap2kgL-R<OQUBu7V',
+         'J*$N2tfPU!*1|#aFu(kqwKV>mgGSKQu$&dR2>E7k6>Ex4rxi5+J@MrBr2y24y}',
+         'E6xLyzA<Uu_2k&1CBE7p0iTtqfyrbyUJHrcJ0@@0Mq^ib2w|6ZsR!a3chXrW`h',
+         'oQ>vP|*#vkTTUREjUrl(+MI3GiW(OiBGf#t|o&$JAQ^;qtWa^X9ddZKIFcpEEv',
+         'sCy;-5Xo&E|C&gTt#&jq8slAiSo#1Oz}?QV0e7vE6PRD9lE<&csMq5jG2zyd8A',
+         'txkuN9w2tQeg(NkbLGCp<X(-vos0RrgLgbdJOri)=CLpiI|fvO=iu1@ev<=os~',
+         'Cuc&@Yi<Xo2fZhrn%Ykbcd<2U7V_l)pT079i!*0Zgq`P(VkA_ehZ(IMFIO^c&(',
+         'kW_2#Gu0$12emv`L0&m>bJ<bF3(T4b<;~9%ZSH+b=F0J4r4owsJz|1AxjX-yhK',
+         '90tNYh*fm5Q%$oel^3ZW~(z1{hOfe&bNywgp0NW-=W&73{vLDYviEL<A8I-hc*',
+         '=|Zl{kA=sLwvL$O9(5ts}#muFNmMbfiR5mlvC0m8xK9QGu7L^V%;yC*^gUH#)Z',
+         '?wYqBKV>R=kc+8o*)Iu!Ato>lhb(cxFkQS7CleI?Un5|*%X;6<Xr{@p+|4TbQ6',
+         'sL<@2L7?JOKi6A8mX76%AzF&sZFP)&Po&l)sl!VbeoB97$@y(_=AEiQO&APv^N',
+         'x#~M*`?CU<lBW^f{r*H!U$#=A85nh@!+}^VC7cF=JRw52j-Ybkqd;NUMx;g%XR',
+         'I!-Eda8mF11y7kY1DxP=flN;D0(>CvJ;(5z!7Ud$i|>y4yCN?@fAkn;Y-FXpC#',
+         '6<tHh`gO^nEkn{Wh9)<5u9Ou#zBi0ydq_hfNMz;8}}2TtPGIT`tRNi!oksQ^dD',
+         'swBJp{MEJxan>x9%lxi(5ErE!0=9DEc=&>UT4Z0sfALj#TxM$X+xF0v^H{u2IO',
+         '+8FYUJFmZd`J$e>z_GL6u$|4<x(#%Fp?FEZ}QdP}Ky4L}2Bw-pFqFbo>@E?R-^',
+         'LMq!`$0`c-NO1>!_IOMyBJdKHJd07)9h09=<{vm@RQany$5A8bxTz&GK(b&f(L',
+         'RT!6+)4wE9QAEhT&kfLCHj`;p66`|M?qKy-;pWPEYMO8m@N!W_R-qnlsv^`%{j',
+         's%sO5Cz`q56-hJc+!@lF@lFT3^`=*az*f@5q=PEj(~eN8xE@)fuc;Q(WbEj&&K',
+         'RouMOnmAe)dB^D8rqeKrtjKEbnOK5%K+V+!3{sA>MTzuL5!MT;gs=%oiaP{*sb',
+         'TyjQZ1z7C$IjVF%x6)AYL2<qGIc?+H`a~O`B`zx=2s!9~Zgz`TBa#R;o%wonn;',
+         '|J?)&qAE*nvJ7euz^0=0J9Xf|bG@P2k2r%uXC&%lrI-b%~nYWPd=8;MMEmUC!%',
+         '^v4fm+@8*_ywVvOJe2q$dafU{|Oq_10r?1v26=yAbGI78{X_N=GPums@FJ#Q5X',
+         'UbtCn7@(O4M8xWMUbt2b`*W7=bVwA8y*wa*2UBY%RVg1-EeRtcSrU=Potn0P3a',
+         'tR0}?lxZ3W!l?Pn4)QWQ2MKy@Xi^<p{&y28S~$4swM62QR?fXh#<)5vQW2wop4',
+         'XG<A#|0{LIREQSX(!MH4ECheIEQH23^LO1sx+`-{$6HL}G{$CtY+XRZ;96I;V%',
+         'dr2kJeU|@6GIFm$jdoAgbRyGtZbpH1@(ttnifwp#N4Ct<jugt^*Mf3R`HNFYjH',
+         'T`uc8JC2#%4ZdkJ?{JS3lKD13#K0u8FivcU|w{zX>4+TF2Wm<x$;3_y}1at`KR',
+         'r4O%))c=WBIU-{4!rSv`Tl$+1c*CD092=1~0@4-fH00l)d0F{3)4zyGJoelpU7',
+         '9k~-|n%Oq*`lU^OXnDW9XB`HA${47K*MSHHuHVPe`?5oGx#mC}PiFPOb_Ksd7|',
+         '=9}7B1DKsbK{w;%aSn_8(_A6f7)br{o{6XDRePAxXt^Q>M!vZBD8<1$zO58W4p',
+         'L4x=sbUnpn%KO1LFK=0J%ykS;fL9IRCl}`^_<I`dejNx6v)_p;_ZixQDyh!^FR',
+         '_(E!zpb5$g~V<j$BuRX=vYYLc3`-&G{w`gL-tPTiq}nws?^%-ryp37gbe>(bb&',
+         'TNI7!tD5hQ6+#6|yE)iY1G{Fh>c6|<R4MNc0x_+KOlzs({Gte-gwzvQNtg0X5p',
+         'M${}1X955}FAt6dY^OwxkSEr#O4>iJO<`ge^E{btKSjo$p_v(be_cCoZ#TFmiJ',
+         '8lba0p-0x*qvV$UJnKJ*cySNs5h87pD&J#!~|2d4TjJU}8MGIA#88=bLrP6@~z',
+         'GD+5@8KGl!;ThX=t4Um(-vz?587EbRiZXCz5ZP@HVC)reJLV`>6sFmcDN|l@sf',
+         'E4z)CVS-D(3rL6ezNp;k#hC^5Z%Y)7f&&V4wX7CL4LGHKuaNmuOj>?vkmM<8;x',
+         '|cgGa`DXfFzxt!RJC8+lfBG7|~5zZ@NniLVPUz=`6YvuKBaq`bMdO+kd*ziH^%',
+         '0!2}~AD^2-!7EX>P7Z(E-2gTqsIGr%*`Fda^3bmt-}<+QwZ%1yMB{Qn$VNj>ON',
+         'HT;-`{Dt^dP*@6VEs-jz2TLy3RNuQ4#lz3}P=JKlN^8r{GCN+4>N`M=<MXco9h',
+         'Xn>5Q{4!ydv5_)w}gUAH*e!}(TorTRoN$0R)8g&uo8bmTdXe$0GSAtIgKwnJ+l',
+         'AtTHQ%HmMrg}zZcBqmnn7bhWH=?Q&#P?;8&q4K^(clCw%>ed04Ffh6Y$E7v922',
+         'fzxtw!mB7e$^Q-O$~SLTkAiZm_RKE(9lIYLoePglb}O~kP)IzVABD*jXG+?96W',
+         '%yx+hM_e$duV32iaOZn3h5WKGZc9k8mn~+rZ~f;WfZ;EhU+w|`+p<QLP^~5#oB',
+         '3>1KC=|ID^BGMZ4Xbvp7PbKb3MxRUK-t&^T39ZCxGyDVhADPRRG1F7E}ix2{H@',
+         'FX=t4>Sa8(4h&N20Q^tasH}GtI9>4n}|C^QbWqOsN30A_esC7YF2`6m$vE{(iH',
+         'BH`!#3R5tom(M??>IB{DSkXLP?NhZCY`_{NShjs9HW<4v?qa%HB&8sTsX(XfN^',
+         '1Y4`Ti>BV{R3Y|dDo8tYor;+H<}1L?kJCMC);X8I7=ax<?=VU)Ik1RG0h5KJ%m',
+         '7M~<UL;u&nJ=%?c%%sI^zc56j3zk{-M-2pb4<(`D^C$R*%3xRAM~+vhmI(hElB',
+         'M(QOB}+ANVE70@0_KYFyAgmMF(1T6t0A?*d`iLd(cAiXcJ%j<TYnw<SV)wrhUr',
+         'rWndOq`a%ywEjjYmcM)3sdoeF-bHPnx(*U%Wjx3aA!TwJ!bAxc6daE>3_r$O9K',
+         'ohaq&f!q}+jU12N7V7#{+r=nYAA%`Uge`$)3e+XznFR#w2%*j8zHAo57_3d-wn',
+         'e=m<F1>j!EH>!Lj>0Fk*rj-I8H(`i2<tYKoaxc(_6p16oJ6z>~=6m&0@j&c;|y',
+         'Y<ML`lov2g$Zd{6|0q1LWD|Z;Wy=&%s|GhV?#?xVZ#+O(LJA-fy}A4;&_?cHXs',
+         'qAjM*kno1HT&GWPS=(wIqa?DIIr=9Zi>AHc9`hDELeHhE+q^`VwT_ff`e*sRIR',
+         '$$2r&Fdw~tEOd|BkA=p?nuV6D>R_!Ns==7eQeCyh2rk106ucyxJ4pX5KpDw(Z-',
+         'c&3tugN^_hd1FAbX(saztgx57_}u&=jWP{u0y4|hxTlACMH~Sv<a=%t5n3E>HS',
+         'xdUK_(teOEF^>OdY_^Wizasf~SN3aHr%lHt*G-PE?e`pH}$wNAf;BHo4Q5p14D',
+         'cvmtBiEWd`P?i#fHLo@DA#d0kWM_U>9AaMH-fLq8eZhlss34U3dI^o_p=P+4s~',
+         'G}{#IkMP(RFti2)$GpbZRC!8uoNeEn-SmgYP%5DQ8{bcOT#Kt?_R3tS`OCk*1{',
+         '<+xA_F(3;xu8lGDBp@T1yX<@KX8zrPBVEh&FShDu0wIxtxvIk%Aub)?7&4pq_Y',
+         '<ai@X?l+EnihcH{syD}D`SWF9ndMXoYpdq4@Kl<bUoR4Zyi#UY8kc3XNNH!)+4',
+         '_0{0!Oc&ci%w3lXd)O&GpwmQQ$EY$2w^8g^ViCYk#BbFuKfBbea&vkNz3tmvry',
+         '>Y`Ns%AN<Sf3YY>QC`W0;3Sk2Mq!A~d`NK~q{U2eytwVO1Lc`NQ4ZKfd%^0Rkv',
+         'MRCKJM7cRn^o=g)68h$fs65b4ZI<x;CW@48vnjqhr@$Df_nb290$@!&qEZKlDK',
+         'n@>5tWKL9omaO~$dfkN3$wSUKJ3|_h{^s#b@el*3y<s;tPXt<>3LN2gkE~VTlI',
+         'o<_c5k(CovnvfvPSUGflbSq;wq8d|#rm2neeH|c66TfMP4eMVt`U?~%yZt=Vbm',
+         'Fib8{W3Fv&I}zpz?3ej2K{9#2q0q&U**CS5u<K_OXa>x7U}{IA{FiY+w?lr0Aw',
+         'rRMIIo0swWUZWw>zqesH(_0&}Ymg8f>0W&wnCPgw`VJUuO7%j_4+j#1suG7}Um',
+         'GItyI*OzupsJLRRcWa22<JOHtwy0{86BuK7Tuo<6hD<z-U!$s$XduGan=>*!y+',
+         'w2|>`(?hLwC#V}urVRz#4@sZR#1lrM#rC@)EtWJM-0sq@|ZMo?pXhf))@c~j8d',
+         'm5;s0HqG&SvR&8GtyS_IZY&5bi%T<1CJi1ibRzF0e`uNynFRG#s)G3N4vj=Yx!',
+         'V&uGfVf12(I7aOeT!7f+kDw)=m=WoI(ToruR`_C>fgmtVF@EKz|OFGFTHwFNTT',
+         'ihf?DEX4o-<c~UD#;-ie00E30jcWh^Y8mEfvBYQl0ssI200dcD',
+        ])
+        data=lzma.decompress(base64.b85decode(encoded))
+        pos=0
+        for path,size,sha in files:
+            item=data[pos:pos+size]
+            pos+=size
+            assert len(item)==size and H(item)==sha,('BUNDLE_DRIFT',path)
+            dest=Path(path)
+            assert not dest.exists() and not dest.is_symlink(),path
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            dest.write_bytes(item)
+        assert pos==len(data),'BUNDLE_TRAILING_DATA'
+        paths=[
+         ('CaptureCoordinator.swift',
+          '1f1c25c6794734a90f2220671e9d63ee3959fb4696ea18aa5d626b0f7f6f5966'),
+         ('R576OfflinePNGInspector.swift',
+          '7800222e72cc6b90d64736340411166bf0f8c21821fae936f5bc2239130e958f'),
+
+        ]
+        for name,sha in paths:
+            path='app/ios/ChampionsOnDevice/'+name
+            p=Path(path)
+            data=p.read_bytes()
+            assert H(data)==sha,('R634_PATCH_PRECONDITION',path)
+            raw=data.decode()
+            old='R634FieldEvidenceRouting.enrich'
+            new='R635LayoutToFields.enrich'
+            if path.endswith('CaptureCoordinator.swift'):
+                variable='bundle'
+                kind='LIVE_RETAINED_FRAME'
+            else:
+                variable='document'
+                kind='USER_IMPORTED_PNG_OFFLINE_ONLY'
+            suffix='(&'+variable+', sourceKind:"'+kind+'")'
+            seam=' '*20+old+suffix
+            addition=' '*20+new+suffix
+            assert raw.count(seam)==1 and addition not in raw, (
+                'INVALID_SINGLE_SEAM',path)
+            next=(raw.replace(seam,seam+'\n'+addition)).encode()
+            p.write_bytes(next)
+            assert p.read_bytes()==next
+        print('R635_2_EXACT_SHA_MODULES_ONE_BUTTON_HOOKS_PASS')
+        PYR635
+    - name: Run R635 R634 R581 and native Apple contract tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        swiftc -parse-as-library \
+         app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift \
+         app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift \
+         app/ios/ChampionsOnDevice/R635LayoutToFields.swift \
+         tests/R635LayoutHarness.swift -o "$RUNNER_TEMP/r635"
+        "$RUNNER_TEMP/r635"
+        swiftc -parse-as-library \
+         app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift \
+         app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift \
+         tests/R634FieldRoutingHarness.swift -o "$RUNNER_TEMP/r634"
+        "$RUNNER_TEMP/r634"
+        swiftc -parse-as-library \
+         app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift \
+         tests/R581CoverageHarness.swift -o "$RUNNER_TEMP/r581"
+        "$RUNNER_TEMP/r581"
+        swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+        python3 tools/run_r571_native.py
+    - name: Publish only fully checked isolated R635 source branch
+      shell: bash
+      run: |
+        set -euo pipefail
+        branch=r635-layout-field-evidence
+        if git ls-remote --exit-code --heads origin \
+         "refs/heads/$branch" >/dev/null 2>&1; then
+         echo 'Branch already exists. Overwrite forbidden.' >&2
+         exit 1
+        fi
+        git checkout -b "$branch"
+        git add -- \
+         app/ios/ChampionsOnDevice/R635LayoutToFields.swift \
+         app/ios/ChampionsOnDevice/CaptureCoordinator.swift \
+         app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift \
+         app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift \
+         tests/R635LayoutHarness.swift \
+         tests/R634FieldRoutingHarness.swift \
+         schema fixtures source
+        python3 - <<'PYSTAGE'
+        import subprocess
+        f=set(subprocess.check_output(
+         ['git','diff','--cached','--name-only'],text=True).splitlines())
+        required={'app/ios/ChampionsOnDevice/R635LayoutToFields.swift',
+         'app/ios/ChampionsOnDevice/CaptureCoordinator.swift',
+         'app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift',
+         'app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift',
+         'tests/R635LayoutHarness.swift','tests/R634FieldRoutingHarness.swift'}
+        assert required<=f,('MISSING_READER_CODE',required-f)
+        assert all(x in required or x.startswith(
+         ('schema/','fixtures/','source/')) for x in f), (
+         'UNEXPECTED_STAGED_FILE',f-required)
+        print('R635_STAGE_SOURCE_AND_PREREQUISITES',len(f))
+        PYSTAGE
+        git config user.name 'github-actions[bot]'
+        git config user.email \
+         '41898282+github-actions[bot]@users.noreply.github.com'
+        git commit -m 'R635: image bound 79 field and layout evidence wiring'
+        git push origin "HEAD:refs/heads/$branch"
