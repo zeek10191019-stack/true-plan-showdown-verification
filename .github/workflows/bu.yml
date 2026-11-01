@@ -1,0 +1,183 @@
+name: R634.1 Complete Native Source Restore No IPA
+'on':
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/bu.yml
+  workflow_dispatch: null
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: '0'
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+    - name: Checkout immutable R633 restored source
+      uses: actions/checkout@v4
+      with:
+        ref: e780d9184614bb9fcb3be5d11aa8b94617e75696
+        fetch-depth: 1
+        persist-credentials: true
+    - name: Restore R634 changes from pinned successful Swift regression
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PYINSTALL_PARENT'
+        import hashlib,textwrap,urllib.request
+        u=('https://raw.githubusercontent.com/'
+           'zeek10191019-stack/true-plan-showdown-verification/'
+           '8a065859dd7804f3976a2ef2ebba6ce1bd88e639/'
+           '.github/workflows/bs.yml')
+        b=urllib.request.urlopen(u,timeout=90).read()
+        assert len(b)==11151,'PINNED_BS_SIZE_DRIFT'
+        assert hashlib.sha256(b).hexdigest()==(
+         '837806bb7de5f1c72d21bb9caea9d5daa2c460d6fc1b9957c38db546712fb0d4'
+        ),'PINNED_BS_SHA_DRIFT'
+        s=b.decode('utf-8')
+        left="          python3 - <<'PYINSTALL'\n"
+        right="\n          PYINSTALL"
+        assert s.count(left)==1 and s.count(right)==1
+        code=textwrap.dedent(s.split(left,1)[1].split(right,1)[0])
+        exec(compile(code,'PINNED_BS_R634_SOURCE','exec'),{'__name__':'__main__'})
+        PYINSTALL_PARENT
+    - name: Recover SHA-pinned native schema fixtures and source
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PYSCHEMA'
+        """Recover historical CI assets missing from R633 source.
+
+        Restores exact historical schema/, fixtures/, source/ files from the R571
+        Only pinned tar data; never overwrite recovered source files.
+        """
+        from __future__ import annotations
+        import base64, hashlib, io, lzma, re, tarfile, urllib.request
+        from pathlib import Path, PurePosixPath
+
+        PIN='8a065859dd7804f3976a2ef2ebba6ce1bd88e639'
+        URL=('https://raw.githubusercontent.com/'
+             'zeek10191019-stack/true-plan-showdown-verification/'
+             +PIN+'/.github/workflows/r571.yml')
+        BLOB_SHA='05407b66486b8e20c821ca784d85cbeeb106e570'
+        TAR_SHA='745ac80662aa0d9853431de38fe0acec7256655daac19fa0afec5c7341e759cf'
+        PREFIXES=('schema/','fixtures/','source/')
+
+
+        def recover(yaml:bytes, root:Path)->tuple[int,int]:
+            assert len(yaml)==444237,'R571_FILE_SIZE_DRIFT'
+            blob=b'blob '+str(len(yaml)).encode()+b'\0'+yaml
+            assert hashlib.sha1(blob).hexdigest()==BLOB_SHA, (
+                'R571_GIT_BLOB_SHA_DRIFT')
+            text=yaml.decode('utf-8')
+            parts=[]
+            for n in range(30):
+                needle=f"with (folder/'part_{n:04d}.b64').open('xb') as stream:"
+                assert text.count(needle)==1,('PART_NOT_UNIQUE',n)
+                section=text.split(needle,1)[1].split('PAYLOAD_PART',1)[0]
+                fragments=re.findall(r"(?m)^\s+b'([A-Za-z0-9+/=]+)'$",section)
+                assert fragments,('PART_EMPTY',n)
+                parts.append(''.join(fragments))
+            packed=base64.b64decode(''.join(parts),validate=True)
+            decoded=lzma.decompress(packed)
+            assert len(decoded)==1648640, 'R571_TAR_SIZE_DRIFT'
+            assert hashlib.sha256(decoded).hexdigest()==TAR_SHA, (
+                'R571_TAR_SHA_DRIFT')
+            selected=[]
+            with tarfile.open(fileobj=io.BytesIO(decoded),mode='r:') as archive:
+                seen=set()
+                for member in archive:
+                    path=PurePosixPath(member.name)
+                    assert not path.is_absolute() and '..' not in path.parts
+                    assert path.as_posix()==member.name
+                    assert '\\' not in member.name
+                    assert member.isfile() and 0<member.size<200000
+                    assert member.name not in seen
+                    seen.add(member.name)
+                    if not member.name.startswith(PREFIXES):
+                        continue
+                    file=archive.extractfile(member)
+                    assert file is not None
+                    payload=file.read()
+                    assert len(payload)==member.size
+                    target=root/member.name
+                    assert target.resolve().is_relative_to(root.resolve())
+                    assert not target.exists(),member.name
+                    assert not target.is_symlink(),member.name
+                    selected.append((target,payload))
+            wanted={'schema/screen-read.snapshot.v1.schema.json',
+                    'schema/history/r557_draft202012/'
+                    'screen-read.snapshot.v1.schema.json'}
+            names={p.relative_to(root).as_posix() for p,_ in selected}
+            assert wanted<=names and any(s.startswith('fixtures/') for s in names)
+            for path,payload in selected:
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_bytes(payload)
+                assert path.read_bytes()==payload
+            return len(selected),sum(len(b) for _,b in selected)
+
+        if __name__=='__main__':
+            data=urllib.request.urlopen(URL,timeout=120).read()
+            count,size=recover(data,Path.cwd())
+            print('R634_PREREQUISITES_RESTORED',count,size)
+        PYSCHEMA
+    - name: Run R634+R581 and native iPhoneOS enforced test
+      shell: bash
+      run: |
+        set -euo pipefail
+        swiftc -parse-as-library \
+         app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift \
+         app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift \
+         tests/R634FieldRoutingHarness.swift -o "$RUNNER_TEMP/r634"
+        "$RUNNER_TEMP/r634"
+        swiftc -parse-as-library \
+         app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift \
+         tests/R581CoverageHarness.swift -o "$RUNNER_TEMP/r581"
+        "$RUNNER_TEMP/r581"
+        swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+        python3 tools/run_r571_native.py
+    - name: Publish isolated complete native development branch
+      shell: bash
+      run: |
+        set -euo pipefail
+        branch=r634-field-routing
+        if git ls-remote --exit-code --heads origin \
+         "refs/heads/$branch" >/dev/null 2>&1; then
+         echo 'Recovery branch already exists. No overwrite.' >&2
+         exit 1
+        fi
+        git checkout -b "$branch"
+        git add -- \
+         app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift \
+         app/ios/ChampionsOnDevice/CaptureCoordinator.swift \
+         app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift \
+         tests/R634FieldRoutingHarness.swift \
+         schema fixtures source
+        python3 - <<'PYSTAGED'
+        import subprocess
+        p=subprocess.check_output(
+         ['git','diff','--cached','--name-only'],text=True)
+        files=set(p.splitlines())
+        needed={
+         'app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift',
+         'app/ios/ChampionsOnDevice/CaptureCoordinator.swift',
+         'app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift',
+         'tests/R634FieldRoutingHarness.swift'
+        }
+        assert needed<=files and len(files)>12
+        assert all(
+         x in needed or x.startswith(('schema/','fixtures/','source/'))
+         for x in files)
+        print('R634_NATIVE_FULL_ROOT_PREREQUISITES_INCLUDED',len(files))
+        PYSTAGED
+        git config user.name 'github-actions[bot]'
+        git config user.email \
+         '41898282+github-actions[bot]@users.noreply.github.com'
+        git commit -m 'R634: 79 routes and native prerequisites'
+        git push origin "HEAD:refs/heads/$branch"
