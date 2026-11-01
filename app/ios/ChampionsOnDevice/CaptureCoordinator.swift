@@ -1726,6 +1726,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                     R637GeometryDiagnostics.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R638SourceBindingAudit.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R639OrientationHypotheses.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
+                    R640FieldGapAudit.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
                     let data = try JSONSerialization.data(withJSONObject:bundle,
                         options:[.sortedKeys,.withoutEscapingSlashes])
