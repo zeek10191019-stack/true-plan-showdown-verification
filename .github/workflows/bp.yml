@@ -1,0 +1,105 @@
+name: R633.2 Source Recovery - Publish CI-Verified Artifact Without Checkout
+"on":
+  push:
+    branches: [main]
+    paths: [.github/workflows/bp.yml]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: r6332-source-recovery
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      R633_RUN_ID: '41272937220'
+      RECOVERED_BRANCH: r633-recovered-source
+    steps:
+      - name: Fetch immutable R633 artifact - no checkout of malformed main tree
+        uses: actions/download-artifact@v4
+        with:
+          name: r633-recovered-source-tree
+          run-id: 41272937220
+          repository: zeek10191019-stack/true-plan-showdown-verification
+          github-token: ${{ github.token }}
+          path: recovered
+      - name: Verify original build manifest and all 349 recovered files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYVERIFY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('recovered')
+          p=root/'reports/r633/source_manifest.json'
+          assert p.is_file() and not p.is_symlink(),'MANIFEST_MISSING'
+          manifest=json.loads(p.read_text())
+          assert manifest.get('schema')=='trueplan.r633.recovered-source-manifest.v1'
+          assert manifest.get('status')=='source_build_verified_not_game_hud_certified'
+          assert manifest.get('r633_regression_gate')=='PASS_before_manifest'
+          assert manifest.get('verified_79_fields')==0
+          assert manifest.get('owner_hp_mega_certified') is False
+          records=manifest.get('files')
+          assert isinstance(records,list) and len(records)==349,'R633_FILE_COUNT_DRIFT'
+          names=set()
+          total=0
+          for row in records:
+              rel=row['path']
+              path=Path(rel)
+              assert isinstance(rel,str) and rel==path.as_posix()
+              assert not path.is_absolute() and '..' not in path.parts
+              assert path.parts[0] in ('app','tests','tools')
+              assert rel not in names and '\\' not in rel and not any(ord(c)<32 for c in rel)
+              names.add(rel)
+              full=root/path
+              assert full.is_file() and not full.is_symlink(),rel
+              data=full.read_bytes()
+              assert len(data)==row['bytes'] and len(data)<=8_000_000,rel
+              assert hashlib.sha256(data).hexdigest()==row['sha256'],rel
+              total+=len(data)
+          assert total<=150_000_000,'SOURCE_BYTES_TOO_LARGE'
+          actual={f.relative_to(root).as_posix() for d in ('app','tests','tools')
+                  for f in (root/d).rglob('*') if f.is_file()}
+          assert actual==names,('UNEXPECTED_ARCHIVE_MEMBER',len(actual^names))
+          swift=[n for n in names if n.startswith('app/') and n.endswith('.swift')]
+          assert len(swift)>=155,'SWIFT_SOURCE_COUNT_DRIFT'
+          print('R6332_ARTIFACT_SHA_349_OF_349_PASS',len(swift),'Swift files')
+          PYVERIFY
+      - name: Publish new root-only source branch - never checkout or modify main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REPOSITORY}" = 'zeek10191019-stack/true-plan-showdown-verification'
+          test "${RECOVERED_BRANCH}" = 'r633-recovered-source'
+          remote="https://github.com/${GITHUB_REPOSITORY}.git"
+          git ls-remote --exit-code --heads "$remote" "refs/heads/$RECOVERED_BRANCH" && {
+            echo 'ERROR: Recovery branch already exists; overwrite forbidden' >&2
+            exit 1
+          } || result=$?
+          test "${result:-2}" -eq 2
+          mkdir -p published/reports/r633
+          cp -a recovered/app recovered/tests recovered/tools published/
+          cp recovered/reports/r633/source_manifest.json published/reports/r633/source_manifest.json
+          cd published
+          git init -q -b "$RECOVERED_BRANCH"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          test "$(git ls-files | wc -l | tr -d ' ')" -eq 350
+          git commit -qm 'R633: verified full iOS source recovery (349 SHA-pinned files)'
+          git remote add origin "$remote"
+          header=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $header" \
+            push origin "HEAD:refs/heads/$RECOVERED_BRANCH"
+          echo 'Recovered source branch published without checking out invalid main file.'
+          echo "Branch: $RECOVERED_BRANCH" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Main branch was never checked out or modified.' >> "$GITHUB_STEP_SUMMARY"
