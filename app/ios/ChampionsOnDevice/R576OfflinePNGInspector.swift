@@ -107,6 +107,7 @@ final class R576OfflinePNGInspector: ObservableObject {
                     R643SplitPPProof.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
                     R644MoveSlotCoupler.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
                     R645DualHPEvidence.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
+                    R646FieldSignalReaders.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
                     guard let data=try? JSONSerialization.data(withJSONObject:document,
                         options:[.sortedKeys,.withoutEscapingSlashes]),
                         data.count <= R577OfflineEvidenceReport.maximumReportBytes else {return nil}
