@@ -74,6 +74,9 @@ struct ChampionsOnDeviceApp: App {
                     Section("R656｜メガ前後Vision研究（手動・未認証）") {
                         R656MegaVisionPanel()
                     }
+                    Section("R658｜メガ前後4画像の変化（未認証）") {
+                        R658MegaTemporalPanel()
+                    }
                     Section("画面の確認（過去フレーム・未認証）") {
                         Text(capture.rawTimelineStatus).font(.caption)
                         if let preview = capture.diagnosticPreview {
