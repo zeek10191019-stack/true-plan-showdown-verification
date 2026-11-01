@@ -1734,6 +1734,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                     R645DualHPEvidence.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R646FieldSignalReaders.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R647MegaSignalBoundary.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
+                    R649MegaRegistryAudit.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
                     let data = try JSONSerialization.data(withJSONObject:bundle,
                         options:[.sortedKeys,.withoutEscapingSlashes])
@@ -1989,9 +1990,13 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         let localRefURL=FileManager.default.urls(
                             for:.applicationSupportDirectory,in:.userDomainMask
                         ).first?.appendingPathComponent("R595FormReferenceCatalog.json")
+                        let r650LocalReferences=R595FormReferenceMatcher.loadLocalCatalog(at:localRefURL)
                         visualChanges["r595_form_reference_candidates"] =
                             R595FormReferenceMatcher.audit(actorAppearanceSamples,
-                                references:R595FormReferenceMatcher.loadLocalCatalog(at:localRefURL))
+                                references:r650LocalReferences)
+                        visualChanges["r650_megareference_registry_audit"] =
+                            R650MegaReferenceBridge.audit(frames:actorAppearanceSamples,
+                                references:r650LocalReferences)
                         let visualChangesData=try JSONSerialization.data(
                             withJSONObject:visualChanges,options:[.sortedKeys,.withoutEscapingSlashes])
                         entries.append(.init(name:"historical_visual_region_changes.json",

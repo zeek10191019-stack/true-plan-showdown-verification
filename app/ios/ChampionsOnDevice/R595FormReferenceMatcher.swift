@@ -31,14 +31,14 @@ enum R595FormReferenceMatcher {
     /// The label is a supplied claim, not independent proof of a form or Pokémon.
     static func loadLocalCatalog(at url: URL?) -> [[String:Any]] {
         guard let url=url, url.isFileURL,
-              let data=try? Data(contentsOf:url,options:.mappedIfSafe),data.count<=262_144,
+              let data=try? Data(contentsOf:url,options:.mappedIfSafe),data.count<=2_097_152,
               let obj=try? JSONSerialization.jsonObject(with:data) as? [String:Any],
               obj["schema"] as? String == catalogSchema,
               let refs=obj["references"] as? [[String:Any]] else { return [] }
         return validate(refs) ? refs : []
     }
     private static func validate(_ refs:[[String:Any]]) -> Bool {
-        guard refs.count<=64 else { return false }
+        guard refs.count<=512 else { return false }
         var ids=Set<String>()
         for row in refs {
             guard let id=row["reference_id"] as? String,token(id),ids.insert(id).inserted,
