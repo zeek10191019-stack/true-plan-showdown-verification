@@ -23,6 +23,7 @@ final class R656MegaVisionModel: ObservableObject {
         epoch = UUID()
         removeReport()
         status = "参照変更。以前の比較結果は無効"
+        busy = false // Invalidate in-flight callback as well as spinner.
         if before { beforePNG = nil } else { afterPNG = nil }
         let label: String
         do {
@@ -49,8 +50,20 @@ final class R656MegaVisionModel: ObservableObject {
         }
         if before { beforeStatus = label } else { afterStatus = label }
     }
+    func invalidateControls() {
+        precondition(Thread.isMainThread)
+        epoch = UUID()
+        busy = false
+        removeReport()
+        status = "形態・目視ラベル変更：旧比較結果を失効"
+    }
     func run(formID: String, reviewed: Bool) {
         precondition(Thread.isMainThread)
+        guard reviewed else {
+            invalidateControls()
+            status = "HOLD：2画像のラベル目視確認が未完了"
+            return
+        }
         guard !busy, let first = beforePNG, let second = afterPNG,
               R649MegaRegistryAudit.entries.contains(where:{$0.id == formID})
         else {status = "画像2枚または81形態IDが不正";return}
@@ -90,6 +103,7 @@ final class R656MegaVisionModel: ObservableObject {
     func clear() {
         precondition(Thread.isMainThread)
         epoch = UUID()
+        busy = false // A cancelled worker cannot keep the UI locked.
         beforePNG = nil
         afterPNG = nil
         removeReport()
@@ -128,9 +142,15 @@ struct R656MegaVisionPanel: View {
                 }
             }
             Toggle("2画像の前後ラベルを自分で確認",isOn:$manualReview)
+            .onChange(of:manualReview) { _,_ in
+                model.invalidateControls()
+            }
+            .onChange(of:targetID) { _,_ in
+                model.invalidateControls()
+            }
             Button("③ Vision特徴量を比較してJSONを保存") {
                 model.run(formID:targetID,reviewed:manualReview)
-            }.disabled(model.busy)
+            }.disabled(model.busy || !manualReview)
             if let url = model.reportURL {
                 ShareLink(item:url) {Text("比較証拠JSONを共有（画像なし）")}
             }

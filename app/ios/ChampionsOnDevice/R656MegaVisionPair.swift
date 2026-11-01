@@ -28,6 +28,24 @@ enum R656MegaVisionPair {
               image.width <= 4096 && image.height <= 4096 else {
             throw Failure("HOLD_INVALID_PNG")
         }
+        let meta=CGImageSourceCopyPropertiesAtIndex(src,0,nil)
+            as? [String:Any]
+        let key=kCGImagePropertyOrientation as String
+        let orientation: Int?
+        if let field=meta?[key] {
+            guard let value=field as? NSNumber else {
+                throw Failure("HOLD_BAD_EXIF_ORIENTATION")
+            }
+            orientation=value.intValue
+        } else {
+            orientation=nil
+        }
+        guard R657MegaPairMetadataGate.audit(
+            orientation:orientation,width:image.width,
+            height:image.height,byteCount:data.count) ==
+            "PIXEL_GEOMETRY_ONLY_NOT_FORM_CERTIFICATION" else {
+            throw Failure("HOLD_UNSUPPORTED_PNG_ORIENTATION")
+        }
         return image
     }
     private static func printFor(_ image: CGImage) throws
@@ -110,6 +128,10 @@ enum R656MegaVisionPair {
             "after_sha256": digest(after),
             "width": beforeImage.width,
             "height": beforeImage.height,
+            "pixel_orientation": "UP_OR_METADATA_ABSENT",
+            "image_crop_scale": "SCALE_FILL_UNCALIBRATED",
+            "metadata_gate": R657MegaPairMetadataGate.schema,
+            "pair_provenance": "UNVERIFIED_TWO_MANUAL_PNGS",
             "proposed_mega_form_id": proposedMegaID,
             "human_pair_claim_reviewed": manuallyReviewed,
             "label_independently_verified": false,
