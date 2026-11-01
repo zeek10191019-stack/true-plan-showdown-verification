@@ -1,0 +1,54 @@
+name: R641.2 Safe Git Object Restore
+'on':
+  push:
+    branches: [main]
+    paths: [.github/workflows/cp.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: >-
+      github.repository ==
+      'zeek10191019-stack/true-plan-showdown-verification'
+      && github.ref == 'refs/heads/main'
+      && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: '0'
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: bc2c8fc80b524aef46b5f3a4586fa8b88359e86e
+        persist-credentials: true
+    - name: Fetch R641 workflow blob without unsafe checkout
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = \
+          bc2c8fc80b524aef46b5f3a4586fa8b88359e86e
+        git fetch --no-tags --depth=1 origin \
+          f9cb02e4d07f097dac7b2bf65f3dd56d1537080e
+        python3 - <<'PY'
+        import hashlib,subprocess,sys
+        ref=(
+          "f9cb02e4d07f097dac7b2bf65f3dd56d1537080e"
+          ":.github/workflows/cn.yml")
+        data=subprocess.check_output(['git','show',ref])
+        assert len(data)==9915
+        assert hashlib.sha256(data).hexdigest()==(
+          '5f6b141061a5e1b745658415f41db5'
+          'd67fb018d28f6a2a0dbf047a2c880ec2bc')
+        text=data.decode("utf-8")
+        a="        python3 - <<'PY'\n"
+        b="\n        PY\n"
+        assert text.count(a)==1 and text.count(b)==1
+        block=text.split(a,1)[1].split(b,1)[0]
+        seq=block.splitlines()
+        assert all(x.startswith('        ') for x in seq)
+        code="\n".join(x[8:] for x in seq)+"\n"
+        compile(code,'r641_original.py','exec')
+        subprocess.run([sys.executable,"-c",code],check=True)
+        PY
