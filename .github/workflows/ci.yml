@@ -1,0 +1,161 @@
+name: R638.1 Repair Source Index Native CI
+'on':
+  push:
+    branches: [main]
+    paths: [.github/workflows/ci.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: >-
+      github.repository ==
+      'zeek10191019-stack/true-plan-showdown-verification'
+      && github.ref == 'refs/heads/main'
+      && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: '0'
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: 2f57cdb38e8070c8f0b277c496289134357dc2f7
+        persist-credentials: true
+    - name: Strict base64 restore source SHA and Apple native tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import base64,zlib,hashlib,subprocess,os
+        from pathlib import Path
+        enc=''.join((
+          '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'
+          'OolN+z9bcoaa'
+        ))
+        assert len(enc)==6192,'PAYLOAD_LENGTH_CHANGED'
+        compressed=base64.b64decode(enc,validate=True)
+        assert base64.b64encode(compressed).decode()==enc
+        raw=zlib.decompress(compressed)
+        assert len(raw)==15039,'SOURCE_LENGTH_CHANGED'
+        assert hashlib.sha256(raw).hexdigest()==(
+          '7a3c5c1d5cbc0992192b74054092e39e' +
+          '7c53e5ced229ba51949817638f9ac958'), 'SOURCE_SHA_DRIFT'
+        paths=[
+          'app/ios/ChampionsOnDevice/R638SourceBindingAudit.swift',
+          'tests/R638BindingHarness.swift',
+          os.environ['RUNNER_TEMP']+'/r638-run.sh']
+        sizes=[6952, 5257, 2830]
+        offset=0
+        for path,size in zip(paths,sizes):
+          block=raw[offset:offset+size];offset+=size
+          assert len(block)==size
+          dest=Path(path)
+          assert not dest.exists(), ('EXISTING_TARGET',path)
+          dest.write_bytes(block)
+        assert offset==len(raw)
+        subprocess.run(['bash',paths[2]],check=True)
+        PY
