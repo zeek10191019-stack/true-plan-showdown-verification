@@ -1,0 +1,318 @@
+name: R633 Recover Source Tree - Verify First, Publish Only By Manual Opt-in
+'on':
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/bo.yml
+  workflow_dispatch:
+    inputs:
+      publish_sources:
+        description: Explicitly create recovered source branch after successful CI
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: trueplan-r633-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private
+      == false && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: '0'
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+    - name: Restore pinned R628 and repair R629 exact bundle manifest
+      shell: bash
+      run: |-
+        set -euo pipefail
+        python3 - <<'R629_REPLAY'
+        import base64,hashlib,lzma,re,textwrap,urllib.request
+        from pathlib import Path
+        url=('https://raw.githubusercontent.com/'
+             'zeek10191019-stack/true-plan-showdown-verification/'
+             '07493ea875cfa42fe481d89b4df91946397b4f33/'
+             '.github/workflows/bm.yml')
+        parent=urllib.request.urlopen(url,timeout=90).read()
+        assert len(parent)==20982, 'PARENT_BM_SIZE_DRIFT'
+        assert hashlib.sha256(parent).hexdigest() == (
+         '10fc9a8cf82fabb8ac777bb563e0393478e70b7f81a6b29af192f5a0f8bf3ea9'), 'PARENT_BM_HASH_DRIFT'
+        s=parent.decode('utf-8')
+        a=re.search(r"(?m)^( +)python3 - <<'R628_REPLAY'$",s)
+        assert a is not None and s.count('R628_REPLAY')==2,'PARENT_REPLAY_ANCHOR_DRIFT'
+        block=textwrap.dedent(s.split(a.group(0)+'\n',1)[1].split('\n'+a.group(1)+'R628_REPLAY',1)[0])
+        exec(compile(block,'R628_IMMUTABLE_PARENT','exec'),{'__name__':'__main__'})
+        files=[
+         ('app/ios/ChampionsOnDevice/R629R632SlotEvidence.swift',
+          7538,
+          'aca47c0f42f0c30a4270ca751043eee2fb5a59975fa7a364d349dd94fee212c3'),
+         ('tools/r629batch_patch.py',
+          1055,
+          '11a72e3ad77d93ce34c4795c455cccd627c79a0f4cc002382ee7342bb23046e8'),
+         ('tests/test_r629batch_patch.py',
+          1135,
+          '1444147fe9d2a518488782056c189718010db8bc3a517def296ca7ed043ad4d4'),
+         ('tests/test_r629batch_source.py',
+          1176,
+          '93ae8dd77bb4642a4a5a94ff716f7e35e4877247c749d07a638d8303ddbe1338'),
+         ('tests/R629Harness.swift',
+          4988,
+          '8d330963697745c42b0dce5b30a0657cfe11700e4da9819c6c0d5b9b62d58be1'),
+        ]
+        encoded=''.join([
+            '{Wp48S^xk9=GL@E0stWa8~^|S5YJf5;64)(R9yfxn@VT6Qap2kgL-R<OQUBu7VJ*#)Ru4j?r){p#r-%ab&x',
+            'CaHebbeT>NnhrPTV6Mr=PejL5JapStPUX0La)H6RP6L^osHZ~rQowmZ_neF+0;<N!SUhws4HjZ}N6Sh<rAs',
+            '~CnLnb6K<|Cp5MzUD=wYndN41bAJvX18neXR_~DCJ@oNkITd6^y(xW1yR!%Ih9IIqy4~j7$c?y*#oxQT?0q',
+            'cG_!k@8e|h%5&aMOI$~n?Vau*)w=Dl|FG7g8lX^OU6(6L$Ah}xwmn|U1%y;5xY2;8|et$g`$RXyH^wBB3z|',
+            'YSKa@mVgvuTjGqr7%ju&?~>6vD!;J~Tjoq(cF3b6;E@>bbh^!SRNw4XZzyk($4#2`_+aTweYnmpZj~kBGq#',
+            'Toe$~{=1KkmSK`5u<H}fHI56d-9s+^>}u=n(%)d4Z~|H)8pKcREnkPv_I=aY&`Wf38KSRzsSvlhgQ!ayMNG',
+            'D<Y<Zi!ZOQ(kxU%rNw+iK)-zg0kve0A^j>XnTgSzDPK<XBlw)S}We0WRMEULZ6-}#Bq?BYi|6?*i+gxda~A',
+            'pk+6iZ_bHJ~OKT3Mhxo380ZcMrq_oY8|TWGIm>8xt@-~Y4((@guZ+BYeD@G33Jt*1waBn7J2|iM;_s&P-_@',
+            'WK>SeyvdQnDfExk;WcKFT^Wz922s-vGQIcdWL!VQXg9|%$Wi_K&)k$?a)(l8AgGF$OL);isTUUE3K>REbwl',
+            'kt|>4as@HL-?1qKZ$TRGT}EUnr(f)A>GIhBS-$D!9!f$&POy_P1{YUAo!~icgu>)+yZdz|y<CjpRMWCs-%a',
+            'YCamirE1dLZr`JlFI${#Wq$NUIU70>py>XI!=5lGQ}V{+MzgO2EAu&Bqw@z#!zt=oZ&M14(YP~(t4B}O5yh',
+            'FnV9tIwLF2L{ttUads0)53e`uIe94DLspV2o3bl`~qEq;V9+7&{JClLmc8ydc)&3N+9Crp5Uh}l_J{S4P^-',
+            'O@DLO#=H(2`r2s_v7WU3#N+?(&{Y!#V?vQPNqXR&ez9{iID{=JLVmU5;3t@i@#mOM>&G4ME4#8NLt$4CF=o',
+            '-Ikmn~n><RQk>iukWxEk#%OuWprgb%OL1?S|H9|KK-Kd3D6kod<p`ODs6`q(r(U=5mg*fcFT7I2$$=ZJY9f',
+            'R?YYm$6K7bVUFG4q2$Q6ZcOpv^+t;f95PPhc7RDg6Z9=RSjpKOufp=`wCGsaRtK>hJdKjx+ra=1-v5oM5Ww',
+            '&5tmYoz{!Wk}%*rbw5K_I=4NXvSGd;Ct!}_hc+a`H-HEM<4-a{ErtUGe`5D+{bLDX2<=$^W_&*uX*G$22Qy',
+            'igUBOO<lr7(=zUBLu(^!wk&RZDk{LMa;LiZcex<5seuL>*`<5c^eS(nkG&A%s4qGs|TMAC|EE9q2u)Z+@9^',
+            'snqFHNH}u!+oC=JLwWtL%cF)>%kV_iyK6_;Gxh%$zZ`sckVE}dmsmoRJu=SA+z;^jTOJ~aG*VZ$}7GHrACG',
+            '#rBz*^0W_08=pL<?msONWE)-7XzlUMM5LuLdCQRm(<8cSX`Kt6qSIVFtzfp7CaL8yDL5f(8{l0aKbv?D4<!',
+            'TGeE}~&j&;f^ZNA6oaXa3s?d<iw76;+YO^7N*yR%YGJ<U|Lm;^0pA*W(|_+92tVwI(+vfE?^TsG$4;9qt+*',
+            '$A35_y%tcfqhHb}id2AqVHYS0g&O|CCZy~Uvp3Wcb??*p_RQ(RmuYv$ym)?bs-PuXT?|wt>$ep~YYVN0{7&',
+            '{8%*i=}?5TD}cZ`xxoc&Em#!X>aa0>kai!r@_^1kl9g;f6)A`afQmfEO8fy+?Gf~C|6!p7o<@+6$<nB~=Dy',
+            '5=7h&`!v&g3P_o5Jlz@NDJceUUt5hFdOc3!*uNM9YHo?YR$>MobX}VaS)J1#5zO>sF@pb?TYK59MjqFvrL;',
+            '>(E{THkF)H)tS7lrPs0cJoxF@ANul@!Nv3UN$*Qb=wJFrS|AlC!zae7R47>fJ=4e*HfbGuoCHjQN{;>;-%p',
+            '{*RXfg(QV>p_!5`^_YZ8w8{3|FPXGUdOBiVUkGV@Gk;Lnz4P>=u-8qX$0VSe`)eD<Op^fxTt+|JR3wX1>OG',
+            '2QO?+9dNZ(VO+HaPUxsS>Nw(|@+YE-gP?gmuJ-LM8ayjWitXI$`*rdXUURLu{<$jUE7pf`8}y~1GX^h;^$m',
+            's?qI4qCVc_|~6cTs{CAo%ue(!N9U=qo3o|m#(84MPLzr|C%q0=ZFeAtO?wStpn)0pgp9U=27v7B@U=*bRbW',
+            '1}-DG=^@9>-Q>saxyf-n|44eY4ZkzTRh2F^Ba|g2z&rfby!)(2eE2!nBhijM;!0?9My#l{+40{0uu_zVF)4',
+            'D!cbiWT*hF&nn^}2SQz}xAsbUmi$H)kpU%Zyc6STjs5AblyL4IQ^&*9P?3)!^llt32uM}36riYnJ{8Q)sm7',
+            'FnPzYRP&n=uKGwV+h$=)D9p6m|WO&a<>8&3blhTy7539=J5DV4X5JsJBJIc1WLms9n=A2t`&uq1Z`5j+WM3',
+            '0PTz4!H`775%StKU`_&5PPw7Eio->ZM6R19e_w_~!3xEcu$;9tGiQAm>cATCJhB{e2xrUa6}=HbeAN%tcYB',
+            'G_o1VkrX7{Y@29Kqxxqn|x4lfv=dkE>o^cKzWW!)^5m)trNTEN6elWfQw@sqiBMPYF@o{a392Q4}MW{`t%#',
+            'Bs<yBQed$$GK2tm$d6?#EVwZgKEM3R9n2<)MMcO&5gvDsT&{Pzum!A7H~)t$&fsQorbO{<xxVE)md^y(*E9',
+            'U(g^-?srS4OXqTmT*4@UA>RG>S*6L7*z{7F^jPLr9bv>qk%6T>VMIN{fDH{Vr6h{RVz)s6BbYX{7(2c!P;(',
+            'TcdbrZHd-|NWg<y~5o3m{IuyPy00JR%*Mm}YjiO}+aXHE+Rspp|4qm{#~mHFp~YO6w}mV3dg%v;|o(9BXSc',
+            'a+GSoyyRHL#ASlMYX^sIW`jsgD`R~{&Kak*2}`dak^7fd$SRZJi*{=;L(XE8D+no6fHJ`S+OY^)P2A*MKwl',
+            '~75N2JnEDB68bwi_e6{FIIirbgvY6O@cON(Iem~hG>BDtdU7Y~ia*ILGEK~&PJATb(pOD>IO5b+2#=Ubue)',
+            '1i_ifuh#Yd#iFL$o7Db!TlzxLJY%}t9T&!Pt^^+GNtta(lv|uYa6#q0W32}w~#unStQ(p{-*BLq`NzxC1Dn',
+            'WP+#-2_eSGGK$A|v+Afs%gGPIH7yA=2aiS~}e-N=JOh0hELm#_O9t!AaEb?DONe98jZs$G)3p8`(D*1s%=a',
+            's{(u$HP9Dm~og3}&K^I>jSjd|<|WyRf}5>HDTp=X79ji@BL<a`K5XHCXO+a7eYSIJW;~{KG+$gRaAH4n|!W',
+            '6O8!?p#PTAEs{B>f-q#8+_ul*272c-y6C@}R>^~jZbg;ldov|OuGp1%8vNlV$g2fgAVD&SQ(b!k)^n%>1l`',
+            '&uB3NX~f@lL6+6XAVfvI<qbl>=j!K^kS_3w#R^vl?-5&!K(O5O(!N`li9-V6$5L61GR1D7!1&8N(tK%zEvN',
+            'mfx+fJ=h^g5m$Uem{)Y&bO95;*vX}>GO~^fVuZrluJzWmuw4Nl9UYtSP@NIUoyPFyOn1Nl-DbHP{ClJ7bGO',
+            'FIj=VaO=J;>^=%M9zqkZQVY&nHmyjoS02jUy(xIO8cB3H;a1G!3hkHe<igg+_L2sCzY?vW+BtsSXvz(v7y9',
+            'D(eK^}Js8_5F0KgExicp;t1@%y3dOrwd9&mpd=rN;>ssFZzvFw+^98+KOQ-EGLSE57TAE;dDG^@FfNkJW3K',
+            '9I5W7`Z1W^f&UaUW&!4cmI^=oo%A79BUcvRf<b~@58Qwk9qMcyzG&Sb`|)G0JRsk27A21OcdPV(oce6||B2',
+            '+C1StZYrfhsV3+W3?YN0lr77EL4Fu{;Omp}AV$hIDcrM*u7HHl`XXnup>-|fwsS&4NL2M*!Pwsxav$r*3<y',
+            '_#7p3V*YLjD`?GAV~smVbh0636<bkEO`gudCAVyXQ8^L3Z3vDm$K3E^j&u}R4Anmy6P^XAh>(YVjv_TV-4T',
+            'MDRE4IF~KwNztX?7YCTUrGm{L`WW@7!DWI6=EyM0vHlkwPqPE(j$IP_a`jZtl2vMNGm=z#<yrB>Gnc3WU%p',
+            '@Okch<4N%@Qv_aF4}_x+8j+zm@i08WJFF<O4>>n3Uq6GgA!mTO8+3N_TdJpI+gpI|G3}bU*6}O(4SuoCZ9%',
+            'MR_~DXFvvM8wZu}Wtt%q<BPhAsW-pQ*Shl}J(EU_B|Eh1(M4hZB^8vL{b_-5{r|g7!i8O(bzQF?f7xPzA8g',
+            'JKnfAw*QN?-8$0p<r&WbH9IekI0Q+Jjly(j_?5%QS)avKPya+`tJ`zK}E#lu*kyI&^z<HXyEaNZwa&Gam%Z',
+            '9z6fg04)rQ>l76&|d86Fk08qykq&{6bE=}PU*WBK30TCfaoJ@w)v~PkN*n*6|;IJ74CEeMiEWJ?X9=j(Uoz',
+            '~e(ZRzht(IA?%$&Egb(^-qpR0i?(G6Z!1W`yW*82k4${_w`X7gw_KX0wE6duVGYZWwP0999?K3E^kJPSh#Y',
+            ')NSM|qsX$w<?Q2J-`PIJ8KbA?+94_^VYjQvy}K0~jZ|-gW)3ON;?h;Eo={jA})Fd9ggnnZHx%kHZBJwOWDx',
+            '=<{C4ST#Vu7^J&9Wk0EN<xN}t($S=PY_HNU-)~)}Cdym!o8>h=(w&FHrO<d#(q#;a0y1kbZ!-*(jtX@KL!i',
+            'aMBO&^oBJTS9?UF&!9I%rh`EpXw4*M-PiqTvm(gubO&^HEkIke3F0fV3uRok`A&QvZuRF12lvCbhnW_^xho',
+            '&=<>bYW`aVeIO{>9cs`<t|j}Z8X4Wzby(hRJBe7P1<Pj_`zqVidLM~$(94c&)9+ROQd4QF}pL9Ez_q=<-A8',
+            'AMfV?Bo(Mce{DxKhY>X%4XK=dsxoanc$5-=UTkrhAqB}yeeGr=sPFQn!`ow%8P9+Q-#~0!O0|KN3`r<_2UL',
+            'M0j^MVMfdRD&FVwak;Ip1W!2w*zN#`e>QDowcl$3h*ri#LAdW^YZ`l24>{Pl}Fc9|T4%YvQOQA$*+lr`tc5',
+            'Sr$}bR?jxaH-)JW^UdW82=7tQ)-pnEeLi50Ztx#;RUQr=0-JP=0Kf{$om}CWM(APn>0lT+0Kg7Lh8?jJ_S!',
+            'O3RHn$~UafC$gnfS-M{)Tt6`->4%W+Ug7|T-?hJ#_nmJ}E860S8~VD)#E$I<b13c8bO1(`iy^)O48sAGmz{',
+            'pWQ8Wa@Xx&Xhr7jg>PzvbOr(Z;M2HCzhfW-=xJJJ#H#n^V!XWU}oc$B{w`Y=#1}W34=6fHkRkkFq?dsRVn1',
+            'KDPg$*RcQqSvjAy6uS`)j7<a*IhD8inZclD4E(bGn%vXfAiQ_`_*olw6$b(YLfxKnsCG=;34J9<r__U@QIq',
+            'o+DH<|@4g*LL0d$0NEwAw`ntMCk*#U~=SdHnBRz!;7$2d`;Rxv(;LnoC`IxN5|k`+i8))WVb2jnQ}V>B6V-',
+            's&0L8cWS<wkvy(a^PQon*%fX#@})y$I=xOjH=UR`H@6xoMs*~d$Hm`8p3>`ES1cWH2MlzQdy_H|`3d3+|Jk',
+            'bg^7O5k!V5`%&uHD3WlF^R2)Zysn$0N6b$ma+*u3MB8F=&%)Ld7!{Hp8%Bbp*H>3GhU%sI^!T1|m2x_`CFu',
+            '6A)g)^vq{V9wc6>n*rAm=E*-P~ZN7T(7Aq00HnKlzadHXI2javBYQl0ssI200dcD',
+        ])
+        data=lzma.decompress(base64.b85decode(encoded))
+        pos=0
+        for name,size,digest in files:
+         portion=data[pos:pos+size];pos+=size
+         assert len(portion)==size and hashlib.sha256(portion).hexdigest()==digest,name
+         p=Path(name)
+         assert not p.exists() and not p.is_symlink(),name
+         p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(portion)
+        assert pos==len(data),'BUNDLE_TRAILING_BYTES'
+        original=Path('app/ios/ChampionsOnDevice/R625R628PixelHUDAndSprite.swift')
+        original_bytes=original.read_bytes()
+        assert hashlib.sha256(original_bytes).hexdigest()==(
+         '83f6cc37815ede7066ced44b3db326f7c572ba22557c4516882d1969142e1370')
+        fixture=Path('fixtures/R625R628PixelHUDAndSprite.swift');fixture.parent.mkdir(parents=True,exist_ok=True)
+        fixture.write_bytes(original_bytes)
+        from tools.r629batch_patch import patch
+        patch('.')
+        assert Path('app/ios/ChampionsOnDevice/R629R632SlotEvidence.swift').is_file()
+        assert original.read_text().count('R629R632SlotEvidence.enrich(&prior)')==1
+        print('R629_R632_ALL_NEW_FILE_SHA_AND_ONE_PRODUCTION_ANNOTATION_PASS')
+        R629_REPLAY
+    - name: Run all inherited and R629 Python/Swift tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        export PYTHONPATH=.
+        for v in r605 r607 r608 r609 r610 r611batch r613batch r617batch r621batch r625batch r629batch; do
+          python3 -m unittest discover -s tests -p "test_${v}_*.py" -v
+        done
+        swiftc -parse-as-library \
+          app/ios/ChampionsOnDevice/R610CrossEvidenceCandidate.swift \
+          app/ios/ChampionsOnDevice/R611TemporalHUDReview.swift \
+          app/ios/ChampionsOnDevice/R612ArchiveEvidenceClosure.swift \
+          app/ios/ChampionsOnDevice/R613R616IntegratedReadiness.swift \
+          tests/R613BatchHarness.swift -o "$RUNNER_TEMP/r616"
+        "$RUNNER_TEMP/r616"
+        swiftc -parse-as-library \
+          app/ios/ChampionsOnDevice/R617R620RotationReadout.swift \
+          tests/R617Harness.swift -o "$RUNNER_TEMP/r620"
+        "$RUNNER_TEMP/r620"
+        swiftc -parse-as-library \
+          app/ios/ChampionsOnDevice/R617R620RotationReadout.swift \
+          app/ios/ChampionsOnDevice/R621R624VisualCandidates.swift \
+          tests/R621Harness.swift -o "$RUNNER_TEMP/r624"
+        "$RUNNER_TEMP/r624"
+        swiftc -parse-as-library \
+          app/ios/ChampionsOnDevice/R617R620RotationReadout.swift \
+          app/ios/ChampionsOnDevice/R621R624VisualCandidates.swift \
+          app/ios/ChampionsOnDevice/R625R628PixelHUDAndSprite.swift \
+          app/ios/ChampionsOnDevice/R629R632SlotEvidence.swift \
+          tests/R625Harness.swift -o "$RUNNER_TEMP/r628"
+        "$RUNNER_TEMP/r628"
+        swiftc -parse-as-library \
+          app/ios/ChampionsOnDevice/R629R632SlotEvidence.swift \
+          tests/R629Harness.swift -o "$RUNNER_TEMP/r632"
+        "$RUNNER_TEMP/r632"
+        echo 'R629_R632_REGRESSION_PASS_NOT_OWNER_OR_GAME_CERTIFIED'
+    - name: Parse all Swift and build iPhoneOS native target
+      shell: bash
+      run: |
+        set -euo pipefail
+        swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+        python3 tools/run_r571_native.py || {
+          for f in reports/xcode_iphoneos_build.log reports/r574_png_replay_compile.log; do
+            test ! -f "$f" || grep -nE 'error:|BUILD FAILED' "$f" | tail -n 65 || true
+          done
+          exit 1
+        }
+        echo 'R629_R632_APPLE_NATIVE_PASS_NOT_79_FIELDS_OR_MEGA_CERTIFIED'
+    - name: Manifest restored source tree (no certification claims)
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PYMANIFEST'
+        import hashlib,json
+        from pathlib import Path
+        base=Path('.')
+        folders=['app/ios/ChampionsOnDevice','tests','tools']
+        files=[]
+        for folder in folders:
+            for p in sorted(Path(folder).rglob('*')):
+                if (p.is_file() and not p.is_symlink() and '__pycache__' not in p.parts
+                        and p.suffix not in ('.pyc','.pyo')):
+                    b=p.read_bytes()
+                    files.append({'path':p.as_posix(),'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+        assert len([x for x in files if x['path'].endswith('.swift') and x['path'].startswith('app/')])>=155
+        assert len(files)>=185
+        assert len({x['path'] for x in files})==len(files)
+        record={'schema':'trueplan.r633.recovered-source-manifest.v1',
+                'source':'R629 source replay from SHA pinned R628 / bm.yml and bn bundle',
+                'status':'source_build_verified_not_game_hud_certified',
+                'r633_regression_gate':'PASS_before_manifest',
+                'verified_79_fields':0,
+                'owner_hp_mega_certified':False,'files':files}
+        out=Path('reports/r633/source_manifest.json')
+        out.parent.mkdir(parents=True,exist_ok=True)
+        out.write_text(json.dumps(record,ensure_ascii=False,sort_keys=True,indent=2)+'\n')
+        print('R633_SOURCE_MANIFEST_CREATED',len(files),'records',out.stat().st_size,'bytes')
+        with open('/dev/null','w') as _:
+            pass
+        PYMANIFEST
+    - name: Prepare recovered source tree only on explicit publish request
+      if: github.event_name == 'workflow_dispatch' && inputs.publish_sources == true
+      uses: actions/upload-artifact@v4
+      with:
+        name: r633-recovered-source-tree
+        path: 'app/ios/ChampionsOnDevice/
+
+          tests/
+
+          tools/
+
+          reports/r633/source_manifest.json'
+        if-no-files-found: error
+        retention-days: 1
+        include-hidden-files: false
+    permissions:
+      contents: read
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_sources == true
+    needs:
+    - verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout repository only for isolated recovery branch
+      uses: actions/checkout@v4
+      with:
+        path: published
+        persist-credentials: true
+        fetch-depth: 1
+    - name: Read CI-verified recovered sources
+      uses: actions/download-artifact@v4
+      with:
+        name: r633-recovered-source-tree
+        path: recovered
+    - name: Create new recovery branch without touching main
+      shell: bash
+      run: |
+        set -euo pipefail
+        branch='r633-recovered-source'
+        cd published
+        if git ls-remote --heads origin "refs/heads/$branch" | grep -q .; then
+          echo 'FAIL: recovery branch exists; overwrite forbidden' >&2
+          exit 1
+        fi
+        cd ..
+        test -f recovered/reports/r633/source_manifest.json
+        python3 - <<'PYVERIFY'
+        import hashlib,json
+        from pathlib import Path
+        p=Path('recovered/reports/r633/source_manifest.json')
+        manifest=json.loads(p.read_text())
+        assert manifest['status']=='source_build_verified_not_game_hud_certified'
+        for record in manifest['files']:
+            rel=record['path']; file=Path('recovered')/rel
+            assert not file.is_symlink() and file.is_file(),rel
+            b=file.read_bytes()
+            assert len(b)==record['bytes'] and hashlib.sha256(b).hexdigest()==record['sha256'],rel
+        assert len([x for x in manifest['files']
+                    if x['path'].startswith('app/') and x['path'].endswith('.swift')])>=155
+        print('RECOVERED_SOURCE_SHA_VERIFIED',len(manifest['files']))
+        PYVERIFY
+        for folder in app tests tools; do
+          test -d "recovered/$folder"
+          mkdir -p "published/$folder"
+          rsync -a --exclude='__pycache__/' --exclude='*.pyc' "recovered/$folder/" "published/$folder/"
+        done
+        mkdir -p published/reports/r633
+        cp recovered/reports/r633/source_manifest.json published/reports/r633/source_manifest.json
+        cd published
+        git checkout -b "$branch"
+        git add -- app tests tools reports/r633/source_manifest.json
+        test "$(git diff --cached --name-only | wc -l | tr -d ' ')" -ge 185
+        git config user.name 'github-actions[bot]'
+        git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+        git commit -m 'R633: recover verified iOS sources for normal source control'
+        git push --set-upstream origin "$branch"
+        echo "Recovered branch: $branch" >> "$GITHUB_STEP_SUMMARY"
+        echo 'Main branch was not modified.' >> "$GITHUB_STEP_SUMMARY"
