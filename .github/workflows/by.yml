@@ -1,0 +1,117 @@
+name: R635.2 Pinned Native Restore and Field Reader Tests
+'on':
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: >-
+      github.repository ==
+      'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+      && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: '0'
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+    - name: Checkout frozen R633 source (349 files)
+      uses: actions/checkout@v4
+      with:
+        ref: e780d9184614bb9fcb3be5d11aa8b94617e75696
+        fetch-depth: 1
+        persist-credentials: true
+    - name: Restore R633 and verify pinned source and support files
+      shell: bash
+      run: |
+        set -euo pipefail
+        cat > "$RUNNER_TEMP/r6352.py" <<'PY'
+        import re
+        import subprocess
+        import sys
+        import urllib.request
+        from pathlib import Path
+
+        repo = ('zeek10191019-stack/'
+                'true-plan-showdown-verification')
+        rev = '5183ca25da6267603bc6073cc421e831935325b8'
+        blob = 'cc8391a980538a122721928d78c8283ae6da06b3'
+        url = ('https://raw.githubusercontent.com/' + repo + '/'
+               + rev + '/.github/workflows/bw.yml')
+        tasks = (
+            'Restore complete R633 Apple-PASS native environment',
+            'Apply pinned R634 sources without new tar bundle',
+            'Apply exact SHA-pinned R635 layout reader',
+            'Run R635 R634 R581 and native Apple contract tests',
+            'Publish only fully checked isolated R635 source branch',
+        )
+        cache = Path(__import__('os').environ['RUNNER_TEMP']) / 'r6351.yml'
+
+        def pinned_text(download):
+            if download:
+                with urllib.request.urlopen(url, timeout=90) as response:
+                    cache.write_bytes(response.read())
+            raw = cache.read_bytes()
+            got = subprocess.check_output(
+                ['git', 'hash-object', '--stdin'], input=raw,
+            ).decode().strip()
+            assert got == blob, ('PINNED_PARENT_CHANGED', got)
+            return raw.decode('utf-8')
+
+        def script_for(index, text):
+            heads = list(re.finditer(r'^    - name: (.*)$', text, re.M))
+            names = [m.group(1) for m in heads]
+            assert len(names) == 6, ('STEP_COUNT_CHANGED', names)
+            match = [i for i, name in enumerate(names)
+                     if name.startswith(tasks[index])]
+            assert len(match) == 1, ('STEP_NOT_UNIQUE', tasks[index])
+            i = match[0]
+            end = heads[i+1].start() if i+1 < len(heads) else len(text)
+            section = text[heads[i].start():end]
+            marker = re.search(r'^      run: \|[-]?\n', section, re.M)
+            assert marker is not None, ('NO_RUN_SCRIPT', tasks[index])
+            lines = section[marker.end():].splitlines(keepends=True)
+            assert lines and all(x.startswith('        ') or not x.strip()
+                                 for x in lines), 'BAD_SCRIPT_INDENT'
+            result = ''.join(x[8:] if x.strip() else '\n' for x in lines)
+            assert 'set -euo pipefail' in result
+            if index == 0:
+                absent = "'schema/screen-read.png-replay.v1.schema.json',"
+                assert result.count(absent) == 1
+                assert 'R633_REPLAY_MISMATCH' in result
+                assert 'R633_SOURCE_MANIFEST_COUNT' in result
+                result = result.replace(absent, '')
+            return result
+
+        idx = int(sys.argv[1])
+        assert 0 <= idx < len(tasks)
+        text = pinned_text(download=(idx == 0))
+        print('R6352_PINNED_SOURCE_PASS', idx, tasks[idx], flush=True)
+        subprocess.run(['bash', '-e', '-o', 'pipefail'],
+                       input=script_for(idx, text), text=True, check=True)
+        print('R6352_STEP_PASS', idx, flush=True)
+        PY
+        python3 "$RUNNER_TEMP/r6352.py" 0
+        test -f schema/screen-read.snapshot.v1.schema.json
+        test -f fixtures/r571_source_value_baseline.zip
+    - name: Apply exact frozen R634 changes
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 "$RUNNER_TEMP/r6352.py" 1
+    - name: Apply exact frozen R635 layout and capture changes
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 "$RUNNER_TEMP/r6352.py" 2
+    - name: Run Swift integration and real iPhoneOS native build
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 "$RUNNER_TEMP/r6352.py" 3
+    - name: Publish isolated branch only when native tests pass
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 "$RUNNER_TEMP/r6352.py" 4
