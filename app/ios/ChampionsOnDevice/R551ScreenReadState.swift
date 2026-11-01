@@ -148,6 +148,15 @@ enum R551ScreenReadState {
                 }
             }
         }
+        // Complete OCR token index, including arbitrary move-name strings.
+        // Not owned and never authoritative for the live battle.
+        state["ocr_source_inventory"] = Array(sites.prefix(288)).map { item in
+            ["evidence_ref":item.reference,"raw_text":item.text,
+             "roi":item.roi,"image_sha256":imageSHA,
+             "capture_session_id":captureSessionID,
+             "frame_id":frame,"epoch":epoch,
+             "owner_verified":false] as [String:Any]
+        }
         state["source_validation"] = "PASS_FRAME_BINDING_ONLY"
         state["reason"] = "OCR_MEANING_OWNER_AND_GAME_STATE_UNVERIFIED"
         state["candidates"] = candidates
