@@ -7,6 +7,8 @@ struct ChampionsOnDeviceApp: App {
     @StateObject private var capture = CaptureCoordinator()
     @StateObject private var offlinePNG = R576OfflinePNGInspector()
     @State private var showOfflinePNGPicker = false
+    @State private var showMegaCatalogPicker = false
+    @State private var megaCatalogStatus = "メガ参照JSON未取込"
     @State private var unifiedShareItem: R535EvidenceShareItem?
     @State private var megaManualSide = "OWN"
     @State private var megaManualSpecies = ""
@@ -59,6 +61,14 @@ struct ChampionsOnDeviceApp: App {
                         Button("取り込み画像と候補を消去",role:.destructive) {offlinePNG.clear()}
                             .disabled(offlinePNG.image == nil && offlinePNG.lines.isEmpty)
                         Text("ローカルで読取。画面共有履歴とは隔離。現在状態・自他・個体・メガ姿は未認証。自動送信・技推薦なし")
+                            .font(.caption).foregroundColor(.secondary)
+                    }
+                    Section("R652｜メガ姿の参照画像を端末に登録") {
+                        Button("自分の参照JSONを選択（手動）") {
+                            showMegaCatalogPicker = true
+                        }
+                        Text(megaCatalogStatus).font(.caption)
+                        Text("本人が検証したChampions画像から作成したR595 JSONのみ。画像自体の自動取得や外部送信なし。姿・自他・メガ使用は未認証。最大512件／1ファイル。")
                             .font(.caption).foregroundColor(.secondary)
                     }
                     Section("画面の確認（過去フレーム・未認証）") {
@@ -445,6 +455,24 @@ struct ChampionsOnDeviceApp: App {
                     guard let url=urls.first else {offlinePNG.clear();return}
                     offlinePNG.importFile(.success(url))
                 case .failure(let error):offlinePNG.importFile(.failure(error))
+                }
+            }
+            .fileImporter(isPresented:$showMegaCatalogPicker,
+                allowedContentTypes:[.json], allowsMultipleSelection:false) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else {
+                        megaCatalogStatus = "ファイル未選択"
+                        return
+                    }
+                    do {
+                        let count = try R652MegaCatalogInstaller.importLocalFile(url)
+                        megaCatalogStatus = "参照候補\(count)件取込済み。実機認識は未認証"
+                    } catch {
+                        megaCatalogStatus = "取込拒否。以前の台帳を保持"
+                    }
+                case .failure:
+                    megaCatalogStatus = "選択取消。以前の台帳を保持"
                 }
             }
             .onChange(of: capture.unifiedEvidenceURL) { _, next in
