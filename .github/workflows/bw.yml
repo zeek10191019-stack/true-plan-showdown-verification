@@ -1,0 +1,206 @@
+name: R635.1 79-Field Source and Full Native Proven-Replay Repair
+'on':
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/bw.yml
+  workflow_dispatch: null
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+
+      && github.event.repository.private == false
+
+      && github.ref == 'refs/heads/main'
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: '0'
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+    - name: Checkout immutable R633 restored source
+      uses: actions/checkout@v4
+      with:
+        ref: e780d9184614bb9fcb3be5d11aa8b94617e75696
+        fetch-depth: 1
+        persist-credentials: true
+    - name: Restore complete R633 Apple-PASS native environment (349 SHA guards)
+      shell: bash
+      run: |-
+        set -euo pipefail
+        python3 - <<'PYBASE'
+        """Use the exact R633 native-PASS restore for missing support assets.
+        Replay executes ONLY SHA-pinned historic code in an isolated worktree.
+        Every one of the 349 versioned code files must match the restored branch.
+        """
+        import hashlib, json, os, re, shutil, subprocess, sys, tempfile
+        import textwrap, urllib.request
+        from pathlib import Path
+        url=('https://raw.githubusercontent.com/'
+             'zeek10191019-stack/true-plan-showdown-verification/'
+             '34eed79c0cfdb6d4c062bfd38a503fed74e3c2a5/'
+             '.github/workflows/bo.yml')
+        raw=urllib.request.urlopen(url, timeout=120).read()
+        assert len(raw)==17927,'R633_PARENT_SIZE_DRIFT'
+        assert hashlib.sha256(raw).hexdigest()==(
+         'c2a37e21f19bfb8ff5b86e0b9be9962b3b33651b45d6388a4898af5eb89d212d'
+        ),'R633_PARENT_SHA_DRIFT'
+        s=raw.decode()
+        a=re.search(r"(?m)^( +)python3 - <<'R629_REPLAY'$",s)
+        assert a is not None and s.count('R629_REPLAY')==2
+        code=textwrap.dedent(s.split(a.group(0)+'\n',1)[1].split(
+         '\n'+a.group(1)+'R629_REPLAY',1)[0])
+        compile(code,'R633_IMMUTABLE_REPLAY','exec')
+        base=Path.cwd()
+        manifest=json.loads((base/'reports/r633/source_manifest.json')
+            .read_text())
+        rows=manifest['files']
+        assert len(rows)==349,'R633_SOURCE_MANIFEST_COUNT'
+        with tempfile.TemporaryDirectory(
+            prefix='r633_replay_') as scratch:
+            env=dict(os.environ)
+            env['PYTHONPATH']=scratch
+            run=subprocess.run([sys.executable,'-'],cwd=scratch,
+                input=code,env=env,capture_output=True,text=True,timeout=720)
+            if run.returncode:
+                print(run.stdout[-4000:]+run.stderr[-4000:],flush=True)
+                raise RuntimeError('R633_VERIFIED_REPLAY_FAILED')
+            donor=Path(scratch)
+            for row in rows:
+                rel=row['path']; dst=base/rel; src=donor/rel
+                assert src.is_file() and dst.is_file(),('MISSING_PINNED',rel)
+                assert not src.is_symlink() and not dst.is_symlink()
+                blob=dst.read_bytes()
+                assert blob==src.read_bytes(),('R633_REPLAY_MISMATCH',rel)
+                assert len(blob)==row['bytes']
+                assert hashlib.sha256(blob).hexdigest()==row['sha256']
+            count=0
+            for folder in ('schema','fixtures','source'):
+                origin=donor/folder
+                assert origin.is_dir(),('MISSING_NATIVE_SUBTREE',folder)
+                assert not (base/folder).exists(),(
+                    'ALREADY_EXISTS',folder)
+                for p in origin.rglob('*'):
+                    assert not p.is_symlink(),('SYMLINK_FORBIDDEN',str(p))
+                shutil.copytree(origin,base/folder)
+                count+=sum(p.is_file() for p in (base/folder).rglob('*'))
+            expected=(
+              'schema/screen-read.snapshot.v1.schema.json',
+              'schema/screen-read.png-replay.v1.schema.json',
+              'fixtures/r571_source_value_baseline.zip')
+            absent=[x for x in expected if not (base/x).is_file()]
+            print('R633_SUCCESSFUL_REPLAY_FILES',len(rows),
+                  'NATIVE_PREREQUISITES',count,'MISSING',absent,flush=True)
+            if absent:raise RuntimeError(
+                'R633_REPLAY_NATIVE_REQUIREMENTS_MISSING')
+        print('R633_NATIVE_PASS_ENVIRONMENT_RESTORED_AND_349_SHA_BOUND')
+        PYBASE
+    - name: Apply pinned R634 sources without new tar bundle
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PYINSTALL_PARENT'
+        import hashlib,textwrap,urllib.request
+        u=('https://raw.githubusercontent.com/'
+           'zeek10191019-stack/true-plan-showdown-verification/'
+           '8a065859dd7804f3976a2ef2ebba6ce1bd88e639/'
+           '.github/workflows/bs.yml')
+        b=urllib.request.urlopen(u,timeout=90).read()
+        assert len(b)==11151,'PINNED_BS_SIZE_DRIFT'
+        assert hashlib.sha256(b).hexdigest()==(
+         '837806bb7de5f1c72d21bb9caea9d5daa2c460d6fc1b9957c38db546712fb0d4'
+        ),'PINNED_BS_SHA_DRIFT'
+        s=b.decode('utf-8')
+        left="          python3 - <<'PYINSTALL'\n"
+        right="\n          PYINSTALL"
+        assert s.count(left)==1 and s.count(right)==1
+        code=textwrap.dedent(s.split(left,1)[1].split(right,1)[0])
+        exec(compile(code,'PINNED_BS_R634_SOURCE','exec'),{'__name__':'__main__'})
+        PYINSTALL_PARENT
+    - name: Apply exact SHA-pinned R635 layout reader and one-button hooks
+      shell: bash
+      run: |-
+        set -euo pipefail
+        python3 - <<'PYR635_PARENT'
+        import hashlib,re,textwrap,urllib.request
+        url=('https://raw.githubusercontent.com/'
+             'zeek10191019-stack/true-plan-showdown-verification/'
+             '8754a8257cf028bdbf09874f433a868293e4fda0/'
+             '.github/workflows/bv.yml')
+        raw=urllib.request.urlopen(url,timeout=120).read()
+        assert len(raw)==16742, 'R635_PINNED_FILE_SIZE_DRIFT'
+        assert hashlib.sha256(raw).hexdigest()==(
+         'd9625591d4a3500fdefc238247068f57a39e3451ea605b6da3f5efe81067a0a6'
+        ),'R635_PINNED_FILE_SHA_DRIFT'
+        s=raw.decode()
+        m=re.search(r"(?m)^( +)python3 - <<'PYR635'$",s)
+        assert m is not None and s.count('PYR635')==2
+        code=textwrap.dedent(s.split(m.group(0)+'\n',1)[1].split(
+         '\n'+m.group(1)+'PYR635',1)[0])
+        exec(compile(code,'R635_PINNED_LAYOUT_INSTALL','exec'),
+             {'__name__':'__main__'})
+        PYR635_PARENT
+    - name: Run R635 R634 R581 and native Apple contract tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        swiftc -parse-as-library \
+         app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift \
+         app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift \
+         app/ios/ChampionsOnDevice/R635LayoutToFields.swift \
+         tests/R635LayoutHarness.swift -o "$RUNNER_TEMP/r635"
+        "$RUNNER_TEMP/r635"
+        swiftc -parse-as-library \
+         app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift \
+         app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift \
+         tests/R634FieldRoutingHarness.swift -o "$RUNNER_TEMP/r634"
+        "$RUNNER_TEMP/r634"
+        swiftc -parse-as-library \
+         app/ios/ChampionsOnDevice/R581ReadabilityCoverage.swift \
+         tests/R581CoverageHarness.swift -o "$RUNNER_TEMP/r581"
+        "$RUNNER_TEMP/r581"
+        swiftc -frontend -parse app/ios/ChampionsOnDevice/*.swift
+        python3 tools/run_r571_native.py
+    - name: Publish only fully checked isolated R635 source branch
+      shell: bash
+      run: |
+        set -euo pipefail
+        branch=r635-layout-field-evidence
+        if git ls-remote --exit-code --heads origin \
+         "refs/heads/$branch" >/dev/null 2>&1; then
+         echo 'Branch already exists. Overwrite forbidden.' >&2
+         exit 1
+        fi
+        git checkout -b "$branch"
+        git add -- \
+         app/ios/ChampionsOnDevice/R635LayoutToFields.swift \
+         app/ios/ChampionsOnDevice/CaptureCoordinator.swift \
+         app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift \
+         app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift \
+         tests/R635LayoutHarness.swift \
+         tests/R634FieldRoutingHarness.swift \
+         schema fixtures source
+        python3 - <<'PYSTAGE'
+        import subprocess
+        f=set(subprocess.check_output(
+         ['git','diff','--cached','--name-only'],text=True).splitlines())
+        required={'app/ios/ChampionsOnDevice/R635LayoutToFields.swift',
+         'app/ios/ChampionsOnDevice/CaptureCoordinator.swift',
+         'app/ios/ChampionsOnDevice/R576OfflinePNGInspector.swift',
+         'app/ios/ChampionsOnDevice/R634FieldEvidenceRouting.swift',
+         'tests/R635LayoutHarness.swift','tests/R634FieldRoutingHarness.swift'}
+        assert required<=f,('MISSING_READER_CODE',required-f)
+        assert all(x in required or x.startswith(
+         ('schema/','fixtures/','source/')) for x in f), (
+         'UNEXPECTED_STAGED_FILE',f-required)
+        print('R635_STAGE_SOURCE_AND_PREREQUISITES',len(f))
+        PYSTAGE
+        git config user.name 'github-actions[bot]'
+        git config user.email \
+         '41898282+github-actions[bot]@users.noreply.github.com'
+        git commit -m 'R635: image bound 79 field and layout evidence wiring'
+        git push origin "HEAD:refs/heads/$branch"
