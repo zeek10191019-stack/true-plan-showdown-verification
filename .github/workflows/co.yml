@@ -1,0 +1,67 @@
+name: R641.1 Restore CI Role
+'on':
+  push:
+    branches: [main]
+    paths: [.github/workflows/co.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: >-
+      github.repository ==
+      'zeek10191019-stack/true-plan-showdown-verification'
+      && github.ref == 'refs/heads/main'
+      && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 55
+    env:
+      PYTHONOPTIMIZE: '0'
+      SCREEN_READ_CI_ROLE: IOS27_NATIVE
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: f9cb02e4d07f097dac7b2bf65f3dd56d1537080e
+    - name: Verify original workflow before reuse
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        from pathlib import Path
+        import hashlib,os
+        src=Path('.github/workflows/cn.yml').read_bytes()
+        assert len(src)==9915
+        assert hashlib.sha256(src).hexdigest()==(
+          '5f6b141061a5e1b745658415f41db5'
+          'd67fb018d28f6a2a0dbf047a2c880ec2bc')
+        Path(os.environ['RUNNER_TEMP'],'r641.yml').write_bytes(src)
+        PY
+    - uses: actions/checkout@v4
+      with:
+        ref: bc2c8fc80b524aef46b5f3a4586fa8b88359e86e
+        persist-credentials: true
+    - name: Execute unchanged R641 with required role
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(git rev-parse HEAD)" = \
+          bc2c8fc80b524aef46b5f3a4586fa8b88359e86e
+        python3 - <<'PY'
+        from pathlib import Path
+        import hashlib,os,subprocess,sys
+        p=Path(os.environ['RUNNER_TEMP'],'r641.yml')
+        src=p.read_bytes()
+        assert hashlib.sha256(src).hexdigest()==(
+          '5f6b141061a5e1b745658415f41db5'
+          'd67fb018d28f6a2a0dbf047a2c880ec2bc')
+        txt=src.decode('utf-8')
+        a="        python3 - <<'PY'\n"
+        b='\n        PY\n'
+        assert txt.count(a)==1 and txt.count(b)==1
+        code=txt.split(a,1)[1].split(b,1)[0]
+        lines=code.splitlines()
+        assert all(s.startswith('        ') for s in lines)
+        code='\n'.join(s[8:] for s in lines)+'\n'
+        compile(code,'r641-original.py','exec')
+        subprocess.run([sys.executable,'-c',code],check=True)
+        PY
