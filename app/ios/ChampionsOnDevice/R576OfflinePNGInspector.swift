@@ -103,6 +103,7 @@ final class R576OfflinePNGInspector: ObservableObject {
                     R639OrientationHypotheses.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
                     R640FieldGapAudit.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
                     R641RotatedHUDCandidates.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
+                    R642MappedFrameProof.enrich(&document, sourceKind:"USER_IMPORTED_PNG_OFFLINE_ONLY")
                     guard let data=try? JSONSerialization.data(withJSONObject:document,
                         options:[.sortedKeys,.withoutEscapingSlashes]),
                         data.count <= R577OfflineEvidenceReport.maximumReportBytes else {return nil}
