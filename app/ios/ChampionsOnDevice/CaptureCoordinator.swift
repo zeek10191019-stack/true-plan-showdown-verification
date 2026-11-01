@@ -1997,6 +1997,13 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         visualChanges["r650_megareference_registry_audit"] =
                             R650MegaReferenceBridge.audit(frames:actorAppearanceSamples,
                                 references:r650LocalReferences)
+                        // R654: same-species BASE/X/Y/Z comparisons; class
+                        // duplicates cannot substitute for negative controls.
+                        // Output stays historical, not a live Mega assertion.
+                        visualChanges["r654_megareference_class_safety"] =
+                            R654MegaVisualClassGate.audit(
+                                frames:actorAppearanceSamples,
+                                references:r650LocalReferences)
                         let visualChangesData=try JSONSerialization.data(
                             withJSONObject:visualChanges,options:[.sortedKeys,.withoutEscapingSlashes])
                         entries.append(.init(name:"historical_visual_region_changes.json",
