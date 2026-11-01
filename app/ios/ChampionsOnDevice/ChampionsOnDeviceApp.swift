@@ -71,6 +71,9 @@ struct ChampionsOnDeviceApp: App {
                         Text("本人が検証したChampions画像から作成したR595 JSONのみ。画像自体の自動取得や外部送信なし。姿・自他・メガ使用は未認証。最大512件／1ファイル。")
                             .font(.caption).foregroundColor(.secondary)
                     }
+                    Section("R656｜メガ前後Vision研究（手動・未認証）") {
+                        R656MegaVisionPanel()
+                    }
                     Section("画面の確認（過去フレーム・未認証）") {
                         Text(capture.rawTimelineStatus).font(.caption)
                         if let preview = capture.diagnosticPreview {
