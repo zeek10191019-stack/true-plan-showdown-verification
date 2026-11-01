@@ -1722,6 +1722,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                     // Only capture receipt metadata can be promoted at this stage.
                     R634FieldEvidenceRouting.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R635LayoutToFields.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
+                    R636TypedHUDEvidence.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
                     let data = try JSONSerialization.data(withJSONObject:bundle,
                         options:[.sortedKeys,.withoutEscapingSlashes])
