@@ -469,7 +469,7 @@ struct ChampionsOnDeviceApp: App {
                         let count = try R652MegaCatalogInstaller.importLocalFile(url)
                         megaCatalogStatus = "参照候補\(count)件取込済み。実機認識は未認証"
                     } catch {
-                        megaCatalogStatus = "取込拒否。以前の台帳を保持"
+                        megaCatalogStatus = "取込拒否。現在の有効参照は\(R652MegaCatalogInstaller.localCount())件。異常時は再確認"
                     }
                 case .failure:
                     megaCatalogStatus = "選択取消。以前の台帳を保持"

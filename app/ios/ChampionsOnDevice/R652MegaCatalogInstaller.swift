@@ -80,14 +80,44 @@ enum R652MegaCatalogInstaller {
                   reference["certified_as_game_state"] as? Bool == false
             else { throw reject("FORM_NOT_IN_SEASON_REGISTRY") }
         }
-        let destination = try target()
-        // Data.write(.atomic) preserves the existing file on failure.
-        try data.write(to: destination, options: .atomic)
-        guard R595FormReferenceMatcher.loadLocalCatalog(
-            at: destination).count == references.count else {
-            throw reject("DESTINATION_READBACK_REJECTED")
+        return try transactionalStore(data, to: target(),
+                                     count: references.count)
+    }
+
+    // Pre-write validation is performed by importLocalFile.
+    // Readback detects a damaged replacement and restores the old file.
+    // The injected writer is for deterministic failure tests only.
+    static func transactionalStore(
+        _ data: Data, to destination: URL, count: Int,
+        writer: (Data, URL) throws -> Void = {
+            try $0.write(to: $1, options: .atomic)
         }
-        return references.count
+    ) throws -> Int {
+        let fm = FileManager.default
+        let existed = fm.fileExists(atPath: destination.path)
+        let original = existed ? try Data(contentsOf: destination) : nil
+        do {
+            try writer(data, destination)
+            let readback = try Data(contentsOf: destination)
+            guard readback == data,
+                  R595FormReferenceMatcher.loadLocalCatalog(
+                    at: destination).count == count else {
+                throw reject("DESTINATION_READBACK_REJECTED")
+            }
+            return count
+        } catch {
+            do {
+                if let original {
+                    try original.write(to: destination,
+                                       options: .atomic)
+                } else if fm.fileExists(atPath: destination.path) {
+                    try fm.removeItem(at: destination)
+                }
+            } catch {
+                throw reject("ROLLBACK_FAILED_CHECK_CATALOG")
+            }
+            throw error
+        }
     }
 
     static func localCount() -> Int {
