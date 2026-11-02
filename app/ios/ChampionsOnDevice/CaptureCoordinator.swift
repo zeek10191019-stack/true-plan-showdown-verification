@@ -2060,6 +2060,15 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             R662VisionRegionTracking.audit(
                                 frames:Array(r659Frames.suffix(4)),
                                 evidence:r662Join,budgetMs:1600)
+                        // R663: two signed residual interpretations.
+                        // Uncalibrated geometry: never promote to a battle fact.
+                        let r663Tracks = visualChanges[
+                            "r662_region_track_history"] as? [String:Any] ?? [:]
+                        visualChanges["r663_relative_motion_history"] =
+                            R663RelativeMotionAudit.audit(
+                                feature:r661Feature,
+                                joined:r662Join,
+                                tracking:r663Tracks)
                         let visualChangesData=try JSONSerialization.data(
                             withJSONObject:visualChanges,options:[.sortedKeys,.withoutEscapingSlashes])
                         entries.append(.init(name:"historical_visual_region_changes.json",
