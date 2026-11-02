@@ -1733,6 +1733,9 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                     R644MoveSlotCoupler.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R645DualHPEvidence.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R646FieldSignalReaders.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
+                    // R664: candidate-signal counts are NOT game accuracy.
+                    R664ReadoutScorecard.enrich(&bundle,
+                        sourceKind:"LIVE_RETAINED_FRAME")
                     R647MegaSignalBoundary.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R649MegaRegistryAudit.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
