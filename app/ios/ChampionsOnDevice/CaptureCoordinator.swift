@@ -2035,6 +2035,13 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             R659AutoVisionTimeline.audit(
                                 frames:Array(r659Frames.suffix(4)),
                                 budgetMs:1600)
+                        // R660: camera/scene translation only, on the exact
+                        // four frames already bound and used by R659.
+                        // No owner, Pokémon identity, or Mega claim.
+                        visualChanges["r660_scene_registration"] =
+                            R660CameraMotionRegistration.audit(
+                                frames:Array(r659Frames.suffix(4)),
+                                budgetMs:1200)
                         let visualChangesData=try JSONSerialization.data(
                             withJSONObject:visualChanges,options:[.sortedKeys,.withoutEscapingSlashes])
                         entries.append(.init(name:"historical_visual_region_changes.json",
