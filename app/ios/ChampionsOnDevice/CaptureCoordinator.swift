@@ -2052,6 +2052,14 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             R661CrossModalEvidenceGate.audit(
                                 feature:r661Feature,
                                 registration:r661Motion)
+                        // R662: follow unverified regions across the SAME
+                        // four retained frames. Never promote identity.
+                        let r662Join=visualChanges[
+                            "r661_cross_modal_evidence"] as? [String:Any] ?? [:]
+                        visualChanges["r662_region_track_history"] =
+                            R662VisionRegionTracking.audit(
+                                frames:Array(r659Frames.suffix(4)),
+                                evidence:r662Join,budgetMs:1600)
                         let visualChangesData=try JSONSerialization.data(
                             withJSONObject:visualChanges,options:[.sortedKeys,.withoutEscapingSlashes])
                         entries.append(.init(name:"historical_visual_region_changes.json",
