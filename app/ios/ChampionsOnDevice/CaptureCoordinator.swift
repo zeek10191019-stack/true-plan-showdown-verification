@@ -2042,6 +2042,16 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             R660CameraMotionRegistration.audit(
                                 frames:Array(r659Frames.suffix(4)),
                                 budgetMs:1200)
+                        // R661: join ONLY evidence with matching IDs,
+                        // timestamps and source hashes; never grant advice.
+                        let r661Feature = visualChanges[
+                            "r659_auto_vision_timeline"] as? [String:Any] ?? [:]
+                        let r661Motion = visualChanges[
+                            "r660_scene_registration"] as? [String:Any] ?? [:]
+                        visualChanges["r661_cross_modal_evidence"] =
+                            R661CrossModalEvidenceGate.audit(
+                                feature:r661Feature,
+                                registration:r661Motion)
                         let visualChangesData=try JSONSerialization.data(
                             withJSONObject:visualChanges,options:[.sortedKeys,.withoutEscapingSlashes])
                         entries.append(.init(name:"historical_visual_region_changes.json",
