@@ -1742,6 +1742,8 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                     // R666: typed OCR candidates, never certified game state.
                     R666TypedOCRCandidates.enrich(&bundle,
                         sourceKind:"LIVE_RETAINED_FRAME")
+                    // R667 text extraction, NOT owner or Mega form evidence.
+                    R667ExpandedOCRFields.enrich(&bundle)
                     R647MegaSignalBoundary.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R649MegaRegistryAudit.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
