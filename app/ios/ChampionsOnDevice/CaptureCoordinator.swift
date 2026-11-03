@@ -2079,6 +2079,11 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             R594ActorAppearance.timeline(actorAppearanceSamples)
                         visualChanges["r673_oriented_sprite_candidates"] =
                             r673SpriteSamples
+                        // R674: same-frame position link; NOT owned game state.
+                        visualChanges["r674_actor_hud_links"] =
+                            zip(r673SpriteSamples,hpFillSamples).map {
+                                R674ActorHUDLink.link(sprite:$0.0,hp:$0.1)
+                            }
                         // R595: optional on-device reviewed form references. An
                         // absent catalog explicitly returns HOLD; never guesses Mega.
                         let localRefURL=FileManager.default.urls(

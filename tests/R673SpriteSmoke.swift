@@ -9,8 +9,8 @@ let v=UInt8(min(250,40+x*120/w+y*100/h))
 pixels[idx]=v;pixels[idx+1]=v;pixels[idx+2]=v;pixels[idx+3]=255
 }}
 for y in 0..<h {for x in 0..<w {
-if Double(x)/Double(w)<0.06 || Double(x)/Double(w)>0.30 ||
-Double(y)/Double(h)<0.60 || Double(y)/Double(h)>0.80 {
+if Double(x)/Double(w)<0.06 || Double(x)/Double(w)>0.60 ||
+Double(y)/Double(h)<0.30 || Double(y)/Double(h)>0.80 {
 let idx=(y*w+x)*4
 pixels[idx]=100;pixels[idx+1]=100;pixels[idx+2]=100
 }
@@ -18,8 +18,8 @@ pixels[idx]=100;pixels[idx+1]=100;pixels[idx+2]=100
 func sample()->[Int] {
 var g=[Int]()
 for j in 0..<12 {for i in 0..<16 {
-let x=Int(Double(w)*(0.06+0.24*(Double(i)+0.5)/16))
-let y=Int(Double(h)*(0.60+0.20*(Double(j)+0.5)/12))
+let x=Int(Double(w)*(0.06+0.54*(Double(i)+0.5)/16))
+let y=Int(Double(h)*(0.30+0.50*(Double(j)+0.5)/12))
 g.append(Int(pixels[(y*w+x)*4]))
 }}
 return g

@@ -2,7 +2,7 @@ import Foundation
 enum R673OrientedSpriteReader {
 static let schema = "trueplan.r673.oriented-sprite-reference.v1"
 private static let zones:[(String,Double,Double,Double,Double)] = [
-("LEFT_ACTOR_POSITION_ONLY",0.06,0.30,0.60,0.80),
+("LEFT_ACTOR_POSITION_ONLY",0.06,0.60,0.30,0.80),
 ("RIGHT_ACTOR_POSITION_ONLY",0.60,0.35,0.78,0.82)]
 private static func validSHA(_ s:String)->Bool {
 s.utf8.count==64 && s.utf8.allSatisfy {
