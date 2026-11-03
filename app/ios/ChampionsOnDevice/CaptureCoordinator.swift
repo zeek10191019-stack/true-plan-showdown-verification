@@ -1744,6 +1744,10 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         sourceKind:"LIVE_RETAINED_FRAME")
                     // R667 text extraction, NOT owner or Mega form evidence.
                     R667ExpandedOCRFields.enrich(&bundle)
+                    // R668: direct plain-label HUD OCR with geometric anchors.
+                    // Position is not player ownership, form or live state.
+                    R668PlainHUDReader.enrich(&bundle,
+                        sourceKind:"LIVE_RETAINED_FRAME")
                     R647MegaSignalBoundary.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R649MegaRegistryAudit.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
