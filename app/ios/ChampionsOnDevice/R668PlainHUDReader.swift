@@ -68,7 +68,15 @@ enum R668PlainHUDReader {
         let excluded=["コマンド","わざ","ポケモン","メガシンカ",
                       "こうかあり","こうかばつぐ","ひんし",
                       "たたかう","にげる","ちからをみる"]
-        return !excluded.contains(t)
+        let nonSpeciesHUDWords=["やけど","まひ","ねむり","こおり","どく",
+           "もうどく","こんらん","みがわり","ちょうはつ",
+           "アンコール","かなしばり","あくび","すなあらし",
+           "あめ","雨","ひざしがつよい","ゆき","雪",
+           "リフレクター","ひかりのかべ","オーロラベール",
+           "トリックルーム","グラスフィールド",
+           "エレキフィールド","サイコフィールド",
+           "ミストフィールド"]
+        return !excluded.contains(t) && !nonSpeciesHUDWords.contains(t)
     }
     private static func timer(_ s:String)->Int? {
         guard s.range(of:#"^[0-9]{1,2}:[0-5][0-9]$"#,
