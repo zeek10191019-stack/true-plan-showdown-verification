@@ -1806,6 +1806,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         var visualSceneSamples=[[String:Any]]()
                         // R594: separate, uncalibrated actor appearance descriptors.
                         var actorAppearanceSamples=[[String:Any]]()
+                        var glyphPixelSamples=[[String:Any]]()
                         // R659: independent Vision evidence from retained frames.
                         // The model has no labels for Mega, owner or form.
                         var r659Frames = [R659AutoVisionTimeline.Frame]()
@@ -1848,6 +1849,9 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             var appearance=R594ActorAppearance.unavailable(
                                 epoch:sample.epoch,frame:sample.frame,ms:sample.observed,
                                 sha:digest,reason:"RGBA_RENDER_UNAVAILABLE")
+                            var glyphs=R670HUDPixelGlyphs.unavailable(
+                                epoch:sample.epoch,frame:sample.frame,
+                                ms:sample.observed,sha256:digest)
                             if w>=128,h>=128,w<=R589PixelHUDProbe.maxDimension,
                                h<=R589PixelHUDProbe.maxDimension,
                                w*4<=R589PixelHUDProbe.maxPixelBytes/h {
@@ -1877,8 +1881,13 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                                         pixels:rgba,width:w,height:h,rowBytes:w*4,
                                         epoch:sample.epoch,frame:sample.frame,
                                         observedMs:sample.observed,imageSHA:digest)
+                                    glyphs=R670HUDPixelGlyphs.inspect(
+                                        pixels:rgba,width:w,height:h,rowBytes:w*4,
+                                        epoch:sample.epoch,frame:sample.frame,
+                                        ms:sample.observed,sha256:digest)
                                 }
                             }
+                            glyphPixelSamples.append(glyphs)
                             visualSceneSamples.append(visualScene)
                             actorAppearanceSamples.append(appearance)
                             colorHUDFrames.append(colorHUD)
@@ -2001,6 +2010,22 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         manifest["r589_hud_pixel_runs_file"]="historical_hud_pixel_runs.json"
                         manifest["r589_pixel_frame_count"]=visualHUDFrames.count
                         manifest["r589_owner_hp_or_mega_certified"]=false
+                        let glyphArchive:[String:Any]=[
+                            "schema":"trueplan.r670.historical-hud-rgba-bundle.v1",
+                            "frame_count":glyphPixelSamples.count,
+                            "frames":glyphPixelSamples,
+                            "owner_certified":false,
+                            "status_icon_class_certified":false,
+                            "current_state_eligible":false]
+                        let glyphBytes=try JSONSerialization.data(
+                            withJSONObject:glyphArchive,
+                            options:[.sortedKeys,.withoutEscapingSlashes])
+                        entries.append(.init(
+                            name:"historical_hud_rgba_glyphs.json",
+                            bytes:glyphBytes))
+                        manifest["r670_rgba_glyphs_file"] =
+                            "historical_hud_rgba_glyphs.json"
+                        manifest["r670_status_icon_class_certified"] = false
                         // R593: compare actual rendered pixels across saved frames.
                         // These changes may be sprite animation, camera motion or FX;
                         // never assert a switch, Mega evolution, owner or species.
