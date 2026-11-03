@@ -2051,12 +2051,21 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         } ?? []
                         let iconMatches=R671StatusGlyphMatcher.audit(
                             frames:glyphPixelSamples,references:glyphReferences)
+                        // R675: selected OCR vs historical raw-pixel HP.
+                        // Cross-modal agreement is NOT a live HP or owner proof.
+                        let hpCrossmodal=R675PixelOCRHPAgreement.audit(
+                            ocr:bundle["r668_plain_hud_ocr"] as? [String:Any] ?? [:],
+                            pixelFrames:hpFillSamples,
+                            rawSHA:bundle["png_sha256"] as? String ?? "",
+                            frame:frame,epoch:epoch,
+                            projection:bundle["analysis_projection"] as? [String:Any])
                         let glyphArchive:[String:Any]=[
                             "schema":"trueplan.r670.historical-hud-rgba-bundle.v1",
                             "frame_count":glyphPixelSamples.count,
                             "frames":glyphPixelSamples,
                             "r671_reviewed_reference_matches":iconMatches,
                             "r672_pixel_hp_fill_tracks":hpFillSamples,
+                            "r675_ocr_pixel_hp_agreement":hpCrossmodal,
                             "owner_certified":false,
                             "status_icon_class_certified":false,
                             "current_state_eligible":false]
