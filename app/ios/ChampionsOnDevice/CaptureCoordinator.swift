@@ -2010,10 +2010,20 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         manifest["r589_hud_pixel_runs_file"]="historical_hud_pixel_runs.json"
                         manifest["r589_pixel_frame_count"]=visualHUDFrames.count
                         manifest["r589_owner_hp_or_mega_certified"]=false
+                        let iconCatalog=FileManager.default.urls(
+                            for:.applicationSupportDirectory,in:.userDomainMask
+                        ).first?.appendingPathComponent(
+                            "R671StatusGlyphReferences.json")
+                        let glyphReferences=iconCatalog.map {
+                            R671StatusGlyphMatcher.loadReferences(at:$0)
+                        } ?? []
+                        let iconMatches=R671StatusGlyphMatcher.audit(
+                            frames:glyphPixelSamples,references:glyphReferences)
                         let glyphArchive:[String:Any]=[
                             "schema":"trueplan.r670.historical-hud-rgba-bundle.v1",
                             "frame_count":glyphPixelSamples.count,
                             "frames":glyphPixelSamples,
+                            "r671_reviewed_reference_matches":iconMatches,
                             "owner_certified":false,
                             "status_icon_class_certified":false,
                             "current_state_eligible":false]
