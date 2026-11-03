@@ -1807,6 +1807,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         // R594: separate, uncalibrated actor appearance descriptors.
                         var actorAppearanceSamples=[[String:Any]]()
                         var glyphPixelSamples=[[String:Any]]()
+                        var hpFillSamples=[[String:Any]]()
                         // R659: independent Vision evidence from retained frames.
                         // The model has no labels for Mega, owner or form.
                         var r659Frames = [R659AutoVisionTimeline.Frame]()
@@ -1852,6 +1853,9 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             var glyphs=R670HUDPixelGlyphs.unavailable(
                                 epoch:sample.epoch,frame:sample.frame,
                                 ms:sample.observed,sha256:digest)
+                            var hpFill=R672PixelHPFillReader.unavailable(
+                                epoch:sample.epoch,frame:sample.frame,
+                                ms:sample.observed,sha256:digest)
                             if w>=128,h>=128,w<=R589PixelHUDProbe.maxDimension,
                                h<=R589PixelHUDProbe.maxDimension,
                                w*4<=R589PixelHUDProbe.maxPixelBytes/h {
@@ -1885,8 +1889,13 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                                         pixels:rgba,width:w,height:h,rowBytes:w*4,
                                         epoch:sample.epoch,frame:sample.frame,
                                         ms:sample.observed,sha256:digest)
+                                    hpFill=R672PixelHPFillReader.inspect(
+                                        pixels:rgba,width:w,height:h,rowBytes:w*4,
+                                        epoch:sample.epoch,frame:sample.frame,
+                                        ms:sample.observed,sha256:digest)
                                 }
                             }
+                            hpFillSamples.append(hpFill)
                             glyphPixelSamples.append(glyphs)
                             visualSceneSamples.append(visualScene)
                             actorAppearanceSamples.append(appearance)
@@ -2024,6 +2033,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             "frame_count":glyphPixelSamples.count,
                             "frames":glyphPixelSamples,
                             "r671_reviewed_reference_matches":iconMatches,
+                            "r672_pixel_hp_fill_tracks":hpFillSamples,
                             "owner_certified":false,
                             "status_icon_class_certified":false,
                             "current_state_eligible":false]
