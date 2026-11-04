@@ -1755,6 +1755,9 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                     // On-screen label is NOT proof of activation or turn age.
                     R676FieldOverlayOCR.enrich(&bundle,
                         sourceKind:"LIVE_RETAINED_FRAME")
+                    // R677: displayed header turn and clock OCR, not battle truth.
+                    R677TurnTimerOCR.enrich(&bundle,
+                        sourceKind:"LIVE_RETAINED_FRAME")
                     R647MegaSignalBoundary.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R649MegaRegistryAudit.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
