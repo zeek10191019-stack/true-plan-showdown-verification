@@ -1751,6 +1751,10 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                     // R669: proximity candidates, not proof of actor identity.
                     R669HUDAdjacentText.enrich(&bundle,
                         sourceKind:"LIVE_RETAINED_FRAME")
+                    // R676: source-bound OCR of displayed field effects.
+                    // On-screen label is NOT proof of activation or turn age.
+                    R676FieldOverlayOCR.enrich(&bundle,
+                        sourceKind:"LIVE_RETAINED_FRAME")
                     R647MegaSignalBoundary.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R649MegaRegistryAudit.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]
