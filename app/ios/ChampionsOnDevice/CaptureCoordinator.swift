@@ -1817,6 +1817,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         var actorAppearanceSamples=[[String:Any]]()
                         var glyphPixelSamples=[[String:Any]]()
                         var hpFillSamples=[[String:Any]]()
+                        var typeColorSamples=[[String:Any]]()
                         var r673SpriteSamples=[[String:Any]]()
                         let r673RefURL=FileManager.default.urls(
                             for:.applicationSupportDirectory,
@@ -1879,6 +1880,8 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             var hpFill=R672PixelHPFillReader.unavailable(
                                 epoch:sample.epoch,frame:sample.frame,
                                 ms:sample.observed,sha256:digest)
+                            var typeColor=R679TypeColorProbe.unavailable(
+                                epoch:sample.epoch,frame:sample.frame,sha:digest)
                             var r673Sprite=R673OrientedSpriteReader.unavailable(
                                 epoch:sample.epoch,frame:sample.frame,
                                 sha:digest)
@@ -1896,6 +1899,12 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                                     return true
                                 }
                                 if produced {
+                                    
+                                    typeColor=R679TypeColorProbe.inspect(
+                                        pixels:rgba,width:w,height:h,rowBytes:w*4,
+                                        epoch:sample.epoch,frame:sample.frame,
+                                        observedMs:sample.observed,sha:digest,
+                                        document:bundle)
                                     visualScene=R593VisualChangeEvidence.capture(
                                         pixels:rgba,width:w,height:h,rowBytes:w*4,
                                         epoch:sample.epoch,frame:sample.frame,
@@ -1927,6 +1936,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                                 }
                             }
                             hpFillSamples.append(hpFill)
+                            typeColorSamples.append(typeColor)
                             r673SpriteSamples.append(r673Sprite)
                             glyphPixelSamples.append(glyphs)
                             visualSceneSamples.append(visualScene)
@@ -2075,6 +2085,7 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             "r671_reviewed_reference_matches":iconMatches,
                             "r672_pixel_hp_fill_tracks":hpFillSamples,
                             "r675_ocr_pixel_hp_agreement":hpCrossmodal,
+                            "r679_move_type_color_pixel_samples":typeColorSamples,
                             "owner_certified":false,
                             "status_icon_class_certified":false,
                             "current_state_eligible":false]
