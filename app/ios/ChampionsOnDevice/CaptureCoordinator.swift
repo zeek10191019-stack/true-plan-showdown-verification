@@ -2106,6 +2106,11 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                         // appearance audit to the existing historical visual JSON.
                         visualChanges["r594_actor_appearance"] =
                             R594ActorAppearance.timeline(actorAppearanceSamples)
+                        // R680: PNG-bound unlabeled reference drafts; NOT Mega proof.
+                        visualChanges["r680_real_png_reference_drafts"] =
+                            R680MegaReferenceSeeds.make(
+                                frames:actorAppearanceSamples,
+                                snapshots:snapshots)
                         visualChanges["r673_oriented_sprite_candidates"] =
                             r673SpriteSamples
                         // R674: same-frame position link; NOT owned game state.
