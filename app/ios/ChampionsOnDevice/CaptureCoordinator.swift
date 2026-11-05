@@ -1758,6 +1758,8 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                     // R677: displayed header turn and clock OCR, not battle truth.
                     R677TurnTimerOCR.enrich(&bundle,
                         sourceKind:"LIVE_RETAINED_FRAME")
+                    R678MoveTypeOCR.enrich(&bundle,
+                        sourceKind:"LIVE_RETAINED_FRAME")
                     R647MegaSignalBoundary.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     R649MegaRegistryAudit.enrich(&bundle, sourceKind:"LIVE_RETAINED_FRAME")
                     diagnosticIncludedInPacket = bundle["metrics"] is [String:Any]

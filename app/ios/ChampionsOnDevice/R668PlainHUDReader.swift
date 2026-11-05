@@ -60,6 +60,7 @@ enum R668PlainHUDReader {
     }
     private static func label(_ s:String)->Bool {
         let t=s.trimmingCharacters(in:.whitespacesAndNewlines)
+        if t == "10まんボルト" { return true }
         guard (2...24).contains(t.count),
               t.range(of:#"^[ぁ-ゖァ-ヺー一-龯A-Za-z・♀♂]+$"#,
                       options:.regularExpression) != nil,
@@ -76,7 +77,12 @@ enum R668PlainHUDReader {
            "トリックルーム","グラスフィールド",
            "エレキフィールド","サイコフィールド",
            "ミストフィールド"]
+        let typeLabels=["ノーマル","ほのお","みず","でんき",
+            "くさ","こおり","かくとう","どく","じめん",
+            "ひこう","エスパー","むし","いわ","ゴースト",
+            "ドラゴン","あく","はがね","フェアリー"]
         return !excluded.contains(t) && !nonSpeciesHUDWords.contains(t)
+            && !typeLabels.contains(t)
     }
     private static func timer(_ s:String)->Int? {
         guard s.range(of:#"^[0-9]{1,2}:[0-5][0-9]$"#,
