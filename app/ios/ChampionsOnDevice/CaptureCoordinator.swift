@@ -2111,6 +2111,16 @@ final class CaptureCoordinator: NSObject, ObservableObject,
                             R680MegaReferenceSeeds.make(
                                 frames:actorAppearanceSamples,
                                 snapshots:snapshots)
+                        // R681: same-PNG HUD species OCR hints; never form proof.
+                        visualChanges["r681_species_ocr_seed_hints"] =
+                            R681MegaSeedOCRHints.make(
+                                draftReport:visualChanges[
+                                    "r680_real_png_reference_drafts"] as?
+                                    [String:Any] ?? [:],
+                                spatial:spatial,
+                                registry:R649MegaRegistryAudit.entries.map {
+                                    (species:$0.species.uppercased(),jp:$0.jp)
+                                })
                         visualChanges["r673_oriented_sprite_candidates"] =
                             r673SpriteSamples
                         // R674: same-frame position link; NOT owned game state.
