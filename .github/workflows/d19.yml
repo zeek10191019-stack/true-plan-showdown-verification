@@ -1,0 +1,335 @@
+name: R757 Base64 Verified Delivery No IPA
+'on':
+  push:
+    branches: [main]
+    paths: ['.github/workflows/d19.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+    - name: Restore R756 from pinned e18 workflow, no source deletions
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        mkdir -p R757Proof
+        url='https://raw.githubusercontent.com/'
+        url+='zeek10191019-stack/'
+        url+='true-plan-showdown-verification/'
+        url+='main/.github/workflows/e18.yml'
+        curl -fLsS --retry 3 "$url" -o /tmp/e18.yml
+        expected_e18='9d7bd9dd863a19bddf4d1cc6433f8769'
+        expected_e18+='0effef799065b1d6d9a999b8da432c5f'
+        actual_e18=$(shasum -a 256 /tmp/e18.yml | cut -d' ' -f1)
+        test "$actual_e18" = "$expected_e18"
+        python3 - <<'PYTHON'
+        from pathlib import Path
+        lines=Path('/tmp/e18.yml').read_text().splitlines()
+        assert lines[0].startswith('name: R756 ')
+        first=next(i for i,s in enumerate(lines)
+         if s.startswith('    - name: Swift XCTest'))
+        chunks=[]
+        for i,s in enumerate(lines[:first]):
+         if s.strip()!='run: |':continue
+         block=[]
+         for raw in lines[i+1:]:
+          if raw.strip() and len(raw)-len(raw.lstrip())<=6:break
+          block.append(raw)
+         nonempty=[len(v)-len(v.lstrip()) for v in block if v.strip()]
+         assert nonempty
+         indent=min(nonempty)
+         chunks.append('\n'.join(v[indent:] if v.strip() else ''
+          for v in block))
+        assert len(chunks)==7,len(chunks)
+        Path('/tmp/restore_r756.sh').write_text(
+         '\n'.join(chunks)+'\n')
+        PYTHON
+        bash /tmp/restore_r756.sh
+        python3 - <<'PYTHON'
+        import pathlib,hashlib
+        root=pathlib.Path('source')
+        sha=lambda b:hashlib.sha256(b).hexdigest()
+        files={p.relative_to(root).as_posix():p.read_bytes()
+         for p in root.rglob('*') if p.is_file()}
+        def tree(d):
+         return sha(''.join(n+'\t'+sha(d[n])+'\n'
+          for n in sorted(d)).encode())
+        assert len(files)==419
+        assert tree(files)==(
+         '7711d6fab6052603a40716790355244ada1a8460485a02f60c52c990c1636eda'
+        )
+        print('R756 PINNED SHA PASS 419 FILES')
+        PYTHON
+    - name: Apply verified R757 patch, preserve all earlier functions
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PYTHON'
+        import pathlib,json,hashlib,lzma,base64,subprocess
+        root=pathlib.Path('source')
+        sha=lambda b:hashlib.sha256(b).hexdigest()
+        def readtree():
+         return {p.relative_to(root).as_posix():p.read_bytes()
+          for p in root.rglob('*') if p.is_file()}
+        def tree(d):
+         return sha(''.join(n+'\t'+sha(d[n])+'\n'
+          for n in sorted(d)).encode())
+        before=readtree()
+        assert len(before)==419
+        assert tree(before)==(
+         '7711d6fab6052603a40716790355244ada1a8460485a02f60c52c990c1636eda'
+        )
+        packed='''
+        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
+        '''
+        patch=lzma.decompress(base64.b64decode(
+         ''.join(packed.split())))
+        assert sha(patch)==(
+         '81cfcbc29464e0fc9cde302dec2a8033226e3db4def9b1588d6279e5426517fb'
+        )
+        for line in patch.decode().splitlines():
+         if line.startswith('+++ b/'):
+          n=line[6:]
+          assert n and not n.startswith('/')
+          assert '..' not in pathlib.PurePosixPath(n).parts
+          (root/n).parent.mkdir(parents=True,exist_ok=True)
+        subprocess.run(['patch','-p1'],input=patch,cwd=root,check=True)
+        changed=readtree()
+        assert len(changed)==422 and set(before)<=set(changed)
+        manifest={n:sha(b) for n,b in changed.items()
+         if n!='source_manifest.json'}
+        dest=root/'source_manifest.json'
+        dest.write_text(json.dumps(manifest,sort_keys=True,
+         indent=2,ensure_ascii=False)+'\n')
+        assert sha(dest.read_bytes())==(
+         '432ebcedc952bd855b5399c8c8dd18a6460dc22ca81baed05a4ba07655b1b0b8'
+        )
+        current=readtree()
+        assert len(current)==422
+        assert tree(current)==(
+         'fa79a7ffe8a6de221e22329dddbddac9880e9d93de3ad7ac5353403341683173'
+        )
+        assert all(manifest[n]==sha(current[n]) for n in manifest)
+        proof=pathlib.Path('R757Proof')
+        (proof/'SOURCE_HASHES.json').write_text(
+         json.dumps({n:sha(b) for n,b in current.items()},sort_keys=True))
+        print('R757 422/422 BYTE VERIFIED - ZERO DELETION')
+        PYTHON
+    - name: Run original Swift and iPhoneOS checks NO IPA
+      shell: bash
+      run: |
+        set -euo pipefail
+        (cd source/R720_PORTABLE_TESTS && swift test -j 2) \
+         > R757Proof/Swift.log 2>&1 || {
+          tail -n 70 R757Proof/Swift.log;exit 1;
+         }
+        grep -Fq 'Executed 324 tests, with 0 failures' \
+         R757Proof/Swift.log
+        python3 source/tools/r748_capture_path_gate.py
+        python3 source/tools/r745_read_path_gate.py \
+         > R757Proof/ReadPath.log
+        python3 source/tools/r742_live_path_audit.py
+        python3 source/tools/r743_macos_compat_audit.py
+        python3 -m unittest discover -s source/tools/tests \
+         -p 'test_r756*.py' -v > R757Proof/VideoTests.log 2>&1 || {
+          tail -n 70 R757Proof/VideoTests.log;exit 1;
+         }
+        grep -Fq 'Ran 16 tests' R757Proof/VideoTests.log
+        python3 -m unittest discover -s source/tools/tests \
+         -p 'test_r757*.py' -v > R757Proof/R757Audit.log 2>&1 || {
+          tail -n 70 R757Proof/R757Audit.log;exit 1;
+         }
+        grep -Fq 'Ran 6 tests' R757Proof/R757Audit.log
+        swiftc -frontend -parse source/app/ios/ChampionsOnDevice/*.swift
+        python3 source/tools/generate_xcode_project.py
+        xcodebuild -project source/app/ios/ChampionsOnDeviceResearch.xcodeproj \
+         -scheme ChampionsOnDeviceResearch -configuration Debug \
+         -sdk iphoneos -destination 'generic/platform=iOS' \
+         ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+         -derivedDataPath "$RUNNER_TEMP/r757" build \
+         > R757Proof/iPhoneOS.log 2>&1 || {
+          grep -E 'error:|BUILD FAILED' R757Proof/iPhoneOS.log || true
+          exit 1;
+         }
+        grep -Fq 'BUILD SUCCEEDED' R757Proof/iPhoneOS.log
+    - name: Package R757 only and complete SHA manifest
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PYTHON'
+        import pathlib,zipfile,hashlib,json
+        root=pathlib.Path('source');out=pathlib.Path('R757Proof')
+        expected=json.loads((out/'SOURCE_HASHES.json').read_text())
+        assert len(expected)==422
+        names=[
+         'R720_PORTABLE_TESTS/Sources/R719Core/R750HUDPixelAudit.swift',
+         'R720_PORTABLE_TESTS/Sources/R719Core/R751HUDBarEvidence.swift',
+         'R720_PORTABLE_TESTS/Sources/R719Core/R752HPTextBarLink.swift',
+         'R720_PORTABLE_TESTS/Tests/R719CoreTests/R752HPTextBarLinkTests.swift',
+         'R757_CHANGELOG.md',
+         'app/ios/ChampionsOnDevice/R750HUDPixelAudit.swift',
+         'app/ios/ChampionsOnDevice/R751HUDBarEvidence.swift',
+         'app/ios/ChampionsOnDevice/R752HPTextBarLink.swift',
+         'source_manifest.json',
+         'tools/r757_real_one_tap_audit.py',
+         'tools/tests/test_r757_real_one_tap_audit.py',
+        ]
+        with zipfile.ZipFile(out/'R757_CHANGESET_ONLY.zip','w',
+          zipfile.ZIP_DEFLATED) as z:
+         for n in names:
+          b=(root/n).read_bytes()
+          assert hashlib.sha256(b).hexdigest()==expected[n]
+          z.writestr(n,b)
+        (out/'STATUS.txt').write_text(
+         'R757 SHA PASS / 422 files preserved / NO IPA.\n'
+         'Real game image evidence stays local; 0/79 certified.\n')
+        PYTHON
+    - name: Auto-upload source changes and diagnostics ONLY
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: R757-source-diagnostics-NO-IPA
+        path: R757Proof/
+        retention-days: 3
+        if-no-files-found: error
