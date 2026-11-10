@@ -1,0 +1,210 @@
+name: R746 48 Frame Evidence Compile Gate - NO IPA
+'on':
+  push:
+    branches: [main]
+    paths: ['.github/workflows/e8.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  check:
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+    - name: Restore pinned R745 and R746 lossless changes
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+       set -euo pipefail
+       mkdir -p source R746Proof
+       url='https://api.github.com/repos/'
+       url+='zeek10191019-stack/'
+       url+='true-plan-showdown-verification/'
+       url+='actions/artifacts/13769570656/zip'
+       curl -fLsS --retry 2 \
+        -H "Authorization: Bearer $GH_TOKEN" \
+        -H 'Accept: application/vnd.github+json' \
+        "$url" -o /tmp/r745.zip
+       python3 - <<'PYTHON'
+       import pathlib,hashlib,zipfile,io,json,base64,lzma
+       root=pathlib.Path('source')
+       sha=lambda b:hashlib.sha256(b).hexdigest()
+       def tree(d):
+        s=''.join(n+'\t'+sha(d[n])+'\n' for n in sorted(d))
+        return sha(s.encode())
+       with zipfile.ZipFile('/tmp/r745.zip') as z:
+        assert z.testzip() is None
+        raw=z.read('R745_ALL_EDITABLE_SOURCE_RECOVERY.zip')
+       with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        assert z.testzip() is None
+        before={n:z.read(n) for n in z.namelist()}
+       assert len(before)==372
+       packed='''
+       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
+       AARZWg==
+       '''
+       d=json.loads(lzma.decompress(base64.b64decode(
+        ''.join(packed.split()))))
+       assert d['schema']=='R746-VISUAL-TIMELINE-48-NO-IPA'
+       assert len(before)==d['baseline_count']
+       assert tree(before)==d['base_tree']
+       for n,b in before.items():
+        p=pathlib.PurePosixPath(n)
+        assert p.parts and '..' not in p.parts and not p.is_absolute()
+        f=root/n;f.parent.mkdir(parents=True,exist_ok=True)
+        f.write_bytes(b)
+       for item in d['patches']:
+        n=item['path'];f=root/n
+        assert n in before and sha(before[n])==item['before']
+        lines=f.read_text().splitlines(keepends=True)
+        end=0;new=[]
+        for lo,hi,part in item['hunks']:
+         assert end<=lo<=hi<=len(lines)
+         new.extend(lines[end:lo]);new.append(part);end=hi
+        new.extend(lines[end:]);b=''.join(new).encode()
+        assert sha(b)==item['after']
+        f.write_bytes(b)
+       for item in d['additions']:
+        n=item['path'];f=root/n;b=item['contents'].encode()
+        assert n not in before and not f.exists()
+        assert sha(b)==item['sha256']
+        f.parent.mkdir(parents=True,exist_ok=True)
+        f.write_bytes(b)
+       h={p.relative_to(root).as_posix():sha(p.read_bytes())
+        for p in root.rglob('*') if p.is_file()
+        and p.name!='source_manifest.json'}
+       m=root/'source_manifest.json'
+       m.write_text(json.dumps(h,sort_keys=True,indent=2,
+        ensure_ascii=False)+'\n')
+       assert sha(m.read_bytes())==d['manifest_sha256']
+       now={p.relative_to(root).as_posix():p.read_bytes()
+        for p in root.rglob('*') if p.is_file()}
+       assert len(now)==d['final_count']==374
+       assert set(before)<=set(now) and tree(now)==d['after_tree']
+       (pathlib.Path('R746Proof')/'SOURCE_HASHES.json').write_text(
+        json.dumps({n:sha(b) for n,b in now.items()},sort_keys=True))
+       print('R746_RESTORE_374_SHA_PASS_ZERO_DELETION')
+       PYTHON
+    - name: XCTest iPhoneOS and 48-frame regression NO IPA
+      shell: bash
+      run: |
+       set -euo pipefail
+       (cd source/R720_PORTABLE_TESTS && swift test -j 2) \
+        > R746Proof/Swift.log 2>&1 || {
+         tail -n 45 R746Proof/Swift.log;exit 1;
+        }
+       grep -Fq 'Executed 226 tests, with 0 failures' \
+        R746Proof/Swift.log
+       cp source/tests/R746FrameBudgetTests.swift \
+        "$RUNNER_TEMP/main.swift"
+       swiftc \
+        source/app/ios/ChampionsOnDevice/R593VisualChangeEvidence.swift \
+        source/app/ios/ChampionsOnDevice/R594ActorAppearance.swift \
+        source/app/ios/ChampionsOnDevice/R595FormReferenceMatcher.swift \
+        source/app/ios/ChampionsOnDevice/R680MegaReferenceSeeds.swift \
+        "$RUNNER_TEMP/main.swift" -o "$RUNNER_TEMP/r746check"
+       "$RUNNER_TEMP/r746check" > R746Proof/Frame48.log
+       grep -Fq 'R746_FRAME_BUDGET_48_AND_SAFE_HOLD_PASS' \
+        R746Proof/Frame48.log
+       python3 source/tools/r745_read_path_gate.py \
+        > R746Proof/ReadPath.log
+       python3 source/tools/r742_live_path_audit.py
+       python3 source/tools/r743_macos_compat_audit.py
+       swiftc -frontend -parse source/app/ios/ChampionsOnDevice/*.swift
+       python3 source/tools/generate_xcode_project.py
+       xcodebuild -project source/app/ios/ChampionsOnDeviceResearch.xcodeproj \
+        -scheme ChampionsOnDeviceResearch -configuration Debug \
+        -sdk iphoneos -destination 'generic/platform=iOS' \
+        ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+        -derivedDataPath "$RUNNER_TEMP/r746" build \
+        > R746Proof/iPhoneOS.log 2>&1 || {
+         grep -E 'error:|BUILD FAILED' R746Proof/iPhoneOS.log || true
+         exit 1;
+        }
+       grep -Fq 'BUILD SUCCEEDED' R746Proof/iPhoneOS.log
+       python3 - <<'PYTHON'
+       import json,hashlib,pathlib,zipfile
+       root=pathlib.Path('source');out=pathlib.Path('R746Proof')
+       h=json.loads((out/'SOURCE_HASHES.json').read_text())
+       assert len(h)==374
+       zpath=out/'R746_ALL_EDITABLE_SOURCE_RECOVERY.zip'
+       with zipfile.ZipFile(zpath,'w',zipfile.ZIP_DEFLATED) as z:
+        for n in sorted(h):
+         b=(root/n).read_bytes()
+         assert hashlib.sha256(b).hexdigest()==h[n]
+         z.writestr(n,b)
+       with zipfile.ZipFile(zpath) as z:
+        assert z.testzip() is None and len(z.namelist())==374
+       (out/'STATUS.txt').write_text(
+        'R746 Mac and iPhoneOS compile only. NO IPA.\n'
+        '79 gameplay fields and Mega recognition uncertified.\n')
+       assert sum(f.stat().st_size for f in out.rglob('*')
+        if f.is_file())<16_000_000
+       print('R746_NO_IPA_SOURCE_ONLY_SUCCESS')
+       PYTHON
+    - name: Upload R746 source and diagnostics NO IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: R746-48-frame-source-gate-NO-IPA
+        path: R746Proof/
+        retention-days: 3
+        if-no-files-found: error
