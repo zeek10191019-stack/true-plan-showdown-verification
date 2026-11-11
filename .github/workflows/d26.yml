@@ -1,0 +1,252 @@
+name: R764 D26 Independent Capture Liveness NO IPA
+'on':
+  push:
+    branches: [main]
+    paths:
+    - '.github/workflows/d26.yml'
+    - '.github/workflows/d26.b64'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r764-d26-${{ github.repository }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - runner: macos-26
+          lane: real-apple-vision
+        - runner: xcode-27
+          lane: iphoneos-compile
+    if: >-
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
+      && github.event.repository.private == false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+    - name: Read current commit source payload only
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+        persist-credentials: false
+        sparse-checkout: .github/workflows/d26.b64
+        sparse-checkout-cone-mode: false
+    - name: Create diagnostics before source restoration
+      if: always()
+      shell: bash
+      run: |
+        mkdir -p R764Proof
+        echo 'NO IPA; R764 callback liveness verification' > R764Proof/STARTED.txt
+        echo 'Runner: ${{ matrix.runner }}' >> R764Proof/STARTED.txt
+        echo 'Lane: ${{ matrix.lane }}' >> R764Proof/STARTED.txt
+        xcodebuild -version > R764Proof/Environment.log
+        swift --version >> R764Proof/Environment.log
+    - name: Restore independent SHA verified source NO IPA
+      id: restore
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PYTHON'
+        import pathlib,json,lzma,base64,hashlib
+        sha=lambda b:hashlib.sha256(b).hexdigest()
+        encoded=pathlib.Path('.github/workflows/d26.b64').read_text()
+        packed=base64.b64decode(''.join(encoded.split()),validate=True)
+        expected=(
+          '146b26bb517fa02f9ca8c94adf1982e4'
+          '0fe53703c996f21863188a69e1553749')
+        assert sha(packed)==expected,'SOURCE_PAYLOAD_SHA_MISMATCH'
+        unpack=lzma.LZMADecompressor()
+        decoded=unpack.decompress(packed,max_length=64_000_000)
+        assert unpack.eof and not unpack.unused_data
+        data=json.loads(decoded)
+        files={n:s.encode('utf8') for n,s in data['text'].items()}
+        for n,s in data['binary'].items():
+         assert n not in files
+         files[n]=base64.b64decode(s,validate=True)
+        root=pathlib.Path('source')
+        root.mkdir(exist_ok=False)
+        for n,b in files.items():
+         p=pathlib.PurePosixPath(n)
+         assert not p.is_absolute() and '..' not in p.parts
+         assert chr(92) not in n and ':' not in n
+         target=root/n
+         target.parent.mkdir(parents=True,exist_ok=True)
+         target.write_bytes(b)
+        manifest=json.loads(files['source_manifest.json'])
+        assert set(manifest)==set(files)-{'source_manifest.json'}
+        assert all(sha(files[n])==h for n,h in manifest.items())
+        tree=sha(''.join(n+'\t'+sha(files[n])+'\n'
+         for n in sorted(files)).encode())
+        expected=(
+         '49a5670cd620ae26400a4e4681fc6be7'
+         '083918c9c2f6787676bf3e2a9619c533')
+        assert tree==expected,'RESTORED_TREE_SHA_MISMATCH'
+        assert len(files)==456
+        pathlib.Path('R764Proof/HASHES.json').write_text(
+         json.dumps({n:sha(b) for n,b in files.items()},sort_keys=True))
+        print('R764 restored source SHA PASS',len(files),tree)
+        PYTHON
+    - name: Source preservation and static capture gates
+      id: checks
+      if: >-
+        always() && steps.restore.outcome == 'success'
+        && matrix.lane == 'iphoneos-compile'
+      shell: bash
+      run: |
+        set -euo pipefail
+        for script in r761_preflight r742_live_path_audit \
+          r743_macos_compat_audit r745_read_path_gate \
+          r748_capture_path_gate; do
+          python3 "source/tools/$script.py" \
+            > "R764Proof/$script.log" 2>&1 || {
+              cat "R764Proof/$script.log"; exit 1;
+            }
+        done
+        cmp source/app/ios/ChampionsOnDevice/R764CaptureLivenessLedger.swift \
+          source/R720_PORTABLE_TESTS/Sources/R719Core/R764CaptureLivenessLedger.swift
+        grep -F 'r764Liveness.observe(sessionToken:' \
+          source/app/ios/ChampionsOnDevice/CaptureCoordinator.swift
+        grep -F 'startR764Watchdog(token:' \
+          source/app/ios/ChampionsOnDevice/CaptureCoordinator.swift
+        grep -F 'r764Liveness.poll(sessionToken:' \
+          source/app/ios/ChampionsOnDevice/CaptureCoordinator.swift
+        grep -c 'recognition/r764_callback_liveness.json' \
+          source/app/ios/ChampionsOnDevice/CaptureCoordinator.swift \
+          | grep -x 2
+        cmp source/app/ios/ChampionsOnDevice/R763CaptureGapLedger.swift \
+          source/R720_PORTABLE_TESTS/Sources/R719Core/R763CaptureGapLedger.swift
+        grep -F 'r763GapLedger.observe(epoch:generation' \
+          source/app/ios/ChampionsOnDevice/CaptureCoordinator.swift
+        grep -F 'recognition/r763_callback_time_gaps.json' \
+          source/app/ios/ChampionsOnDevice/CaptureCoordinator.swift
+        cmp source/app/ios/ChampionsOnDevice/R762SingleFrameConflictFence.swift \
+          source/R720_PORTABLE_TESTS/Sources/R719Core/R762SingleFrameConflictFence.swift
+        grep -F 'R762SingleFrameConflictFence.filter(findings)' \
+          source/app/ios/ChampionsOnDevice/R716SpatialFieldProjection.swift
+        grep -F 'r762_same_frame_conflicting_candidates_held' \
+          source/app/ios/ChampionsOnDevice/R714CaptureAudit.swift
+        python3 -m unittest discover -s source/tools/tests -v \
+          > R764Proof/Python.log 2>&1 || {
+            tail -n 70 R764Proof/Python.log; exit 1;
+          }
+        swiftc -frontend -parse \
+          source/app/ios/ChampionsOnDevice/*.swift \
+          > R764Proof/Parse.log 2>&1
+    - name: Mac XCTest and actual real PNG Apple Vision
+      id: swift
+      if: >-
+        always() && steps.restore.outcome == 'success'
+        && matrix.lane == 'real-apple-vision'
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(uname -s)" = Darwin
+        export R761_FIELD_AUDIT_OUTPUT="$GITHUB_WORKSPACE/"
+        R761_FIELD_AUDIT_OUTPUT+="R764Proof/FieldSafety.json"
+        export R761_APPLE_VISION_OUTPUT="$GITHUB_WORKSPACE/"
+        R761_APPLE_VISION_OUTPUT+="R764Proof/RealAppleVision.json"
+        swift test --package-path source/R720_PORTABLE_TESTS \
+          --jobs 4 --scratch-path "$RUNNER_TEMP/r761-tests" \
+          > R764Proof/Swift.log 2>&1 || {
+            tail -n 90 R764Proof/Swift.log; exit 1;
+          }
+        python3 - <<'PYTHON'
+        from pathlib import Path
+        import re
+        text=Path('R764Proof/Swift.log').read_text()
+        for name in ['testActualAppleVisionOnRealHPAndPPPanel',
+                     'testActualAppleVisionOnRealSelectionSix']:
+         assert re.search(name+r'.*passed',text),name
+        assert re.search('testActualProjectorCannotAdmitTwoDifferentPPValuesForOneSlot'
+                         +r'.*passed',text)
+        assert re.search('testFifteenSecondDeliveryGapCapturedWithoutInventingFrames'
+                         +r'.*passed',text)
+        assert re.search('testWithoutAnyFurtherCallbackTimerRecordsBothSilences'
+                         +r'.*passed',text)
+        assert re.search('testOldSessionCannotResetNewOrStopItsTimer'
+                         +r'.*passed',text)
+        assert re.search(r'Executed [0-9]+ tests, with 0 failures',text)
+        PYTHON
+    - name: Production archive integrity and negative cases on Mac
+      id: archive
+      if: >-
+        always() && steps.restore.outcome == 'success'
+        && matrix.lane == 'iphoneos-compile'
+      shell: bash
+      run: |
+        set -euo pipefail
+        app=source/app/ios/ChampionsOnDevice
+        sources=(
+          "$app/R548ResearchArchive.swift"
+          "$app/R551EvidenceIntegrity.swift"
+          "$app/R555StoredZIPReadback.swift"
+          "$app/R689StreamingZIP.swift"
+          "$app/R731ArchiveCapacity.swift"
+          source/tests/R710ArchiveIntegrationTests.swift
+        )
+        swiftc "${sources[@]}" -o "$RUNNER_TEMP/r761-archive" \
+          > R764Proof/Archive.log 2>&1
+        "$RUNNER_TEMP/r761-archive" >> R764Proof/Archive.log 2>&1
+    - name: iPhoneOS compile without IPA creation
+      id: phone
+      if: >-
+        always() && steps.restore.outcome == 'success'
+        && matrix.lane == 'iphoneos-compile'
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 source/tools/generate_xcode_project.py
+        project=source/app/ios/ChampionsOnDeviceResearch.xcodeproj
+        xcodebuild -project "$project" \
+          -scheme ChampionsOnDeviceResearch -configuration Debug \
+          -sdk iphoneos -destination 'generic/platform=iOS' \
+          ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+          -derivedDataPath "$RUNNER_TEMP/r761" build \
+          > R764Proof/iPhoneOS.log 2>&1 || {
+            grep -E 'error:|BUILD FAILED' R764Proof/iPhoneOS.log || true
+            exit 1;
+          }
+        grep -F 'BUILD SUCCEEDED' R764Proof/iPhoneOS.log
+    - name: Preserve complete source and honest gate status
+      if: always() && steps.restore.outcome == 'success'
+      shell: bash
+      env:
+        MAC_RESULT: ${{ steps.swift.outcome }}
+        LANE: ${{ matrix.lane }}
+        RUNNER: ${{ matrix.runner }}
+        IOS_RESULT: ${{ steps.phone.outcome }}
+        SOURCE_RESULT: ${{ steps.checks.outcome }}
+        ARCHIVE_RESULT: ${{ steps.archive.outcome }}
+      run: |
+        python3 - <<'PYTHON'
+        import os,pathlib,zipfile,json
+        root=pathlib.Path('source');out=pathlib.Path('R764Proof')
+        names=list(json.loads((root/'source_manifest.json').read_text()))
+        names+=['source_manifest.json']
+        with zipfile.ZipFile(out/'R764_COMPLETE_SOURCE.zip','w',
+         zipfile.ZIP_DEFLATED) as z:
+         for name in sorted(names):z.write(root/name,name)
+        status={
+         'lane':os.environ['LANE'],
+         'runner':os.environ['RUNNER'],
+         'source_checks':os.environ['SOURCE_RESULT'],
+         'mac_xctest_and_real_vision':os.environ['MAC_RESULT'],
+         'mac_accurate_vision':os.environ['MAC_RESULT'],
+         'iphoneos_compile':os.environ['IOS_RESULT'],
+         'production_archive_test':os.environ['ARCHIVE_RESULT'],
+         'device_certified_fields':0,'ipa_created':False,
+         'ipa_allowed':False,'duration_gate_required':False,
+         'remaining':'79 fields, real iPhone 3-min capture, root cause, OCR'}
+        (out/'GATE.json').write_text(json.dumps(status,indent=2))
+        PYTHON
+    - name: Upload diagnostics even on failure NO IPA
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: R764-${{ matrix.lane }}-NO-IPA
+        path: R764Proof/
+        retention-days: 3
+        if-no-files-found: error
