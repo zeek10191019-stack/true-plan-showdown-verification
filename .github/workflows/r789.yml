@@ -1,4 +1,4 @@
-name: R789 D48 Recording Scoped Start Completion NO IPA
+name: R789 D49 Recording Scoped Start Completion NO IPA
 'on':
   workflow_dispatch: {}
 permissions:
@@ -2913,7 +2913,7 @@ jobs:
         PYR789PATCH
     - name: Enable real video codec regression NO IPA
       id: codecs
-      if: always() && steps.patch788.outcome == 'success' && matrix.lane == 'iphoneos-compile'
+      if: always() && steps.patch789.outcome == 'success' && matrix.lane == 'iphoneos-compile'
       run: |
         set -euo pipefail
         if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
@@ -2923,7 +2923,7 @@ jobs:
         ffprobe -version >> R789Proof/Codecs.log
     - name: Source preservation and static capture gates
       id: checks
-      if: always() && steps.patch788.outcome == 'success' && matrix.lane == 'iphoneos-compile'
+      if: always() && steps.patch789.outcome == 'success' && matrix.lane == 'iphoneos-compile'
       shell: bash
       run: |
         set -euo pipefail
@@ -3172,7 +3172,7 @@ jobs:
         PYR789STARTSCOPE
     - name: Mac XCTest and actual real PNG Apple Vision
       id: swift
-      if: always() && steps.patch788.outcome == 'success' && matrix.lane == 'real-apple-vision'
+      if: always() && steps.patch789.outcome == 'success' && matrix.lane == 'real-apple-vision'
       shell: bash
       run: |
         set -euo pipefail
@@ -3466,7 +3466,7 @@ jobs:
         PYR789STARTTESTS
     - name: Production archive integrity and negative cases on Mac
       id: archive
-      if: always() && steps.patch788.outcome == 'success' && matrix.lane == 'iphoneos-compile'
+      if: always() && steps.patch789.outcome == 'success' && matrix.lane == 'iphoneos-compile'
       shell: bash
       run: |
         set -euo pipefail
@@ -3484,7 +3484,7 @@ jobs:
         "$RUNNER_TEMP/r761-archive" >> R789Proof/Archive.log 2>&1
     - name: iPhoneOS compile without IPA creation
       id: phone
-      if: always() && steps.patch788.outcome == 'success' && matrix.lane == 'iphoneos-compile'
+      if: always() && steps.patch789.outcome == 'success' && matrix.lane == 'iphoneos-compile'
       shell: bash
       run: |
         set -euo pipefail
@@ -3520,7 +3520,7 @@ jobs:
           }
         grep -F 'BUILD SUCCEEDED' R789Proof/iPhoneOS.log
     - name: Preserve delta-only evidence and honest gate status
-      if: always() && steps.patch788.outcome == 'success'
+      if: always()
       shell: bash
       env:
         MAC_RESULT: ${{ steps.swift.outcome }}
@@ -3555,7 +3555,11 @@ jobs:
          'device_certified_fields':0,'ipa_created':False,
          'ipa_allowed':False,'duration_gate_required':True,
          'remaining':'79 fields, real iPhone 3-min capture, root cause, OCR'}
+        required=['MAC_RESULT'] if status['lane']=='real-apple-vision' else ['SOURCE_RESULT','ARCHIVE_RESULT','IOS_RESULT']
+        status['required_lane_checks_complete']=all(os.environ.get(k)=='success' for k in required)
         (out/'GATE.json').write_text(json.dumps(status,indent=2))
+        assert status['required_lane_checks_complete'],('REQUIRED_LANE_CHECK_SKIPPED_OR_FAILED',status)
+
         PYTHON
     - name: Upload diagnostics even on failure NO IPA
       if: always()
