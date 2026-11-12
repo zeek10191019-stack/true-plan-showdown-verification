@@ -1,0 +1,359 @@
+name: R794 D54 Original Resolution Tile Diagnosis NO IPA
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/r794.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: r794-d54-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            lane: real-apple-vision
+          - runner: xcode-27
+            lane: iphoneos-compile
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+      - name: Checkout proven R793 only (NO IPA)
+        uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows/d30.b64
+            .github/workflows/r793.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Reconstruct exact R793 via original hash-gated D53 source steps
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p R793Proof R794Proof
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, re, os, json, hashlib
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert actual=='37b3e26851c71fcabd65da3299356c1e38c53869'
+          original=Path('.github/workflows/r793.yml').read_text()
+          blocks=re.split(r'(?=^    - name: )',original,flags=re.M)
+          parsed={}
+          for block in blocks:
+              m=re.match(r'    - name: (.+)\n',block)
+              if not m or '      run: |\n' not in block:continue
+              body=block.split('      run: |\n',1)[1]
+              lines=body.splitlines(keepends=True)
+              assert all(x.startswith('        ') or not x.strip() for x in lines)
+              parsed[m.group(1)]=''.join(x[8:] if x.startswith('        ') else x for x in lines)
+          names=[
+              'Restore independent SHA verified source NO IPA',
+              'Apply pinned R773 cumulative source delta with SHA checks',
+              'Apply R774 source-only delta with strict SHA checks',
+              'Apply R775 source-only delta with strict SHA checks',
+              'Apply R776 quick lane freshness delta with strict SHA checks',
+              'Apply R777 through R780 cumulative delta with SHA checks',
+              'Apply SHA verified R781 through R793 source fixes NO IPA',
+          ]
+          for n in names:
+              assert n in parsed,n
+              with open('R794Proof/Restore.log','a') as out:
+                  out.write('BEGIN '+n+'\n');out.flush()
+                  r=subprocess.run(['bash','-e','-o','pipefail','-c',parsed[n]],
+                      stdout=out,stderr=subprocess.STDOUT,env=os.environ.copy(),timeout=360)
+                  out.write('END '+n+' '+str(r.returncode)+'\n')
+              assert r.returncode==0,('R793_ORIGINAL_STEP_FAILED',n)
+          root=Path('source')
+          manifest=json.loads((root/'source_manifest.json').read_text())
+          disk={str(p.relative_to(root)):p for p in root.rglob('*') if p.is_file()
+              and '__pycache__' not in p.parts}
+          assert set(disk)==set(manifest)|{'source_manifest.json'}
+          assert len(disk)==566 and all(sha(disk[k].read_bytes())==v
+              for k,v in manifest.items())
+          digest=sha(''.join(n+'\t'+sha(disk[n].read_bytes())+'\n'
+              for n in sorted(disk)).encode())
+          assert digest=='b1f01daec74002cec9dd2ab3a79b9e7e0621d8a76d010f64e34068d10f414ff2',digest
+          Path('R794Proof/R793_PINNED_SOURCE_SHA.txt').write_text(digest+'\n')
+          print('R793 pinned original complete',len(disk),digest)
+          PY
+
+      - name: Apply bounded R794 source-only diagnostic delta with strict SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, base64, lzma, subprocess
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          packed=base64.b64decode(''.join((
+            '/Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4EKUEt9dABboBAwi8pS7Ve3EwjehQ5L2Q0dC0SvebQg+dkoFOhwLuLAsOn4StJaEX3fD'
+            '8DDKmuBvu53Sa6P3KMFXfaYWOMn4ARke1hI0jppIa9def4sPAoAl90PRt1cFp5i40V7zdjqqznv6io4JwRrA2WDnNOOICP/GBN6z'
+            'dB2XE3ZkCtSLJ92TadmYNdkQMi+IcVvb7bXuYIzS0JExfxSzlXaQ2SfHENv/Iu9F1E3GCaIAI6WTUYH9r6Revm+Nk2oJpcFe//Qu'
+            'EXDvCCE8VDapS2LgXqYHvaMWnlwO8bc3VxjPJB6rCL3ZsxaCtpGv97YGe+Mbz/ngLCHLjmSbFqoT5LI+fGHrPQ8Bsc+xg1ubYLW9'
+            'MsHlNCZMXzOvxYIXSQW65tAinT1xW7NZU9rNjgja+a5w2IGWp5w1493vrleEu2Wi6m4rnXTFHguFM40A7cNcRfmZOQ3+MEQ2ZMAP'
+            '8mffrmd+HbbB/MKLXBsuzCQZGkdCeiomIsh0yXBdphMO8uoTZ0PUaTsdBFidNTZ4ARh7aPtUku6A/on/DlTsSwC8P13ZetiV892V'
+            'HiTo7CfXAhlWguf508wkvDZCcMjc6H/2R18OyDN3v12mNUKT0VX/LIftevMmNMm53Pzg5CCK4jJAfsGkMZux91lDfo9zLqWNH9/S'
+            'HpknM0WFeH1Skv4I00LejHrgFiAoxBRWH2KXnko5rgXFBCQoXSlZKRUCq8CjLLo3bb3vb7itoo9Z9m6DsLze7AweggVXIDCeQaIO'
+            'sL7l5WmB+ARVVQpVeCqGo3Y31fyq6n+6AUh/JySRY0yX1bK/Zc2KnFEy/phZn/IRKrf3+PFYCzzNeiafnodq5N15WpsKrRq3wcqQ'
+            'wbfb21O2yPRS0uCOcD9E1wlMlEegcsD2evYeLrFVXYnpS1jzn2bHyansui+ZivBg8XST7UPzo+uKAb1xudwApbFY3CT6pVXbYcKC'
+            'yN+cHUXH1q0ZmCP7pffCP1GLyGYgvafdIwoQTWExgM9vS6+yYv1ZtQ1V18YIcOzUYxLwBwccRAPPfemZtzAzOhE3JRsO1Y14/ClJ'
+            'Q4bFDTfKY/9XWX5bDjIwck4C7QTl3Mza17hMVATqGHEThx8PMQIGAOt3jcsHzC4csF7tU1xqgl2KA7XTcJNJvnRJSvupibIfiu9I'
+            'moDmGWefZ6ZpCsyFapPAlaHANMh0kqu6IJKIij4NrRd8l1QfTqO7rvdmXzTJ0UfiggSbtW8bL88PDME4SMC1Kb7aYHsxRcxdCFLn'
+            'o1ek9DMXK3nY9uboet+o7L+EJB80KCWm3dK19OEP3vYjlPCeL3htD/IlR6zOXNpwJ+dZXrAsaDKYlOb9aF7vGI9yRHCxdz4s/osl'
+            'OR4KkZw1fYEYHtZV7v8JimebKfm1WL/2c3k6qLR9v5k9z37gblNlL3Q400fddwoXovLQo6+UiR2elISfyBIj4Dmi95W+rpQvRslz'
+            'akwOIpzICeV43hGrFovnufEX782C/uAtoPWfFrIQluX+m/EzBs2UTI5TvUwcjX8cSlkqBDZgJPeC/pQHJJlJSodGI12PDlRxmWlY'
+            'SegHjJ2AiM93E9JeE2ZIBiz+HTn0bzWFH07i8ZsqkIw8Ap72X1qnVcgJCck5CQ1ZUxR8qBXx1zFydmSvTM9r9NmFItezAPp4g/RL'
+            'szJKh3EaxhoX6Y4cbAOYxNa2HTv5lNC0g/rA9TWm9ojaaGuxjPg9tGNO2gzSBV9M34IC6pBupJIn6kHQe1N9ssr26O68a0d2LRX7'
+            'VB0PipFiSyTGuOa0l6cudGjm3U/5XUniZ7/dFDSpNjZgd6D1Z3qns176exjIbwO0jCWgVi0DCij7E4SbVblP0c+o8b1NBRui6RK5'
+            'OWqe49A93JgRZKxrTJzHwZuWI6b2chdaFT5/C0OtWTK5DgM0X/KCABhQpq4a5NvcOtgjQLZBJtadRAc9AEVqhD5r0kLOveJ4fVI0'
+            'OMFDgiCLM32rJGZvmmnHJ9VBfY9PQIIaNWofwvlMISGGRb2WA++B5tbQ1AAEfAhTQR3e0fqA1im02BotbH57dVN88bXQkn+CsMWR'
+            'igxEoIRWynr4E7+ZmTaw0VevxbSPffSX2xqSkh1My+Dbvt5rPKTnpj+R46pJu9Y8u+NrKb2JgwgtrtqBfHJMdbcjXl7ufmh8kvrO'
+            'gCT1HPGEtG65BgAT0kDDxrUIl+/YGhGyN+lN36uTNjjghecnldr3EoWTJx9FZxSvhPKxyYjVC2RQVnk8pvgCF0XgVci/koLn/jor'
+            '3h0J5zZlA1AW0VxhtEgiJUwV55BbfdNCOZOI6w2CPJQfHsS4AOiQnm7lq0x/XSE0ZSAHfSzn0MLz95WY13cufZnitcrUGNaJGBpQ'
+            'IgfRsu/VpiPiZ0fUeTpYli8U4gW12ID+o7JMAhzZhZt8swqlgRKhbE+JkEeGeU+a9w0ZnnsIt53I3YBXbUcGiwaUVMHv4hqCRkle'
+            'pw4z1ATlhcl4rrXtv5sH+iji3j/IYILmArzXVfsRF4a3tYTkhPh5WdDjWZkMic8omA8xXYbyGLdOUYyeiB5X0qzFV2RNpSAbCGFL'
+            'BnBsopi7+zQ9f5uTAJrpAdNY6HPiytyoK4r/DnyVgeQqmAJLL4uS7H5BlI2tUaeMorom2FQqZLBxvVJRFFwjSXauiyLyNLIXRJFy'
+            'mSMeYautRC0nRfTh4w2HVPuKfiHKBeuTf0F3LAvSUlB+fGJOY+DB+U+AnALMM4CZvNQjjX+FWj2t0YeF/Dk75HjnaNcZE6mtKz1L'
+            'TguA8V8lryDzy2B/bC+t9sRK1GPDt4sKRdfmA32Ysv9c8W7ojupYlQtgImcMt3OIoy7aycoXtsc1UCwSXeSXsoABDSzi/wrt4PGf'
+            '3NUH2RC5j5pI8CzcfrXK9tEVBIqyRlmnnDdXzeIpRGMo4FJQTL1u50nUmu0KqXrJCWqYLAMR4TM7V6t+5wr8iVB6wTy04jbyemYD'
+            'l39RUWvkNWcIvbEPGj61qCiKQakUIK1vw5/0yI4g7IkpIQEhJ/nyKrwH3xucHRxde8/kmDZkYLdIV6ePEsN1xMTDCKbkD43D7K6x'
+            'RWoO5Qckj5IoSNLVAJJr0N94Q+h4NXAZB61cIo6LCkxNoCbakkUlSY3Lz8hnaAyzO9m7HPQXuNRnuiavd98UNER1/Llgt0PEoNhY'
+            'BBzLkIe5oQ8ftvRzHAMQPlrMCAwvVxe+4g4laa+FiGFAEMt0JqGjMQ9k6YW+R6JUb47J7VaK/dZ0SN3Ng8Ha7mV+eoja5860VY1O'
+            '4Ai9WJiGqafg6R2pqZi+F0NCgoqTa/BIQ5BW4qdS+ROxsqq3sMEIDxLH05Eev/SgcBbZmo/HAYY9QkmpsrF2xRbYA0dEqtjSweV/'
+            'w68m8tShXUVEJu5rvzDtM6MsDS7dBQSTvZ2pgYnEqvltoNiAbANXKkfariKWMzFo3vkIiqmpz+zRzrFeKPB+/XBmsxEu6uAocNNp'
+            'yAu5K95Ib9WnOzm56duJ3msKbtTyDgxO1UcRw0heCpP0ZTsR9nMfKQ92FAs74piWDHNHEO83P8hOQnX9/mGIPr3GeDVuw8RuL28Q'
+            'tCuPoSCYhcDmndThwfLFGAMffkiIN++fpFsY3ezmkUQ4+JO8+3GdYhgLi8xbZpn8BPewH+ipZFOh2jgThsKeJZ67Humwwg+WB5++'
+            'ZVIQTfB3jKSM/y2rJyY19dl/R0CnJIzqHuKbSMGx/L7IpiWXHHOrTQvOrpj6Yiu7VJrxoj6QjDmkbnbU+XaQw4XrCqSe7fAIigYZ'
+            'NfCNU+FU2pUYXtamOwHFC4aINbv5lnSWaxdg+Ae4KjqUutZRcXj7JJTi8RlYhzqrbANUF/thaxueziFM/40/SUnmvxYV0ojy6Cfn'
+            'GApBaSF6U4Cey/A1JnzfGvNPj7LXQZwKXU+L/0V3X0HoWRKP2Oa7UOgYgx3Qu6hJtmZMOrSUSxxPAyW/5IUX3BVePpVQ9EeC7sBF'
+            'oNCoCm9i47n90dNlHM6goa9sq108k66UD/5JMCvilz4KE9Rk/gEYQ+YldxTgb1fRHx3q0lMTNGtLbY48RDpvBL0U1VbuioO0DM3x'
+            'i2znfP/0lTHeeKwsAiHzCC+FR9JNxl1GnxgpcTx/jghiM2BATEACcAyfBNQCFF2LsJ8mXiV63EQnmiFEtozjL5ARd3CP6RUYMcya'
+            'kRKjIvOUdS9eKH2HIvu8/e1/ntlITeahA6k5j/zSL9NsYuLeURdbNxP79uQzYb060sBe0xFPIVKgUGHIUjactpLfrt9C808aVZT3'
+            'MCa6w6IuRMTIewi99y7GWoVn06wFLykdp1F7ng7mA7g8+R0fiId0ejgF6uzmVOgccIW5ozskWcbyG1Wa3MWFqxwU3a1wcRXK6SjL'
+            'e8S12JsEPGD5BdpTDf+cRqz2jgukPa5uejM6W5aag9kWfQuPotTyVSwtdvBFW8Eoe5dljoloNQB9iROramGNi7AvF8MmX2LYeFXA'
+            'YlXcf5iUvPD0fFOVFogQ69teBawbg9yhxJjCDVhmuNBflNAxAwygerpczhdOo8/c+zPLsUDz2hFUDny4OhBi4u8Tmzfxf781TuyV'
+            'fIpDUZOt+vc7EJppdx8aBA122h8L3cxuTEfRL8+7uw5S953y4KVra0+ATU8v1bFKaIxeG7lbdRYmXFYjlkiSCrIvpyCbK1lvtyX5'
+            '9c2u2YnrCelSHr+n0VnxjLPDXydWPMICIJnnztjQPpLs/0y21atMUBLGaatrqARyfDFzMGEbYa7MaGbkIeyJNq1L9Z6Ub10umIWJ'
+            'nXTnfHHzdVzMFQcnMo6Sh1gGh0xlpujSQ5i4pMPCu4i1Z9BFdZCq+6iCrL6SxR3Yn+jajFlxkUshDq6xJnQOgP48s0Z0HGQLyh9Q'
+            'bmT7GWKyJFTWTVdoFJX+LpaZcEpZsMuVvqjkIWZKO7mEk51wlw6P6EFoetoxT5Yez+0Bxzly7dTHprZpGrwHL5/4ireFRnM4q8Fh'
+            '4OJ8QptuVAl7j92k6pEMIn6uQgoLmYdnxRVTzNfIDONFIyPf9MQmkteMQ9Um3lq1w0Bxyk5tmzjRCnzxA0y6JmQDP9XG8ypxBoVH'
+            'Yhz5Ly9r5kaChW/Sw66oe9IOJNsMEJsq7KnXkdYWuOK2nytjfzp276Vn9aLQ1yzkw9rYxwdczHlQ7RAIiJ+C8mQyfqxlMLYTVTCa'
+            'B+5Ji5hKIy+mDXEKl5O8JupHHyOogZ0t5oL0MhIkagzBLJJ0K5piNCwr3/RBvHCyEeWq4hMpdmc1/zUNNgLCgDyHDEk/nKuY4umr'
+            'O1ivNh/ZIy7O5I3cfGOKDEdru/gMks3hM0Ti904W8d3aPJs0dIz0jez3MUuSmX76vxwzqsYTpCOPqjY0CoAcJ18zT9yljW7yt4Lp'
+            'LKf5+OOL1oMqYiIUaVfSu7SlBzUI8sNOKZsHlfeIx9M5x90O7aAwuwhjYJgsNL7sXV6eb12oPhdzotGPhpgfRWYgGFoS1GkII5p5'
+            'XRY+VBlIqYb8fLuC3UQTIIHrO368une5yk7WiH2UkSjP7t150g6z7Qbt1B9QSMHJpnhAIjIWMDR30U1jrm8X0RIxGiN2j8GGzMUN'
+            'PIcfuti7XZnPUDl1ZiJLb9XcQl9I9oD/z/hYtbYXmZfZEuQXRGT1O7bWdnMDe4MJkakH35HJ1DFyl6X74Hx+ezv4Q2sV9QWnBEPK'
+            'mh81Xr7l+E1sOzj6cCnV1spOWqv6RfFtbKUrs0NghLd+ihALBLbmBluXYcAko3qXeG5qxanoGl2tZqfQM9VN+XPSpYtZhYxl3MY1'
+            'nWYxJdyxaYIL0B01/YSf3kMUVUyoWN+EyxbXO3hCNCOCUPSykKmxKNDLQ3OOLcXtzUedULqA04ihU8Px2TiwIueGG0qynPSjr/VG'
+            'HdHoXVIvD+hltToarajg0jt/qWLUCK6k8K8ynJHHss0iqTTrEPCVL+K7AzWn3DDX6ZZXMXY3bD6gXHmoEzK6NwaO1983E3k/hf0v'
+            'Md7D8iCBHjGNFZ/xjqEIHw86AdS+iT8GuXNsAo2Kvsp805fNBAKcGNTREaY6ffavvVyPBHYrmvVClxd6lIQcI5vAcAinnRzYyTZO'
+            'suqJEnx9ruPMIZQhFr47QwwemVXX+HhQs63Pfm/UjBLO31i62oOmoGsbWw/GAogHmdUuDzyTYXcuW5LYBoNDDzO/7fRL//UtMkuI'
+            'Cbzc7xxfwsSY86VOuMM2PJzHYm8oyoVkr6eetXB3surd/E63nhZbZKj2iQ2CwYAQvx+ffLuTDVHL/1abxPEu31DqNMMirK18bZY9'
+            'liKbqkj377aboWb5/Angv21clwa1Q+vIhXTZe0C1EJw4/xVPTbSRO19PnItC+6VXdzvHyp5GAdb0Y+a4UDu8+qWQcC+2Apa9ds3v'
+            'VcZCtQ7v54/xYGzhN/wzHR8n3vYraWHHGOnQhsHJxrTdQNyP//JC2kH4Pkd1QftDbYd48WeL1q0pFZGqVegAABYjgf/GpCUDAAH7'
+            'JZWFAQDPZFrBscRn+wIAAAAABFla'
+          )),validate=True)
+          assert sha(packed)=='d03b5f2c38468d146ed6133ed9f4bbd4187b38f00f7b108d0f92225e06893437','R794_COMPRESSED_DELTA_SHA_MISMATCH'
+          payload=lzma.decompress(packed)
+          assert sha(payload)=='2b43ec37a22465b3528d87ee5f8cd638e1060593fcfaa2c61e0cc5b950992553','R794_SOURCE_DELTA_SHA_MISMATCH'
+          subprocess.run(['patch','-s','--batch','--fuzz=0','-p1'],
+              cwd='source',input=payload,check=True)
+          root=Path('source')
+          manifest=json.loads((root/'source_manifest.json').read_text())
+          disk={str(p.relative_to(root)):p for p in root.rglob('*') if p.is_file()
+              and '__pycache__' not in p.parts}
+          assert set(disk)==set(manifest)|{'source_manifest.json'}
+          assert len(disk)==567 and all(sha(disk[k].read_bytes())==v for k,v in manifest.items())
+          tree=sha(''.join(n+'\t'+sha(disk[n].read_bytes())+'\n'
+              for n in sorted(disk)).encode())
+          assert tree=='19f75d0296ef6166966833f8ae087b4c80502b37f243cb4842ed2997975379b0',tree
+          a=root/'app/ios/ChampionsOnDevice/R792AutomaticVisionInput.swift'
+          b=root/'R720_PORTABLE_TESTS/Sources/R719Core/R792AutomaticVisionInput.swift'
+          assert a.read_bytes()==b.read_bytes(),'MIRROR_DIVERGENCE'
+          proof={'revision':'R794','base_revision':'R793','source_count':567,
+            'tree_sha256':tree,'patch_sha256':sha(payload),'ipa_created':False,
+            'device_certified_fields':0,'source_only_no_prod_ocr_schedule_change':True}
+          Path('R794Proof/SOURCE_INTEGRITY.json').write_text(json.dumps(proof,indent=2))
+          print('R794 delta verified 567 SHA-bound files',tree)
+          PY
+
+      - name: Native original-resolution tile geometry and actual PNG Apple Vision
+        if: matrix.lane == 'real-apple-vision'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export R794_DIAGNOSTIC_DIR="$GITHUB_WORKSPACE/R794Proof"
+          cd source/R720_PORTABLE_TESTS
+          swift test --filter R794SourceTileDiagnosticsTests > "$GITHUB_WORKSPACE/R794Proof/TileSwift.log" 2>&1 || {
+            tail -120 "$GITHUB_WORKSPACE/R794Proof/TileSwift.log"
+            exit 1
+          }
+          cd ../..
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          p=Path('R794Proof')
+          for n in ('R794TileMoveVision.json','R794TileSelectionVision.json'):
+              q=json.loads((p/n).read_text())
+              assert q['tile_count']==2
+              assert q['source_width']==2796 and q['source_height']==1290
+              assert q['source_png_unchanged'] and not q['real_device_capture_certified']
+              assert q['device_certified_fields']==0
+              assert not q['auto_production_tile_ocr_enabled']
+              assert len(q['rows'])==len(q['alternatives'])
+              assert all(t['pixel_count']<=2_000_000 for t in q['tile_metrics'])
+              assert all(t['language_correction']==False for t in q['tile_metrics'])
+          m=json.loads((p/'R794TileMoveVision.json').read_text())
+          s=json.loads((p/'R794TileSelectionVision.json').read_text())
+          comparison={'baseline_revision':'R793','diagnostic_revision':'R794',
+              'baseline_full_raster_projected_move_exact':1,
+              'baseline_full_raster_selection_exact':4,
+              'tile_projected_move_exact':m['projected_move_names_exact'],
+              'tile_projected_pp_candidate_count':m['projected_pp_candidate_count'],
+              'tile_selection_exact':len(s['selection_names_exact']),
+              'no_dictionary_autocorrection':True,
+              'device_certified_fields':0,'certification_gate_passed':False,
+              'note':'Controlled fixture comparison; production fallback not enabled.'}
+          (p/'R794_COMPARISON.json').write_text(json.dumps(comparison,indent=2))
+          print(json.dumps(comparison,indent=2))
+          PY
+
+      - name: Full Mac Swift existing regression - preserve failures
+        if: always() && matrix.lane == 'real-apple-vision'
+        shell: bash
+        run: |
+          set -uo pipefail
+          export R794_DIAGNOSTIC_DIR="$GITHUB_WORKSPACE/R794Proof"
+          export R792_AUTOMATIC_OCR_DIR="$GITHUB_WORKSPACE/R794Proof"
+          export R761_FIELD_AUDIT_OUTPUT="$GITHUB_WORKSPACE/R794Proof/FieldSafety.json"
+          export R761_APPLE_VISION_OUTPUT="$GITHUB_WORKSPACE/R794Proof/RealAppleVision.json"
+          cd source/R720_PORTABLE_TESTS
+          swift test > "$GITHUB_WORKSPACE/R794Proof/Swift.log" 2>&1
+          result=$?
+          printf '%s\n' "$result" > "$GITHUB_WORKSPACE/R794Proof/FullSwift.exit"
+          echo "Full suite exit=$result (R792 baselines NOT relaxed)"
+          exit 0
+
+      - name: Python static regression and source preservation (iPhoneOS lane)
+        if: matrix.lane == 'iphoneos-compile'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in r761_preflight r742_live_path_audit \
+            r743_macos_compat_audit r745_read_path_gate \
+            r748_capture_path_gate r780_project_source_parity; do
+            python3 "source/tools/$script.py" > "R794Proof/$script.log"
+          done
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install ffmpeg
+          fi
+          python3 -m unittest discover -s source/tools/tests -p 'test_*.py' \
+            > R794Proof/Python.log 2>&1 || {
+            tail -120 R794Proof/Python.log
+            exit 1
+          }
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('R794Proof/Python.log').read_text()
+          assert 'Ran 65 tests' in p, 'LEGACY_TEST_COUNT_CHANGED'
+          assert p.rstrip().endswith('OK'),'PYTHON_REGRESSION_NOT_OK'
+          assert 'skipped=' not in p,'NO_SKIPS_ALLOWED'
+          src=Path('source')
+          a=src/'app/ios/ChampionsOnDevice/R792AutomaticVisionInput.swift'
+          b=src/'R720_PORTABLE_TESTS/Sources/R719Core/R792AutomaticVisionInput.swift'
+          assert a.read_bytes()==b.read_bytes()
+          for text in ('sourceTileRects','sourceTileImages','rects.count<=4'):
+            assert text in a.read_text()
+          print('65 Python tests no skip + mirrored R794 tiles')
+          PY
+
+      - name: iPhoneOS real xcodebuild (NO IPA)
+        if: matrix.lane == 'iphoneos-compile'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, subprocess,sys
+          root=Path('source')
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          def verified():
+              files={str(p.relative_to(root)):p for p in root.rglob('*') if p.is_file()
+                  and '__pycache__' not in p.parts}
+              manifest=json.loads((root/'source_manifest.json').read_text())
+              assert set(files)==set(manifest)|{'source_manifest.json'}
+              assert all(sha(files[n].read_bytes())==h for n,h in manifest.items())
+              return sha(''.join(n+'\t'+sha(files[n].read_bytes())+'\n'
+                  for n in sorted(files)).encode())
+          assert verified()=='19f75d0296ef6166966833f8ae087b4c80502b37f243cb4842ed2997975379b0'
+          subprocess.run([sys.executable,'source/tools/generate_xcode_project.py'],check=True)
+          assert verified()=='19f75d0296ef6166966833f8ae087b4c80502b37f243cb4842ed2997975379b0','PROJECT_GENERATOR_SOURCE_DRIFT'
+          PY
+          xcodebuild -project source/app/ios/ChampionsOnDeviceResearch.xcodeproj \
+            -scheme ChampionsOnDeviceResearch -configuration Debug \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO \
+            -derivedDataPath "$RUNNER_TEMP/r794" build \
+            > R794Proof/iPhoneOS.log 2>&1 || {
+              grep -E 'error:|BUILD FAILED' R794Proof/iPhoneOS.log || true
+              exit 1
+            }
+          grep -F 'BUILD SUCCEEDED' R794Proof/iPhoneOS.log
+
+      - name: Preserve measured diagnostic status (no device certification)
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os,json
+          p=Path('R794Proof');p.mkdir(exist_ok=True)
+          lane='${{ matrix.lane }}'
+          data={'revision':'R794','lane':lane,'ipa_created':False,
+              'device_certified_fields':0,'device_180s_certified':False,
+              'full_mac_ocr_gate_certified':False,
+              'source_integrity_checked':(p/'SOURCE_INTEGRITY.json').is_file(),
+              'tile_diagnostic_saved':all((p/n).is_file() for n in
+                 ('R794TileMoveVision.json','R794TileSelectionVision.json')),
+              'full_swift_exit':(p/'FullSwift.exit').read_text().strip()
+                   if (p/'FullSwift.exit').exists() else None,
+              'source_changes_awaiting_apple_validation':True}
+          (p/'GATE.json').write_text(json.dumps(data,indent=2))
+          print(json.dumps(data,indent=2))
+          PY
+
+      - name: Upload delta-only evidence even on failure (NO IPA)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R794-${{ matrix.lane }}-NO-IPA
+          path: R794Proof/
+          retention-days: 3
+          if-no-files-found: error
+
+      - name: Final strict gate - do not downgrade R792 or R793 assertions
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f R794Proof/SOURCE_INTEGRITY.json
+          if [ '${{ matrix.lane }}' = 'real-apple-vision' ]; then
+            test -f R794Proof/R794TileMoveVision.json
+            test -f R794Proof/R794TileSelectionVision.json
+            test -f R794Proof/FullSwift.exit
+            test "$(cat R794Proof/FullSwift.exit)" = 0
+          else
+            grep -F 'BUILD SUCCEEDED' R794Proof/iPhoneOS.log
+            grep -F 'Ran 65 tests' R794Proof/Python.log
+            grep -E '^OK$' R794Proof/Python.log
+          fi
