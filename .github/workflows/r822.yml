@@ -1,0 +1,62 @@
+name: R822 D82 R820 QUICK DETAIL Source Audit NO IPA
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/r822.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout pinned R821 workflow only
+        uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/workflows/r821.yml
+          sparse-checkout-cone-mode: false
+      - name: Verify and expose exact R820 source and failing tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R822_AUDIT_PY'
+          from pathlib import Path
+          import base64,hashlib,json,lzma,re
+          y=Path('.github/workflows/r821.yml').read_text()
+          start=y.index('blob=base64.b64decode(')
+          end=y.index(')),validate=True)',start)
+          b64=''.join(re.findall(r"'([A-Za-z0-9+/=]{2,})'",y[start:end]))
+          blob=base64.b64decode(b64,validate=True)
+          digest=hashlib.sha256(blob).hexdigest()
+          assert digest=='b2ea5efb6d2bfd611c6ee85de0b829ae1f4a1ed4a6e14c4f8a8ea2ec7f9835cb',digest
+          payload=json.loads(lzma.decompress(blob))
+          expected={
+           'app/ios/ChampionsOnDevice/R767QuickEpochExecutionPool.swift',
+           'app/ios/ChampionsOnDevice/R768DetailEpochExecutionPool.swift',
+           'R720_PORTABLE_TESTS/Sources/R719Core/R767QuickEpochExecutionPool.swift',
+           'R720_PORTABLE_TESTS/Sources/R719Core/R768DetailEpochExecutionPool.swift',
+           'R720_PORTABLE_TESTS/Tests/R719CoreTests/R767QuickEpochExecutionPoolTests.swift',
+           'R820_CHANGELOG.md'
+          }
+          assert set(payload)==expected,('unexpected change set',set(payload)^expected)
+          print('R822_VERIFIED_R820_PATCH',len(payload),flush=True)
+          for name in sorted(payload):
+           record=payload[name]
+           data=base64.b64decode(record['b64'],validate=True)
+           assert hashlib.sha256(data).hexdigest()==record['new'],name
+           if name.startswith('R720_PORTABLE_TESTS/'):
+            print('=== SOURCE_BEGIN',name,'===',flush=True)
+            for n,line in enumerate(data.decode('utf-8').splitlines(),1):
+             print(f'{n:04d} | {line}',flush=True)
+            print('=== SOURCE_END',name,'===',flush=True)
+           else:
+            print('R822_MEMBER_OK',name,len(data),record['new'],flush=True)
+          print('R822_COMPLETE_NO_IPA',flush=True)
+          R822_AUDIT_PY
