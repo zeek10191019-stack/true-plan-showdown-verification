@@ -1,0 +1,176 @@
+name: R825 D85 Extract Exact OCR Owner Turn Evidence Source For Safe Runtime Fix NO IPA
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/r825.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: r825-d85-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  trace:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: macos-26
+    timeout-minutes: 55
+    steps:
+      - name: Checkout pinned R823 source reconstruction recipe
+        uses: actions/checkout@v4
+        with:
+          ref: 4cc925234f9101a8875744e75049f06e96ce4d90
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-r823
+          sparse-checkout: .github/workflows/r823.yml
+          sparse-checkout-cone-mode: false
+      - name: Checkout pinned R821 source patch recipe
+        uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-r821
+          sparse-checkout: .github/workflows/r821.yml
+          sparse-checkout-cone-mode: false
+      - name: Checkout pinned R819 exact 69-step recipe
+        uses: actions/checkout@v4
+        with:
+          ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-r819
+          sparse-checkout: .github/workflows/r819.yml
+          sparse-checkout-cone-mode: false
+      - name: Checkout pinned R793 original bootstrap
+        uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-r793
+          sparse-checkout: |
+            .github/workflows/d30.b64
+            .github/workflows/r793.yml
+          sparse-checkout-cone-mode: false
+      - name: Reconstruct full source from pinned D83 recipe only
+        shell: bash
+        env:
+          R823_LANE: real-apple-vision
+        run: |
+          set -euo pipefail
+          ruby -ryaml -rjson -e 'recipe=YAML.load_file(ARGV.fetch(0)); puts JSON.generate(recipe.fetch("jobs").fetch("verify").fetch("steps"))' \
+            pinned-r823/.github/workflows/r823.yml > r824_r823_steps.json
+          python3 - <<'R824_BOOT_PY'
+          from pathlib import Path
+          import hashlib,json,os,subprocess,sys
+          steps=json.loads(Path('r824_r823_steps.json').read_text())
+          assert len(steps)==9,'R824_R823_STEP_COUNT_DRIFT'
+          assert steps[3]['name'].startswith('Reconstruct R821 full pinned production source')
+          assert steps[4]['name'].startswith('R823 repair ordering of two legacy QUICK tests')
+          cwd=Path.cwd()
+          for i in (3,4):
+              s=steps[i]
+              workdir=cwd/s.get('working-directory','.')
+              script=s['run']
+              assert chr(36)+'{{' not in script,('UNEXPECTED_EXPRESSION',i)
+              print('R824_EXACT_REPLAY',i,s['name'],flush=True)
+              with (cwd/f'R824_replay_step_{i}.log').open('wb') as out:
+                  p=subprocess.run(['bash','--noprofile','--norc','-e','-o','pipefail','-c',script],cwd=workdir,env=os.environ.copy(),stdout=out,stderr=subprocess.STDOUT,timeout=1800)
+              tail=(cwd/f'R824_replay_step_{i}.log').read_text(errors='replace')[-4500:]
+              print(tail,flush=True)
+              if p.returncode:sys.exit(p.returncode)
+          root=cwd/'pinned-r793/source'
+          m=json.loads((root/'source_manifest.json').read_text())
+          excluded={'.build','__pycache__','.swiftpm'}
+          fs={str(p.relative_to(root)):p for p in root.rglob('*') if p.is_file() and not excluded.intersection(p.parts)}
+          sha=lambda x:hashlib.sha256(x).hexdigest()
+          assert len(fs)==596 and set(fs)==set(m)|{'source_manifest.json'},'R824_SOURCE_INVENTORY_DRIFT'
+          assert all(sha(fs[n].read_bytes())==h for n,h in m.items()),'R824_MANIFEST_HASH_DRIFT'
+          t=sha(''.join(n+'\t'+sha(fs[n].read_bytes())+'\n' for n in sorted(fs)).encode())
+          expected=(cwd/'pinned-r793/R823Proof/SOURCE_TREE_SHA256.txt').read_text().strip()
+          assert t==expected,'R824_R823_TREE_SHA_MISMATCH'
+          print('R824_SHA_VERIFIED_SOURCE_RESTORED',len(fs),t,flush=True)
+          R824_BOOT_PY
+      - name: Collect exact 36 SHA-verified source and regression tests (NO IPA)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'R825_EXTRACT_PY'
+          from pathlib import Path
+          import hashlib, json
+          root = Path('pinned-r793/source')
+          proof = Path('R825Proof')
+          selected = proof / 'targeted_source'
+          selected.mkdir(parents=True, exist_ok=False)
+          sha = lambda b: hashlib.sha256(b).hexdigest()
+          manifest = json.loads((root / 'source_manifest.json').read_text())
+          ignored = {'.build', '__pycache__', '.swiftpm'}
+          disk = {str(p.relative_to(root)): p for p in root.rglob('*')
+                  if p.is_file() and not ignored.intersection(p.parts)}
+          assert len(disk) == 596 and set(disk) == set(manifest) | {'source_manifest.json'}, 'R825_ALL_SOURCE_INVENTORY_DRIFT'
+          assert all(sha(disk[k].read_bytes()) == h for k, h in manifest.items()), 'R825_SOURCE_MEMBER_HASH_DRIFT'
+          tree = sha(''.join(k + '\t' + sha(disk[k].read_bytes()) + '\n' for k in sorted(disk)).encode())
+          assert tree == '117bd41fcd85b946c78fd812ce15e5ff96e01cd9bdded0e9362b6eacbc38421b', 'R825_R823_SHA_DRIFT'
+          targets = json.loads('["app/ios/ChampionsOnDevice/CaptureCoordinator.swift","app/ios/ChampionsOnDevice/R551ScreenReadState.swift","app/ios/ChampionsOnDevice/R564OwnerHintFence.swift","app/ios/ChampionsOnDevice/R565SourceEvidenceFence.swift","app/ios/ChampionsOnDevice/R635LayoutToFields.swift","app/ios/ChampionsOnDevice/R646FieldSignalReaders.swift","app/ios/ChampionsOnDevice/R667ExpandedOCRFields.swift","app/ios/ChampionsOnDevice/R676FieldOverlayOCR.swift","app/ios/ChampionsOnDevice/R677TurnTimerOCR.swift","app/ios/ChampionsOnDevice/R683FieldEvidenceBridge.swift","app/ios/ChampionsOnDevice/R690HistoricalEvidence.swift","app/ios/ChampionsOnDevice/R716SpatialFieldProjection.swift","app/ios/ChampionsOnDevice/R718OwnerTurnEvidenceAudit.swift","app/ios/ChampionsOnDevice/R725LivePixelEvidence.swift","app/ios/ChampionsOnDevice/R726LiveOCRClosure.swift","app/ios/ChampionsOnDevice/R737LiveFieldBridge.swift","app/ios/ChampionsOnDevice/R739FieldRouteCoverage.swift","app/ios/ChampionsOnDevice/R741CaptureMetadataEvidence.swift","app/ios/ChampionsOnDevice/R742QuickVisionBridge.swift","app/ios/ChampionsOnDevice/R749OwnerTurnBindingAudit.swift","app/ios/ChampionsOnDevice/R750TurnPhaseAudit.swift","app/ios/ChampionsOnDevice/R761FieldSafetyContract.swift","app/ios/ChampionsOnDevice/R763CaptureGapLedger.swift","app/ios/ChampionsOnDevice/R781OCRConfidenceEvidence.swift","app/ios/ChampionsOnDevice/R792AutomaticVisionInput.swift","app/ios/ChampionsOnDevice/R802SameFrameEvidenceJoin.swift","R720_PORTABLE_TESTS/Sources/R719Core/R718OwnerTurnEvidenceAudit.swift","R720_PORTABLE_TESTS/Sources/R719Core/R737LiveFieldBridge.swift","R720_PORTABLE_TESTS/Sources/R719Core/R749OwnerTurnBindingAudit.swift","R720_PORTABLE_TESTS/Sources/R719Core/R750TurnPhaseAudit.swift","R720_PORTABLE_TESTS/Sources/R719Core/R761FieldSafetyContract.swift","R720_PORTABLE_TESTS/Sources/R719Core/R802SameFrameEvidenceJoin.swift","R720_PORTABLE_TESTS/Tests/R719CoreTests/R737LiveFieldBridgeTests.swift","R720_PORTABLE_TESTS/Tests/R719CoreTests/R749OwnerTurnBindingAuditTests.swift","R720_PORTABLE_TESTS/Tests/R719CoreTests/R750TurnPhaseAuditTests.swift","R720_PORTABLE_TESTS/Tests/R719CoreTests/R802SameFrameEvidenceJoinTests.swift"]')
+          assert len(targets) == 36 and len(set(targets)) == len(targets)
+          extracted = {}
+          for name in targets:
+              assert name.startswith(('app/ios/ChampionsOnDevice/', 'R720_PORTABLE_TESTS/'))
+              assert name in manifest and name in disk and name.endswith('.swift'), ('MISSING_TARGET_SOURCE', name)
+              payload = disk[name].read_bytes()
+              assert sha(payload) == manifest[name]
+              dest = selected / name
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              dest.write_bytes(payload)
+              extracted[name] = {'sha256': sha(payload), 'bytes': len(payload)}
+          assert sum(v['bytes'] for v in extracted.values()) < 1100000, 'R825_TARGET_SOURCE_SIZE_CAP'
+          report = {
+            'revision': 'R825', 'base_revision': 'R823', 'audit_revision': 'R824',
+            'source_tree_sha256': tree, 'source_files_verified': 596,
+            'targeted_files_collected': len(extracted), 'targeted_source_bytes': sum(v['bytes'] for v in extracted.values()),
+            'source_files_modified': 0, 'source_files': extracted,
+            'static_source_only': True, 'runtime_owner_turn_join_certified': False,
+            'live_device_79_fields_certified': 0, 'mega_81_forms_device_image_certified': False,
+            'ipa_created': False
+          }
+          (proof / 'R825_SOURCE_MANIFEST.json').write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + '\n')
+          print('R825_VERIFIED_596_FULL_TREE', tree, flush=True)
+          print('R825_SHA_VERIFIED_36_TARGET_SOURCES', len(extracted), report['targeted_source_bytes'], flush=True)
+          print('R825_ONLY_REVIEW_SOURCE_NOT_RUNTIME_CERTIFICATION_NO_IPA', flush=True)
+          R825_EXTRACT_PY
+      - name: Upload R825 36-file source review evidence NO IPA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R825-Owner-Turn-79-Source-Review-NO-IPA
+          path: |
+            R825Proof/
+            R824_replay_step_3.log
+            R824_replay_step_4.log
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Fail closed on exact source review manifest, count and hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s R825Proof/R825_SOURCE_MANIFEST.json
+          python3 - <<'R825_GATE_PY'
+          import hashlib,json
+          from pathlib import Path
+          report=json.loads(Path('R825Proof/R825_SOURCE_MANIFEST.json').read_text())
+          assert report['source_files_verified']==596
+          assert report['targeted_files_collected']==36
+          assert report['source_files_modified']==0
+          assert report['live_device_79_fields_certified']==0
+          assert not report['ipa_created']
+          paths=report['source_files']
+          assert len(paths)==36
+          for name,metadata in paths.items():
+              data=(Path('R825Proof/targeted_source')/name).read_bytes()
+              assert hashlib.sha256(data).hexdigest()==metadata['sha256']
+              assert len(data)==metadata['bytes']
+          print('R825_D85_SHA_VERIFIED_36_EXACT_SOURCE_FILES_READY_FOR_RUNTIME_FIX_NO_IPA')
+          R825_GATE_PY
