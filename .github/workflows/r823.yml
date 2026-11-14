@@ -1,0 +1,219 @@
+name: R823 D83 Preserve R820 Epoch Fence and Fix Deterministic Quick Regression NO IPA
+'on':
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/r823.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: r823-d83-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            lane: real-apple-vision
+          - runner: xcode-27
+            lane: iphoneos-compile
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 55
+    steps:
+      - name: Checkout immutable R821 workflow script
+        uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-r821
+          sparse-checkout: .github/workflows/r821.yml
+          sparse-checkout-cone-mode: false
+      - name: Checkout immutable R819 69-step baseline
+        uses: actions/checkout@v4
+        with:
+          ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-r819
+          sparse-checkout: .github/workflows/r819.yml
+          sparse-checkout-cone-mode: false
+      - name: Checkout immutable R793 source bootstrap
+        uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          fetch-depth: 1
+          persist-credentials: false
+          path: pinned-r793
+          sparse-checkout: |
+            .github/workflows/d30.b64
+            .github/workflows/r793.yml
+          sparse-checkout-cone-mode: false
+      - name: Reconstruct R821 full pinned production source without edits
+        shell: bash
+        env:
+          R823_LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          ruby -ryaml -rjson -e 'recipe=YAML.load_file(ARGV.fetch(0)); puts JSON.generate(recipe.fetch("jobs").fetch("verify").fetch("steps"))' \
+            pinned-r821/.github/workflows/r821.yml > r823_r821_steps.json
+          python3 - <<'R823_RECONSTRUCT_PY'
+          import hashlib, json, os, subprocess, sys
+          from pathlib import Path
+          lane = os.environ['R823_LANE']
+          assert lane in ('real-apple-vision','iphoneos-compile')
+          recipe = Path('pinned-r821/.github/workflows/r821.yml').read_bytes()
+          assert len(recipe) == 30126, 'R821_RECIPE_SIZE_MISMATCH'
+          steps = json.loads(Path('r823_r821_steps.json').read_text())
+          assert len(steps) == 8, 'R821_EXPECTED_EIGHT_STEPS'
+          assert steps[2]['name'].startswith('R820 replay exact 69-step'), 'R821_REPLAY_MOVED'
+          assert steps[3]['name'].startswith('R820 apply 6-member SHA'), 'R821_PATCH_MOVED'
+          root = Path.cwd()
+          for idx in (2,3):
+              step=steps[idx]
+              script=step['run'].replace(chr(36)+'{{ matrix.lane }}',lane)
+              assert chr(36)+'{{' not in script, 'R823_UNEXPANDED_EXPRESSION'
+              cwd=root / step.get('working-directory','.')
+              print('R823_REPLAYING_IMMUTABLE_STEP',idx,step['name'],flush=True)
+              r=subprocess.run(['bash','--noprofile','--norc','-e','-o','pipefail','-c',script],cwd=cwd,env=os.environ.copy(),capture_output=True,text=True,timeout=1500)
+              print((r.stdout+r.stderr)[-7000:],flush=True)
+              if r.returncode: sys.exit(r.returncode)
+          proof = root/'pinned-r793/R820Proof/SOURCE_TREE_SHA256.txt'
+          assert proof.read_text().strip()=='5a76e6f7f90a358fa1114b0f5875eac5fa6bb5b85837fb07f2ba6b610c9119c3', 'R820_SOURCE_TREE_DRIFT'
+          print('R823_R820_RECONSTRUCTED_WITHOUT_PRODUCTION_MUTATION',flush=True)
+          R823_RECONSTRUCT_PY
+      - name: R823 repair ordering of two legacy QUICK tests only and audit source
+        shell: bash
+        working-directory: pinned-r793
+        run: |
+          set -euo pipefail
+          python3 - <<'R823_PATCH_PY'
+          import hashlib,json
+          from pathlib import Path
+          root=Path('source')
+          file='R720_PORTABLE_TESTS/Tests/R719CoreTests/R767QuickEpochExecutionPoolTests.swift'
+          p=root/file
+          mpath=root/'source_manifest.json'
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          m=json.loads(mpath.read_text())
+          original=p.read_text()
+          assert sha(original.encode())==m[file],'R823_R820_TEST_PREIMAGE_DRIFT'
+          old1='''        XCTAssertTrue(pool.submit(epoch:2,frame:11){e2.signal();_ = h2.wait(timeout:.now()+3)})
+                  XCTAssertEqual(e1.wait(timeout:.now()+1),.success)'''
+          new1='''        XCTAssertEqual(e1.wait(timeout:.now()+1),.success)
+                  XCTAssertTrue(pool.submit(epoch:2,frame:11){e2.signal();_ = h2.wait(timeout:.now()+3)})'''
+          old2='''        XCTAssertTrue(pool.submit(epoch:2,frame:2){entered2.signal();_=held2.wait(timeout:.now()+8)})
+                  XCTAssertEqual(entered1.wait(timeout:.now()+2),.success)'''
+          new2='''        XCTAssertEqual(entered1.wait(timeout:.now()+2),.success)
+                  XCTAssertTrue(pool.submit(epoch:2,frame:2){entered2.signal();_=held2.wait(timeout:.now()+8)})'''
+          for old,new,label in ((old1,new1,'third_unreturned_worker'),(old2,new2,'both_slots_overdue')):
+              assert original.count(old)==1,(label,'EXPECTED_EXACT_ONE_PREIMAGE')
+              original=original.replace(old,new)
+          # The only source edit is moving the first-epoch entered assertion before
+          # admission of the second epoch. No expectations or production source change.
+          assert original.count('func testR820QuickOldReservedJobCannotStartVisionAfterCaptureRollover()')==1
+          assert original.count('func testR820DetailReservedJobCannotStartVisionAfterRollover()')==1
+          assert original.count('func testThirdUnreturnedPhysicalWorkerIsHeldNotSpawned()')==1
+          assert original.count('func testR819QuickBothSlotsOverdueStillNeverSpawnsThirdVision()')==1
+          p.write_text(original)
+          m[file]=sha(p.read_bytes())
+          mpath.write_text(json.dumps(m,sort_keys=True,ensure_ascii=False,indent=2)+'\n')
+          ignored={'.build','__pycache__','.swiftpm'}
+          fs={str(q.relative_to(root)):q for q in root.rglob('*') if q.is_file() and not any(part in ignored for part in q.parts)}
+          assert len(fs)==596 and set(fs)==set(m)|{'source_manifest.json'},'R823_INVENTORY_DRIFT'
+          assert all(sha(fs[n].read_bytes())==h for n,h in m.items()),'R823_MEMBER_SHA_DRIFT'
+          assert sha((root/'app/ios/ChampionsOnDevice/R767QuickEpochExecutionPool.swift').read_bytes())=='fecb0bd47814c77ac22fc7c9d6afa53d6b05599f5e4a0f4fd98331ac77e0be33','R823_QUICK_PRODUCTION_CHANGED'
+          assert sha((root/'app/ios/ChampionsOnDevice/R768DetailEpochExecutionPool.swift').read_bytes())=='ce0a2696b536e5b1d737031d1f6e4b194281b3f548cbbe40998428decfab0a00','R823_DETAIL_PRODUCTION_CHANGED'
+          for name in ('R767QuickEpochExecutionPool.swift','R768DetailEpochExecutionPool.swift'):
+              assert (root/'app/ios/ChampionsOnDevice'/name).read_bytes()==(root/'R720_PORTABLE_TESTS/Sources/R719Core'/name).read_bytes(), 'R823_PORTABLE_PRODUCTION_DRIFT'
+          tree=sha(''.join(n+'\t'+sha(fs[n].read_bytes())+'\n' for n in sorted(fs)).encode())
+          proof=Path('R823Proof');proof.mkdir(exist_ok=True)
+          (proof/'SOURCE_TREE_SHA256.txt').write_text(tree+'\n')
+          (proof/'TEST_PATCH_REPORT.json').write_text(json.dumps({
+            'revision':'R823','source_files':596,'parent_source_tree_sha256':'5a76e6f7f90a358fa1114b0f5875eac5fa6bb5b85837fb07f2ba6b610c9119c3',
+            'new_source_tree_sha256':tree,'changed_source_files':[file],
+            'logical_change':'wait for first physical worker entry before newer epoch admission in two legacy tests',
+            'assertions_deleted':0,'new_R820_retirement_tests_preserved':2,
+            'production_quick_detail_sha256_unchanged':True,'ipa_created':False,
+            'live_79_fields_certified':0,'mega_81_forms_image_certified':False
+          },indent=2)+'\n')
+          print('R823_TEST_ONLY_FIX_PRODUCTION_UNCHANGED',tree)
+          R823_PATCH_PY
+      - name: macOS full 600-test Swift + Apple Vision regression
+        if: matrix.lane == 'real-apple-vision'
+        shell: bash
+        run: |
+          set -uo pipefail
+          export R804_CALIBRATION_DIR="$GITHUB_WORKSPACE/pinned-r793/R804Proof"
+          export R794_DIAGNOSTIC_DIR="$GITHUB_WORKSPACE/pinned-r793/R796Proof"
+          export R792_AUTOMATIC_OCR_DIR="$GITHUB_WORKSPACE/pinned-r793/R796Proof"
+          export R761_FIELD_AUDIT_OUTPUT="$GITHUB_WORKSPACE/pinned-r793/R796Proof/FieldSafety.json"
+          export R761_APPLE_VISION_OUTPUT="$GITHUB_WORKSPACE/pinned-r793/R796Proof/RealAppleVision.json"
+          cd pinned-r793/source/R720_PORTABLE_TESTS
+          swift test > "$GITHUB_WORKSPACE/pinned-r793/R823Proof/Swift.log" 2>&1
+          status=$?
+          printf '%s\n' "$status" > "$GITHUB_WORKSPACE/pinned-r793/R823Proof/Swift.exit"
+          tail -60 "$GITHUB_WORKSPACE/pinned-r793/R823Proof/Swift.log"
+          exit "$status"
+      - name: iPhoneOS native device SDK compile NO IPA
+        if: matrix.lane == 'iphoneos-compile'
+        shell: bash
+        working-directory: pinned-r793
+        run: |
+          set -euo pipefail
+          python3 - <<'R823_XCODE_PY'
+          from pathlib import Path
+          import hashlib,json,subprocess,sys
+          root=Path('source');sha=lambda b:hashlib.sha256(b).hexdigest()
+          ignore={'.build','__pycache__','.swiftpm'}
+          def source_sha():
+              manifest=json.loads((root/'source_manifest.json').read_text())
+              fs={str(p.relative_to(root)):p for p in root.rglob('*') if p.is_file() and not any(x in p.parts for x in ignore)}
+              assert len(fs)==596 and set(fs)==set(manifest)|{'source_manifest.json'}
+              assert all(sha(fs[n].read_bytes())==h for n,h in manifest.items())
+              return sha(''.join(n+'\t'+sha(fs[n].read_bytes())+'\n' for n in sorted(fs)).encode())
+          expected=Path('R823Proof/SOURCE_TREE_SHA256.txt').read_text().strip()
+          assert source_sha()==expected,'R823_PRE_XCODE_DRIFT'
+          subprocess.run([sys.executable,'source/tools/generate_xcode_project.py'],check=True)
+          assert source_sha()==expected,'R823_POST_XCODE_DRIFT'
+          print('R823_VERIFIED_DEVICE_SOURCE_596_FILES')
+          R823_XCODE_PY
+          xcodebuild -project source/app/ios/ChampionsOnDeviceResearch.xcodeproj \
+            -scheme ChampionsOnDeviceResearch -configuration Debug -sdk iphoneos \
+            -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r823_device" build \
+            > R823Proof/iPhoneOS.log 2>&1 || { grep -E 'error:|BUILD FAILED' R823Proof/iPhoneOS.log || true; exit 1; }
+          grep -F 'BUILD SUCCEEDED' R823Proof/iPhoneOS.log
+      - name: Upload R823 delta-only evidence NO IPA
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: R823-${{ matrix.lane }}-NO-IPA
+          path: pinned-r793/R823Proof/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: R823 fail-closed certification
+        shell: bash
+        env:
+          R823_LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          cd pinned-r793
+          test -s R823Proof/TEST_PATCH_REPORT.json
+          test -s R823Proof/SOURCE_TREE_SHA256.txt
+          if [ "$R823_LANE" = real-apple-vision ]; then
+            test "$(cat R823Proof/Swift.exit)" = 0
+            grep -F 'Executed 600 tests, with 0 failures' R823Proof/Swift.log
+            grep -F 'testThirdUnreturnedPhysicalWorkerIsHeldNotSpawned' R823Proof/Swift.log
+            grep -F 'testR819QuickBothSlotsOverdueStillNeverSpawnsThirdVision' R823Proof/Swift.log
+            grep -F 'testR820QuickOldReservedJobCannotStartVisionAfterCaptureRollover' R823Proof/Swift.log
+            grep -F 'testR820DetailReservedJobCannotStartVisionAfterRollover' R823Proof/Swift.log
+          else
+            grep -F 'BUILD SUCCEEDED' R823Proof/iPhoneOS.log
+          fi
+          printf '%s\n' 'R823_D83_ALL_CHECKS_PASS_ONLY_IF_ACTUAL_TESTS_AND_BUILD_PASSED_NO_IPA'
