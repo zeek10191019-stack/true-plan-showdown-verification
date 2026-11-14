@@ -1,0 +1,291 @@
+name: R820 D80 OCR Physical Start Epoch Rollover Fence NO IPA
+'on':
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/r820.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: r820-d80-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private
+      == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - runner: macos-26
+          lane: real-apple-vision
+        - runner: xcode-27
+          lane: iphoneos-compile
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 55
+    steps:
+    - name: Checkout immutable R819 recipe only
+      uses: actions/checkout@v4
+      with:
+        ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+        fetch-depth: 1
+        persist-credentials: false
+        path: pinned-r819
+        sparse-checkout: .github/workflows/r819.yml
+        sparse-checkout-cone-mode: false
+    - name: Checkout immutable R793 base only
+      uses: actions/checkout@v4
+      with:
+        ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+        fetch-depth: 1
+        persist-credentials: false
+        path: pinned-r793
+        sparse-checkout: '.github/workflows/d30.b64
+
+          .github/workflows/r793.yml'
+        sparse-checkout-cone-mode: false
+    - name: R820 replay exact 69-step SHA pinned R819 Mac iPhoneOS baseline
+      shell: bash
+      run: "set -euo pipefail\ncat > r820_replay.py <<'R820_REPLAY_PY'\n#!/usr/bin/env python3\n\
+        import json,os,subprocess,sys,hashlib\nfrom pathlib import Path\nlane=sys.argv[1]\n\
+        assert lane in ('real-apple-vision','iphoneos-compile'), 'UNKNOWN_LANE'\nworkspace=Path.cwd()\n\
+        recipe=workspace/'pinned-r819/.github/workflows/r819.yml'\nroot=workspace/'pinned-r793'\n\
+        assert (root/'.git').exists(), 'R793_PINNED_CHECKOUT_MISSING'\nassert subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True).strip()=='37b3e26851c71fcabd65da3299356c1e38c53869'\n\
+        actual=hashlib.sha256(recipe.read_bytes()).hexdigest()\nassert actual=='82f6d5e96d4d67ce992c6242cab63164f7262e9b6ac4706513d1b94c2345ed25',('R819_RECIPE_SHA_MISMATCH',actual)\n\
+        # Ruby Psych is included with the macOS runner. No pip/network packages are installed.\n\
+        ruby=\"require 'yaml';require 'json';d=YAML.load_file(ARGV.fetch(0));puts JSON.generate(d.fetch('jobs').fetch('verify').fetch('steps'))\"\
+        \nsteps=json.loads(subprocess.check_output(['ruby','-e',ruby,str(recipe)],text=True))\n\
+        assert len(steps)==69,'R819_ORIGINAL_STEPS_NOT_PRESERVED'\nbase_env=os.environ.copy()\n\
+        base_env['GITHUB_WORKSPACE']=str(root)\nbase_env['R820_REPLAY_LANE']=lane\n# Retain\
+        \ a durable audit trail: per-stage logs of the exact R819 recipe.\nlogdir=root/'R820Proof/R819Replay';logdir.mkdir(parents=True,exist_ok=True)\n\
+        for i,step in enumerate(steps):\n command=step.get('run')\n if not command:\n  continue\
+        \  # The pinned recipe's actions/checkout and upload-artifact are managed outside this\
+        \ shell replay.\n condition=step.get('if','')\n if \"matrix.lane == 'real-apple-vision'\"\
+        \ in condition and lane!='real-apple-vision': continue\n if \"matrix.lane == 'iphoneos-compile'\"\
+        \ in condition and lane!='iphoneos-compile': continue\n assert not condition or condition\
+        \ in ('always()',\"matrix.lane == 'real-apple-vision'\",\"matrix.lane == 'iphoneos-compile'\"\
+        ,\"always() && matrix.lane == 'real-apple-vision'\"),('UNKNOWN_R819_STEP_CONDITION',i,condition)\n\
+        \ name=step.get('name','unknown')\n cmd=command.replace('${{ matrix.lane }}',lane)\n\
+        \ assert '${{' not in cmd,('UNEXPANDED_GITHUB_EXPRESSION',i)\n print(f'R820 replay {i:02d}/68\
+        \ [{lane}] {name}',flush=True)\n with (logdir/f'{i:02d}.log').open('wb') as output:\n\
+        \  result=subprocess.run(['bash','--noprofile','--norc','-e','-o','pipefail','-c',cmd],cwd=root,env=base_env,stdout=output,stderr=subprocess.STDOUT,timeout=1200)\n\
+        \ if result.returncode:\n  print(f'R820_R819_REPLAY_STEP_FAILED {i} {name}: exit={result.returncode}',file=sys.stderr,flush=True)\n\
+        \  print((logdir/f'{i:02d}.log').read_text(errors='replace')[-9000:],file=sys.stderr,flush=True)\n\
+        \  raise SystemExit(result.returncode)\nassert (root/'R819Proof/SOURCE_TREE_SHA256.txt').read_text().strip()=='da7dbd52ce4a73f1054779b4da130a724f9398137ae65125d3768123deb291c9'\n\
+        print('R820_ORIGINAL_R819_SOURCE_REPLAY_69_STEPS_MATCH_SHA',lane,flush=True)\nR820_REPLAY_PY\n\
+        python3 r820_replay.py '${{ matrix.lane }}'\n"
+    - name: R820 apply 6-member SHA bounded production QUICK DETAIL fence
+      shell: bash
+      working-directory: pinned-r793
+      run: "set -euo pipefail\nmkdir -p R820Proof\npython3 - <<'R820_PATCH_PY'\nfrom pathlib\
+        \ import Path\nimport base64,hashlib,lzma,json\nroot=Path('source');sha=lambda b:hashlib.sha256(b).hexdigest()\n\
+        manifest_file=root/'source_manifest.json';manifest=json.loads(manifest_file.read_text())\n\
+        ignored={'.build','__pycache__','.swiftpm'}\ndef files(): return {str(p.relative_to(root)):p\
+        \ for p in root.rglob('*') if p.is_file() and not any(part in ignored for part in p.parts)}\n\
+        fs=files()\nassert len(fs)==595 and set(fs)==set(manifest)|{'source_manifest.json'},'R820_BASE_FILE_INVENTORY_MISMATCH'\n\
+        assert all(sha(fs[k].read_bytes())==v for k,v in manifest.items()),'R820_BASE_MEMBER_SHA_MISMATCH'\n\
+        tree=sha(''.join(n+'\\t'+sha(fs[n].read_bytes())+'\\n' for n in sorted(fs)).encode())\n\
+        assert tree=='da7dbd52ce4a73f1054779b4da130a724f9398137ae65125d3768123deb291c9',('R820_BASE_TREE_MISMATCH',tree)\n\
+        blob=base64.b64decode(''.join((\n  '/Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4URpK31dAD2IhkNxnO04TyCRWPCGeyPwk7LKNN96XBElM48/xdlUKDjedxW3DjIVAGACWGFEYb+vybseXf'\n\
+        \  'd+NdZ3HVHRnBW9GSZRNIXdDzbFFirkHNj6JNmtDUlMb02Y5zUZgcZpHtkCl/jnzxit/34W6YLY2U6+agFs5YmX4P0BD6DqoZEg/1W0KMhKRVtQKKV+'\n\
+        \  'oCI8LDFv1naDOmPrV9xPDKeH/pVHuQx3fDgn2F/hQsa6W8mjS3A6028Cj/3w+l+mE0l2Ll1pKhOwhS5pp6ZpBSXtQOq2E+FEIwXidjIIzK+u30dogu'\n\
+        \  '/GRrRtitItERsjyUqY4t5+YlxPfp7j33PVFkWBKfZsm5AXWlojmyMwHI9ZtUfzXjy1+WRTQ2RvtgrI+ssM+2NNlq6Fc3gg0kNLEdzk3T21jY9+4DKs'\n\
+        \  'fmwm2CRGvkIUNtlwfFHbAFI9td0aNuaVXgyjl5T2IEvrCO7p1xPAacM+xsm8ArCr+0tIEjjjdNfTQQiy9qxUrfASaPbWRaQovORemVbotMvgckyI3H'\n\
+        \  'z9P1DYHjb3aZ1aR69hse4HhgzQOcR0o9AwXver85HBvbc4hY4phAu+PQVTCItbjTz3GyPfLLshWreNvc2g/w/pil37Q7NRqhuVcZu7+Qvnxp7KOzpB'\n\
+        \  'nNaTRx4gZvyWZfMVTScqKBA/4PAu6wFbrol1PyOlqBOKplZerCTwdEpfM4LTUEZvBjQ4Wx/SdOdyDCqBbkxkOkZO2jL1E/JigXGC1qjc+/GL/Nbuu/'\n\
+        \  'jx8hH3gM2GL3tfRZMI5dIuCzrAEbxKicbDRShdgXHRzHHvUQT10pTzcVNzSk1YRN2XyKl+6rNMkUrFx5cNyxDV2ZyUPoA48dmZEyMfhOiFo/qpmXJ9'\n\
+        \  'ujFooVS6Ev0FoN4/QhdlIHDWIlEpCSaRNqgDMBzKlXrvUpiuyVR948DZ6KW0v1OaMACedNR5xVB9PqIYnvNyJUK+ohG5J5G3g7Nqt65aFSnuYXN//N'\n\
+        \  '1Abx3tv0A0mh4DPzZe4IG9biYXSUExTAvBOMMogv4coD8dIxKzOCyATYtj8/PPZt95RIPiYo/LklQHDev/69zATim6JuNakzcxmAwvucl0oflxY0U7'\n\
+        \  'tkBcXpBUCUKdZYZsqQWHyHWouzR4UFkyqzVo7G1OBWqRkEILctZpx49mGHity/+UYXS176DCJR7gE75YM0Z3CJoRozyC9Fb3Ix+RJzYrQK2CBIMK0+'\n\
+        \  'UuqmRUMbybKjMEVyHlXyerZ11StTmbV8k7MQUrEukB7C/3p9TFqhx5Lzd7nN+HilYlJ/CUpNcVCsQUTVF73F7RxyaM9VhGqKxC7TPFdzvtKv5nfJfX'\n\
+        \  'L6bIpqPgeKCqEh1rcKm9HifKxMkko41xCB2Jp/YlGgsxM7yuFnZNOh30SZGBobCtGr9LX2E6JaXalitSDiaxQnkO7MyJs2P731b6kQtL5ZXap5E270'\n\
+        \  'IgohpoJjgGyiMeiSb/VMNEIm5j3cZIFO34P0lhYlbiGJ0Oighgp1snbrDSd4NNmru3eKrnu+mJJdGut2VDqGYJOlSNwMlD9nl0naI6k4/NXvFLErxu'\n\
+        \  'KKJMJZZhVzWrTzWDa/VhWB4yGiZtkOKzQ7QlJswo6/rFIGEfeJAUh5e+2iCWWOH4jXTaX7hwdQOY240r/SzjK7lvikd0M10PHUfktLvbhnkCYVpuwX'\n\
+        \  'dXFzR9X83LQiaRCL6RvmXjww61m8MJ9RotbGdqeDeznndH1tgfgJsLev2qd7iM8WdcL+pAlUH6gVpli/bLnM6PR851kM+MXImfofUD/ltMGOXQTSe0'\n\
+        \  'VSZxVXgi1V0BBmBRIHf2EGj8XhkJ/BYFMq3BZdoj+T1HbxXlziFCHBWYACyogF4jGe87vbOAXTFfeyrnT3Yu37zzSdNwUC/CGckeeCkNaSNFjh4UHS'\n\
+        \  'wVPcDe0xI27c7T9PCceDTCxwtvxigUMo13XX1bftNRqGVp0k+/wymdzx7DBB7o7rnLUHKx3KIZaI9ek0QAvc0XRqIxRCOeoAZA5cQsVG0DNip2pzEy'\n\
+        \  'gqOXbkDnwXd6GpdvVJiERlwYpjuIO1hloePDP7HROez0H4SFrVGI6aDFET9XKKyxPJD7R5Wy0qgDyCVKoeuMU35ELVz/3X1wQMoKLSDPLYjK0LwQcF'\n\
+        \  '4MMFYgTuKeg4HgQAFpWbJsprSCjWTBTd7iskTHC806yLaprwoTQgaBxLjy9yV/ZcDPMjEEnLHYDAWx65/9EfgIrQQ51bAZxaGgA+MnJJqJnRxTbtVN'\n\
+        \  'EJa9QgxEwjYW6YatFIxLFWEHBBT7TbqTxk2hfyfLbgroH/DNUqqcVHTDMIa9rP+71rkMf0tM6qzyy5a8Xsp+9qaywVWs/6WGSE4ebv3rBYtltly45L'\n\
+        \  'Jqv8DA4oxanVup/U7TIqF6z9WuSELwz01Cm79PkRQ/YZ07hrlCXOSFEpelYfJL53vXLIQcftcc3BhBytDy4ZamCCemDPveWI2FkXUQxpVt0y8f1fKe'\n\
+        \  'oFf+Opjrf4++oyIEZsO4Sz4ppZ9/mNFNC/Drtljhpa7aHYMOT4ooiRajGuf4gRwnjuZqSK01Dacxm8rywYp/VhBIXNsdeXrP8c9Cj5IBws1gfDDi2V'\n\
+        \  'rKvRJ6jJxf1nWuHaoKgk26fkgpY3UcofFDp8Lv1pMiXHaTuw65RSdsh+Ycl8T0FWEmT7iIT4QpYgucfGLw6F5r0ZyKAUUm6uUqD2fr23jusIJod4tq'\n\
+        \  '4dMiGYqBG+6g0Mz0vWSvFUGuHVZV9KBD3XpJREzHrcdsBIeY5hWolGOJroOdGuQSBjlQyGeSbs/tZJLWgrUJHERFuPRq2wMxmFtee/UZmSIWc4YVdh'\n\
+        \  'J1/K1tBxzgTztqE2ThWnR8nDOqy0tKAY5W+9s8ykvG9c6NWSGUhzdsR31bTr2cqDB95cmTMPrSHrICzVs1lSMcFck/AHFupXCtL/9lH3hPPefi0sWB'\n\
+        \  'hdI6yqqL3WeTHWUpDhyJjMpNzJIoaV/y3BW0Fqv7aSYbGnr08/ITeT5QKL03Aa1jNYgnimmEO3cvB+TU3XrL3OoMhj6MB9vcW1FdTlfh7M/Nq/bzGm'\n\
+        \  '6m3IufGeSfQCAKRFhNwsbPMAEeqdAqPsjudvpfI1UpDrEp1dEIqGmRxY7aqAauhEDaJIWm/A1aiNR8ITPvENuflg5qBnv2K6Kd3vCK0cEfqZdXcbP0'\n\
+        \  '4Hnip4eWnoIJvu1OOU796EfZSHugzcs99bDXDDeoTUUZs+/YtAN7qOkgY+5KAaaJlV5r47AoKnY9Ag38tcMV/YOg09IKvbzCnI3XGrhe/O4bo6tRCB'\n\
+        \  'ewAMEXnBArioJC+eR6N23NE+AReYl2lZsiHRlOQPbeztIJ4NAKLzzEVlDnNPQWEA5FZ1DTDqORecnU/PUxatJWtlgAjxguvBmvTWYqi50BS8B9hIPs'\n\
+        \  'yiSHBR1eiDcv0zTNRNYQb6A695bcA3L8wA1jxwJG+W3hglKQ1DoMN0QN8zZkuZITU+FZCTwgpR8+R1IB8ii3Bpb7j2HnckdOiFXnl2G9rg/SeXDTMV'\n\
+        \  'xQuWJeIGJ3fS5Irkez36nJhLfyAo2PjuA+vgZSwqMs26AcgGw06813ngtGNmxkTkVNKMHo/mH/7YI5fCpLvPtkWMTwc1Co3Q6JDBT8b7VCQKovcvE1'\n\
+        \  'aX/fKmifaH+w/meaWqw5NDDha4oF8A/Rh75F9uLLRdL4tRmOH+aCSJcqwxWq/i8hbaWleZK36eJRd84gqkTajGmOlREh/hnYgtPc5WFKwGpCpTKy8W'\n\
+        \  'BL6oqbSb0EOqVX05MorJoY+0UdvIcJYCYr/g+DUg3JapJgmbtVo59R8CC8FyjtL9y8vJYfVReD9ryN6uCfjZZ9AGdJIc+kFa7WjTlPtMZwPlhD8eER'\n\
+        \  'QdLoZe0a3Cg/CqpCKThX17hwFtixx+9d72PxEPzO5mQzdritM3ghXh+iUWmcg63ggguUe3sKLuOtDjgIBmWhevmjd2V4Gq4wqvnbsSoz10/7F+muTN'\n\
+        \  'GHxfkrK95dpoJKEaf6QHByET5Zf7ZRt0cA3uHVxbs4eeSnJEMpfciY8Gfv7AWGl7tpoHNo6jqV/zD5A7n1byUjpBI6Svu9GG03hbRefj3V3gArjw/P'\n\
+        \  'Jn/chagmXs5tv01q+yLF3eQSu6lkOUQ6kl0gTt8cXyas5TqQNN54KdnpxjfCT4x2CFVNFweJHgOsHf2UQgx2lk/n4MfsSJneBYDFuS8RtJ0pGHeo8u'\n\
+        \  '12uW2jUeKmzjxH2Gw/HNzuCrEzuFtewlYfE+Fmvpn4yipMWngPKj422pLcw2ASzPmglmw1TRN0qPusmDQS0gnLCJj64880NpksUQ2jAYZuaLU0E5yR'\n\
+        \  'ZHKAWyla+IILXjRlWDnzolvgtjuP+6gqh3hGfaifb6yBYDzabW9DzCDLB9J/vLpYShbvY+2ey4q7tAgJ5vhwwG6l5W6ML/O18VcDPEJsYLxchZ8PT6'\n\
+        \  'n7F4CuQxqFJlVvoLfB81SviTyA0md3LQIITokLU0JGjRSTW+NtUUrIqzZMXZqmFmCc5iHPUx7WwP5ARJyfRaBwaxcsI5KuyCbQsH+OXkzA90uE7Bgd'\n\
+        \  'i+50RixhhdouNcTEhUgWNxpS3E06DR8qlcvsqqwtcq7JlMvwwfUfopHes09e1PvegEmwtEGh+c4jv0xymoWwpmOXid7RGGJXnzpRlfaw8iM3EY1Ael'\n\
+        \  'RiVLA27hG6QmMXlW21S2J7gYMzgDgPw4tr5y/CGY5TbM1poQ0sD76hMUy1UM2sEcukU9iwoOJmA4EKlV0IHLxOG0D70Cuga6rI57WiGo6pI3tHpGTu'\n\
+        \  '6WLQccw4licCfmUr0XqZ6xiH30yg3xaFzs1lTwfa0AixxbKcKm+Do5onLuGXjqr0Q4LXLAMFqLfrnKYU7msx+OgCHs6OQUWeNu0Pzk2yX8ugpiHKX5'\n\
+        \  'kvcL67MHfEfqgXHHjZNNy5V0gx3IG/F6/yFYkaT5mFAKkIh2Re6RHIi+FTU6Yfngu+tKbUxVq5tXimhM48tC3+oY4Hi0DHzAlDZPhtq5UdFIg9KX6G'\n\
+        \  '6AirTL1Mt3v83JRsX8LG5LhboHgm6kFXUqwSn3WFhVaE35mW7lTHQPdG89vl+1aYTNnF2VGo1NlkrjD6aWlSBFBv6Ab/dzl66+d/K0EGkxeWPJg7wg'\n\
+        \  'ChEnk6dfd7hzED/TgrafCnImjm7FyBxfC1ftFUse7yI61dmD2GhiL4QoZSVErmUiYaGjbfYmglwhyI15EmaA0k95FvqBRAW+Eyzwo4ghXrCWXJBZLQ'\n\
+        \  'UGz1/J4mA+33zzWePXBlWu0n0DyPT+YDBxdFhjzwHi02rX0gSIvMWHail6MDONnfn/zicb84TdZrk49TBwmKr1qoSWQhcq23UdMPCapAM7JA/LbR/P'\n\
+        \  'hbWPgjiCmTQYZBQ4qGWSMF3HCDuNmsY9asLuh9KpTfpttmSoDOVQBcQGEvkuaM5wwG75YRB11690h+7WPH5giuYTgkI66dwRINeVat5RVHO5MduoxA'\n\
+        \  'triZGrciIsAbBzx+fbUoA8MamL2RigDViJnk+fP1ZG1gHJCMusZocS8m4t0hlSjFY4axhbIFJ/jEhVN0841Ad584AWezpR/kelghhOmg3b4wWpR7Kx'\n\
+        \  'Pqq3+2L76/CA+mIxp0oCxiSstwVflGtg0qhFqZmSr+ss2vlVhjriRec2kU0Azgri+CKLhb8mJH/VrsmTtEvUOiv8kh3Os01engwUv77EDCUIK4whTU'\n\
+        \  'ybPBdMCZCbUWG5L8z3JqV8eYCBBUe54PfOwgQLpnak2lv+UoclxUI6NR7ghoMg7MYJzs8fDe8FuHrG1/ITnBL/PFzv2yeok1eSwqAWjTn+s1nV9WNV'\n\
+        \  'CxNh/dUAME6bausfnF66BI87ktlrY35gjtKDEGo4inFwTGjpeEdqAi5zhAsxfn0lWe1jsDcpbKjv0zRRYqcjLXVcdcGmQewRrbQEhI/HfBygPz0H+x'\n\
+        \  'qiPaKitMItzdf0rfocdoazqfBdEZDylVbcuto7H/LqmLP4UyoYf6fGJCdx6hH+98Gh+DZlFEhpIrll0HPGEt3G2eQQC5LSGlRFUGX+3thWqg7FTm/U'\n\
+        \  'Td8vQniCH4g831ZwwyvIYUeiLom129ISJDqVvo3+ptzHwasyYY90YhYLJMfVY54os+nXm+BJolUpxSYHYT0qMx6XMEiHF0MM4RFwilyif9jekSHj8D'\n\
+        \  'eUJW+qmhVhoD7C7IWniCQjsrCAUs79fY3Ogqi2XiRaZkhqLRcaN8dgKYt4NUgdUgkJUL49kZid+F2VEK4jrZAiK1PYN1a8PxaLTlxWGSTF8aanQwNR'\n\
+        \  'ZBajcIl47FhljV+zzQgvDz5M9Qz9C902JwXm/6nZ5+ls6J0HfO5xpezHcrfSqnQlTTMnewECCtg/+He+R7ZzFjTXp7ecekJtYU8uMBHCGP9Wwa9nxU'\n\
+        \  'uD2LdJVFDK2uFZgQFn81rAmxe7diY2InzgRwLYorSczHSQIhQ6Knh4Zuik5Z6kE7l/t1ffi5HetXUn8NWL+xs8t48MnlEhovDygrt3D2paX5NOlMnG'\n\
+        \  'phbk/2+DPlSP562EVyZdcmtMTzL6hTDEhv/gcyfkGFdPw5up882hBEyRBIi9veZsyTzbzW0MtlqkURVaajd/HhiPpIZzpViJ2+TPkr00Qu/D6upTJ9'\n\
+        \  'a4prXfsi8KWoYIroB69Hb9RMudIwe0yAP9ST4rPA1wbs+aBdBM7pC5aFJAZ5oxDt9hfk3EIT57QGiHj0HW7RfI54cu2EitFsL1IdSgW969z3LSXFE1'\n\
+        \  'dcSOgiTKh5wih+m6RVldgK7Ja/UWIKplH/VD0cBKE43zLJCYtNdpgnGuuTbSejKVK2zSyBfFWqTHfI4hM6yluMsX3LExxw7b/8CgRjgrfz/cF1GLu4'\n\
+        \  'ugNRx2ExpTzXxVELFlXjrW3PtJVR1HlSaJXjrV9towEMBsuhciMA5wvOURWNZCGq1sCYrg7SOBC4S8+6z6G1SROH8Hem+UhGE9JdutJCF9/ARX35nI'\n\
+        \  'VYdjm1bhfYeTZI1k21B9k3k6wz1L5g7La7P3jSeix9js8zUY35n1HmG5NfOFzzqzi+olsj29KH55fdh3FFPoT1/TvCcSxDNVNh937bWzfcQrEF65Cp'\n\
+        \  'yQeuAwxUfPrR08X0Hm8csDx3G2KLObuU/H7wa4aLx9G19DnzGNGKasLDJzUNOAnR5ejPum0ghZ/v+5Mzn6I2sSWqSHvWnNZyJX/7QTzxa96riRK1JE'\n\
+        \  '3KLNrGOzokHJXqYz6YXMWESXNd0VH/Q849CrTe1q/NWaZMQwK+YpvUZvm+p/epW72uN7YCAqL+0gAsmBxpdaf2nsS2t5MOcNKzpKOD9SgmVA2e36KX'\n\
+        \  'xt9+AKpaKcxWgv/IPYZS7L+FQyAhO4hh77FjUkv+BSuvRe3VpRwzJm4s2/6jN88TTHtEDjAqBMfQQxrFrR5C2q7y/JKkijNfM7aQeiXzw0xOLGfz6p'\n\
+        \  'DXCS7b+wQcu8pkLkXFWw1FtjksLifgP8EX9VdId6oYIxR9lnXXxhASFBt92bk5lhx96AUBEgnwLefyVBjVcdTOhtfjHGFhYpWJJfuO7i5guelgfg06'\n\
+        \  '6BD5PMY9AJQ94Ui5Z6x7UM1m62OdW4eIIc08mVtOKmRDKzgtnVrndqPODCVYSk4+wox/j9p6PRweRXdnXEbJ8E0zawDoFCoOr7Rw1NefSm9fx0aOP/'\n\
+        \  '4r2tzC9jpWbJ5P76b2S+iFSXj7QM7TaMKobXK+ErP4zKYfyIYV6HAqc5ha53cYvGhov87I1Db8zMIvNywmF6jDLFrEneq2mmf+lVtam7FEassv27Ji'\n\
+        \  '5FQu35rJpcYPeMTrfqykc9fMcolMyGU6caOgwoX2QtrUUuwH1iqQhNrr3Q3BAEg7dLp5qLCEnna85fL1JwlyFlncaOVDu4Bk640m1pcaP7nI7vQUZi'\n\
+        \  '+gqeWu+khnMEay+WnGALS+UrtoDsmpQi6iBlR5UnTTi/PrdHufp7pj2Ey/rt7dpvDEQBj9K+S161lsI8hsky/iTsM373oXdNXYKxhoB6yCBOExuxEW'\n\
+        \  'U6IXN3xldLRgh9eVxuvX1DgCcpVMLcSTuuksPwfXtNzHQw06H8LI1o+mrjuu2RDtLiFV1kEz209R/HjZrqPsgxofoJnaXKZrFAJBWel+U19w8FEEjY'\n\
+        \  '0JRP5I57uBVxrz7k5y038zvoVqBZJryZm1hH7A4r7pip7Clv7W9yrn5BGul1xzWY6QQJQfUrvDsaRIqYvC0DccPHRWRsSa/cIbhpEARSsci1YgavM+'\n\
+        \  'vh/nmBzl3Lpm0kIWfz2cPCcS+8GMTyfecVYC6vhwZcrOvwBxFNaJ/a/RTZFeLrOwbVSeNDf+GkaQpxIwksXNBVc5mMaYWveCxRIvxwcm2BPz5z+BKJ'\n\
+        \  'NWs0KlBKgUESFQJzPYsm/L8pfBpW4dgIjE2hH31+9f+JMY3Sh6FmINBSI7xK3Nt6Oax5XbwZ/0xey4F0meL0tfa3QzgIqZYdF5VwrEd+X+NI5Ym7oY'\n\
+        \  'vkIz8QPCECaO4pcsiWA+UraTnyQcixRTH2O4uXGWBgwI+VnrqK/9T39Bljd3r6iGHsM94dwKVl0ANfEj1aE9htAsR5521kANJbDy3LN5FdRBbEkazy'\n\
+        \  'VG6DyTK2qthNOusEgG+7Nk3kerZhx6DF79GLKLxhXiiCK0mAxiwTNxMyHeNveP7NsaYibiH52ftZ/nISDkvjRaGg2GGnA7Piva3xzDwvAbcVFTwd1h'\n\
+        \  'T4hLLduNJafM4iRihp1pWzVg2mfafMP0PRt4NnT+7MFKf0e0pB7kP9BD92Ope321+oCwpHoYBEQnturSB0yICG/ZXG1ZMk2c/ndWhX4dXY/AW/Lv0v'\n\
+        \  'e8RfALkEmhweapw4ESA+HNF22evl/2PxulJZcAy3L849sfxkIzgrZ1YenY0mpP1N17/VAXDjHnamqKgHvifmwJGO1t65hfKaZCSMxJBbSt4rjEHLC0'\n\
+        \  '1gM0Nab2pgaxcbgcNe1r3sqKyIbMnSY/7EoQHpCbpvYzdYoCnTIud4xGKJ/Zn3xKXuNN3lvDlHzOI+8K+HYZJ8QapOTdvKVM7hjD+RqX4kcYJPueyg'\n\
+        \  'FLIr8GXK7y/MvMeOXXKRYTghwVhkLLyQy0Wl4W/R62bdgEtADxfKSzZGwwO7yQjjMCQ/qb95yLiuwx0ckQ6/ZjpVFjMQLeMy+M7CuPotYQJKysR9zJ'\n\
+        \  '16G+xF6ODvH1a41LRz8kbNfc+dXmLx+b3t45waTH6p8tTRebcTt9B++LSiDlatoF6qYbkaLen1REkZ3u1otnHqV1eRcX1dnHvD/IvIhq2BMXnJHtEe'\n\
+        \  'jrfaVyGXiuq6lCZ8wmL4VRmfLWJ5D/vnA8akJJFNeAKr1Kg9KdSp6YlBYVhSJTSZzGbrhMKa1HQDzqCQWjyUe5XY+DCBHHiK0waPk//ESe3++0eCxR'\n\
+        \  'FxkEpmajHITib9nSzmTybc6LjNsgWh0PSnWjISZa9w51apl45T+ybjbqW17o1MdkkDcOAY1Gu2G8miitk9/0ZMozrMudUugyJXM/VV9T1RVaISpFMq'\n\
+        \  'vVe8Et9x00n7JiCDoVFfveBvXE9OkSofZunzHAg8svdhg+UuRQR1z1HamAvISpeiFqh+LQ12DLz+sDHmw4kETsGlVVD7QkzhvSIsbJcDfD9H5hS23b'\n\
+        \  '2vNduMLdvrn/E4oxa+um79S87TtweB6ZhVw6hP5i0N2vDD/u9b3LuHwC+H5lp/tXLS6UVplXFUHgWyLd1oVypYtEbokb9vKzeQHvz5nqBQwG6hyxDk'\n\
+        \  'twwcTcOWjGqDO+TUpupnyYMtOhjpjPEcBKQn2uwnblnSm8cEev2scnqBsPiaf6bHN4E3rAuVUz11tdfX4E75lldl0SW8sn38ca7gkvdgiKlbMlhe3y'\n\
+        \  '4mFF6lC8/VEqgN/OpJMAHpjacx70BOlVx6rIfS2kn7N+IOrgrHPyyFTq2A6vDTTnkqwlZiv1LC8+Wc7YxJMQosLhDZdsSnCrwyN3n7KOPTChGURZYM'\n\
+        \  'vPrqSJ/HvZUg6mYowiduTgvnr8hQrvG74JS9wjzOMQoH+6BZSl3+q4mdtohEKziGwjOmFExz+lvM0nW/B3v8T6sIGS2rWwkVh2esHyEyvWZch7YkiV'\n\
+        \  'ggOcWmVU9QYajB1D8g8eQOjIYGzO6ZeTu/F1306PrFnWGZif1139Jak+eTQA2P/ZqtfqkeeV0JrpanXMnoviLO1HX8zUz0kYLQrLks2MtWx6hPvC1e'\n\
+        \  's+dkW6Pe/RphukvCpQPRdz2FmATYtMRkHTbOzKjeNzfiY4r4wjcJkhBWZucahkhyD2hKLEvmNwiMlpmPa0OSA2BGL61m2gYwQP05ye+WPH2d//ot1q'\n\
+        \  'SmQepfT/LL6WdO5v2ZGpjqYV0HUggXhEHmY3bnroTRrhA0IkZM1TDm5dKxVq7H09rhDmEivmrUQ2VQlfwt0eOEiCuDT6uOtglBgkl36KK2rH86PnuC'\n\
+        \  '37oWjqafaxEvu2HY0eM04fFyDaNC/JN/FDDRwPayIKypwdx93F/sYNpx0KGz75mwl47BXMHL7W5h1Q2AeJQBCxGR1gGLA9HdszNJFgERNqD2vO16WC'\n\
+        \  'bZbcHeSkdUDgleALA8n3uLeV72wmAVqzUSnvYKnlZhtIA3Oi7dVuo1o6jqCQTX/lqdyWUqCWH8FEcGFO/opamDz5AzS0rsCBD8Fdj7hamZwhJj4FYR'\n\
+        \  '4ik0/gPXBCxY8MPFBAWFVY+VXTQvq/sXW5GdpWs0WiCNCAQZxIjzu5AEKySY7CXvvyca+knBQOmtTa9j0v62ZAYvXrS9eufrAK/lPJj8wsC/cD81Vf'\n\
+        \  'BxlrBBNCds4MkkzsS9029GPUAwzQZgoh49w0M2zdMQaOMD67ZfVRf3D/GqxL9xFPUZs1JGMf/hlDld0hfIXN9/pbJ4dVJamnJJjlESmNLgzWTuVZ6Q'\n\
+        \  'm8v5jZ4sYlf5hauv+gKkCFVkorFCN0RVhEnCnyXoNQsi9w24H8NjVCysBMRia4fy/Czrdh1K/Y0oTKrFlInq3JXUYD11CKlo4cz8jfwdNIDgyOq/Af'\n\
+        \  'GhGnQ8GJCTR2/QxV02uy34HTsoT+6n5MMjfmPtp3QeTt7/rjyxYDzhSgNm8xka0c7piOT0lp97rb/kwL8zyBbra29RaaO7zoWoMFHaYPptfSUO6iHz'\n\
+        \  'IpRJVDssWnEC9FABJlqqdEQ4uzSKcxDgabGVh7EExsYB3zAPbp5jrsJrFk+ouWS0aDb9N5HDXw1aeJd+tp+WYVPBxEWog1P7TyD07YoWTuzn14BfbS'\n\
+        \  'd6tx7RpvopMJnU3K+dKJQYTNBYxLfvyCpVOz1DwEe3fp7sD29Y9oOiM0LhiUSicdTm6rwaUIBkhEct03bSg5mnklZpth/CmScJW+NydeljhSJLMNga'\n\
+        \  '1kVgmQ0gE77v9gx6peTXRGxuLfqY2qjk0HVGx4ePXbqs3aLDZ8cT+eiZ5YLobknjlN/vZHwFYGOaL87WY7td0hS7NQM2MQIi8HxYpg/tL1uCMesf60'\n\
+        \  'zXV9y96Eg989phT5yIt8Lbl5psGvqIirZPzb1dX4Lw95c4EID/QzUjwx4AZNrlGf8SMavBAfRtvk4L43QIXTSslhDeJOQCie/ZfbIvfIaiC6SZhTe3'\n\
+        \  'AnrkdnZYyalLzLtuuKrxcYCBU0k/piBg9Ps2nQ3Qp/zdBKE1e6y93BBWDG40bglrlO9zci4RuCmuPFD4/anD7ow5egeYVTBq3LMI/BaffnLCGrRkYR'\n\
+        \  'ErkVdvOCd8jPz2NTt0hBZ903/CbKtTsM0O0RTzj0xxZF2OJq2OJ4hrc120URmvaT27OFvecl9PpuVfPr5wLd0MTlV4JTRbYBFcym8k9OcPxXvPV2e3'\n\
+        \  'zPeAm8IbnB8JQwL10GCbgPa6DYHfVsSvsgn/Yf8xS/Gg7CBtul+YP0xIyq6AbtB+VOatdy2bjQHQ3NYRXKvdxeZBmrg2lg2VLRLFBHH9eJukqU+r4i'\n\
+        \  '61bv64iA0LGEwidy3hVduovEOAMtFTj67evyaQqpcITP0yp/38uHXqkbZ2aaNi3oYbhH1YseQyr7ddyKAYW9KPdBnEiUZeY02bqyaH39a3lDslqGfT'\n\
+        \  'GB8DI/aKc7ZYsx407PboLsSHAiLlFDOGgCve+zDNgpzKopn/IUcMZJnPpxBYydXozWU/etfKx9iz7YiVGGkcd+dSNQfbAXjVuGkJlq9Ucp9bGo+v98'\n\
+        \  'wQP8FQ+lQ+E6fTG1ov+srRJ18GswfzNx3NNXRlhqwUKsTIZDdiMov/W3GYnYc6n8JxN6CHaEniIY2n4H7iep+JFSRYd6TTUF4YvxuLjwrca7fBq3k6'\n\
+        \  'JrNwYFw/IQ+CGvzFhmf+b7bwZ6MUHz1qvriQlbJMEpLymn7Ku13iN91vtm5E18GTGL++Iyc2DNzX853QnSiWSXIM0/IuhHkP90nUjY9m0C7W3K8dO6'\n\
+        \  '5ueW2ojxYDw5qVvs0D4mOza+y9WCpfv34t4wTlVXYaDSqQchAQSGqUK4h5GQE2m5US1boFa0wpLiQMSep0Ua5C4JtRC3HibcS09Vft137cqHckpAdh'\n\
+        \  'y3Vs/SN5j7edOxVs2GVsSW58VBWs+JcO0h49QQFo9E+RStCuht3F1N9V9HL/hNMfjW8Jmr3NFFi6QaUFwv9RVRw/TB9wXL87BjsBNDJipsjO8PgELi'\n\
+        \  'e0oWVwvHmVayC2psFwIRzL7iDKQQBxwZAy2Y1P1z0A39oBvswKBDB/aHo5lRUvBpIBHvVcl7PMUfNZaGSKdsUY0r0r/QtympU014zP101i6IL1qbyg'\n\
+        \  'wheCPmAxqzsVZGmNE097Qq8QDpMFLMLkqgH8j+pgVlW7sbZcImsG+AeDf149WanGjwynaF7Et2RBTTwYl49EgW2i3JgvIUjgvU/mLOtX82GQdh79P1'\n\
+        \  'Tbmr7V+RyjAiycIt4EQSCcyhQha2YuPwPSfwFM/CnYosZKmCRmEDuskESQG9+p0zqdnqQguSUZXznDsIPDOF3AAll0GEpFBhPJGgH7Q0CzLjlQm2zp'\n\
+        \  'nr6oRfX4v/NrAkZLI7AiKiId0KzkgZTFUcxzQGJFVbnjD9pjbcvRsJI3L/n1CU8oO2ZrPuimt3zgQnfvtH21+urltZbVgOEQd5WCy9xP9NOyjcGZfc'\n\
+        \  'hTvULqOin7r/UpU7gjn5BjhPKs/b7gGTw7GJSyLMpUMrzStwg/PDKjcUTbhRwF+q3TCB+7REcRBq8Wmgcu+eFhSLw6HjGcTfGwPGApomsUlTQvnHsX'\n\
+        \  '3tL9YHd6fpKKR9rTnr83ha1YvrHLT1Eax0LpikSv9EPqWYHR5yN5vMXWS1LadNdjOrWdbB5p5lYNpnrdTrBse6YaR4laeco8W0riKrxgI1vwK3AY9C'\n\
+        \  'KcyDtbsTPIyKjDJLe5O35RQ/KtiPHLqFRPLM+q/OR5ILpg/R0E+M1tyV0wmvv1PoXmisjZff2Fyky6Xk3VM+fwbVrwRQT5mS6d9WL2LZ19HUnKKIwa'\n\
+        \  'LLwlJB2VI5uFqgfQi+3UdWzqN2egT4qPpPNwPVDKd/UMbi8dIW3NIV/n9eS5x5HAI0NgxpV03rR3RmoqNOJRfCjIXWlAfGyJBFtp/WWSRWtiFfTEky'\n\
+        \  'SnpSw99epmA7gVi4uNwbWJBBrYsZQJ+9/8cKUi89f6jD/NrQ9dgLRoji/IHfa6AteH0ZMxyMgISd5dJ9MWxtMjFwhq/PEd28LD21pvk8v9ZzbUhI5C'\n\
+        \  'uSpVlAb0CbtTFFx/pivH0S23maarMMQbm4/l5BHeBQAOUcaxTOEmmxCRcqo6gaqttLcKOFZlUsb7ui7BqYLQFFSLZkCjuNOScLPVhQ25feG7D0tBzM'\n\
+        \  'IxCWuzTh7XVumwlqHvKDvHl39oCshrWZujV+JwNTWo+5FnZXdUkQcQWPWOA3x+mwltBY2icGcOLot5BkdEfhzCbAWVf/yrbjD1nFJJMSDE1XMzqziu'\n\
+        \  'tWu3JeAbQu5cKn7XaZQPuyDBGowE3Qp6MrcbN0BcVURPepjQ7unvHrJEyghnnP7vWTPF3gxnVZU/lcorClhwSP9yD1Q6zv0XuAqnr7VNRgGdCcX1cj'\n\
+        \  'ZqdsC02cOj+iFZ94QSDLcbd3Jjthh+sg+Zz5k9e5y8hiViRd20BLUtADOQB6hGQeu8dVTsyRUTds7oWOzhMZhNonlWcxrRskyVaB4Nrl6C5aOA6ibL'\n\
+        \  's8QpVBJSV38RUVWHTMv4n1rVIrqv8OXzJ0KFbdJP8AM0heOBlIOXIVZXSGcOJ3pgJgf9su8PSCB8ADMV7t6FShdlznv4d8pdmvGfSuk6t8V/Xe4pJm'\n\
+        \  'GtN8UB0gX2TLLwbEiPvM+ZsR6iYuIbdBOUuDzb3zsa3/7o9d9TG5oDu1WA0AsVLf4xFOikg8n3SMsanXBsPlIdBOYiK6e0qm6JPXrF+2mQRS8aWRXT'\n\
+        \  'hiq6KOhzGWQCplmkGsY9o4StuuD9ROWFUEe81r15gEPV07v8aEvo+jCmXYUu4kmzAq/YwR28MZj5kYcsl6WtCxb9N+OC2ENNFTUNwncSt02tfrmZSc'\n\
+        \  'r5V/VXDaWRu/MwW9/GGCyoIng6eM7tsd3hgVqvxe2BEMRZaofHuKZwHv1zwH4Ajc7WDcKaTiiOTvPnkpgg8ndTCvXesIoxv8Ur83HJUDjBwbcuC1Lf'\n\
+        \  'vU4hQpTd0UK1fy+DyJxe3h/qsIVj1Z/sLiGaRbKAMDEb05UOK2jUqoP2KDV4GtToIlvmNYop/cRgqh1YuPUwWk3QFe8SHM9HfZEgzhaACNdVGG1dSY'\n\
+        \  'UDu5wjrLSxjQCP110R1NwXdiM5ixMLV4t2JLwdvsBPNzqOHEbK4GoEuzOzFTHpZHtYVKfVLFz5EwJ8grCMzbLihYOqJq/53Ch4FLOVn7c5PxnvRmSt'\n\
+        \  '0qpWmarEt7gBjkvqgDPMI395AK+S0EGTD7L9+NPfzPJc54cYs2oHT20/7pJGTkGFWYxAtB6Q95U7DEjIq3boYIYbUkWUdVTzCNfVYWUo1lV/VlyndP'\n\
+        \  'RA3NJQq6vRa4ckZWJHx6bp1rtgLY+HWuE6StpTGZC88v45VsaHx8yIzzUQGfa/tnAAAAAAAqx7JF0CrEYwABmVfqiAUArJ+cWLHEZ/sCAAAAAARZWg'\n\
+        \  '=='\n)),validate=True)\nassert sha(blob)=='b2ea5efb6d2bfd611c6ee85de0b829ae1f4a1ed4a6e14c4f8a8ea2ec7f9835cb','R820_BUNDLE_SHA_MISMATCH'\n\
+        payload=json.loads(lzma.decompress(blob))\nexpected={\n 'app/ios/ChampionsOnDevice/R767QuickEpochExecutionPool.swift',\n\
+        \ 'app/ios/ChampionsOnDevice/R768DetailEpochExecutionPool.swift',\n 'R720_PORTABLE_TESTS/Sources/R719Core/R767QuickEpochExecutionPool.swift',\n\
+        \ 'R720_PORTABLE_TESTS/Sources/R719Core/R768DetailEpochExecutionPool.swift',\n 'R720_PORTABLE_TESTS/Tests/R719CoreTests/R767QuickEpochExecutionPoolTests.swift',\n\
+        \ 'R820_CHANGELOG.md'\n}\nassert set(payload)==expected,'R820_UNEXPECTED_CHANGESET'\n\
+        for name in sorted(payload):\n record=payload[name];dest=root/name\n assert not name.startswith('/')\
+        \ and '..' not in Path(name).parts\n if record['old'] is None:\n  assert name not in\
+        \ manifest and not dest.exists(),'R820_NEW_FILE_COLLISION'\n else:\n  assert name in\
+        \ manifest and dest.is_file(),('R820_MISSING_PREIMAGE',name)\n  assert sha(dest.read_bytes())==manifest[name]==record['old'],('R820_PREIMAGE_HASH_MISMATCH',name)\n\
+        \ data=base64.b64decode(record['b64'],validate=True)\n assert sha(data)==record['new'],('R820_PAYLOAD_MEMBER_HASH_MISMATCH',name)\n\
+        \ dest.parent.mkdir(parents=True,exist_ok=True)\n dest.write_bytes(data)\n manifest[name]=record['new']\n\
+        manifest_file.write_text(json.dumps(manifest,sort_keys=True,ensure_ascii=False,indent=2)+'\\\
+        n')\nfs=files()\nassert len(fs)==596 and set(fs)==set(manifest)|{'source_manifest.json'},'R820_POST_INVENTORY_MISMATCH'\n\
+        assert all(sha(fs[n].read_bytes())==h for n,h in manifest.items()),'R820_POST_MEMBER_HASH_MISMATCH'\n\
+        for fn in ('R767QuickEpochExecutionPool.swift','R768DetailEpochExecutionPool.swift'):\n\
+        \ a=root/'app/ios/ChampionsOnDevice'/fn\n b=root/'R720_PORTABLE_TESTS/Sources/R719Core'/fn\n\
+        \ assert a.read_bytes()==b.read_bytes(),'R820_PRODUCTION_PORTABLE_DRIFT'\n t=a.read_text()\n\
+        \ for token in ('beginPhysicallyIfCurrent','skipped_retired_before_physical_start','guard\
+        \ epoch >= minimumAdmissibleEpoch, epoch >= lastAdmittedEpoch'):\n  assert token in\
+        \ t,('R820_MISSING_START_FENCE',fn,token)\n assert 'forceRelease' not in t and 'reset('\
+        \ not in t,'R820_FORCED_RELEASE_FOUND'\nfinal_tree=sha(''.join(n+'\\t'+sha(fs[n].read_bytes())+'\\\
+        n' for n in sorted(fs)).encode())\nproof=Path('R820Proof');proof.mkdir(exist_ok=True)\n\
+        (proof/'SOURCE_TREE_SHA256.txt').write_text(final_tree+'\\n')\n(proof/'SOURCE_INTEGRITY.json').write_text(json.dumps({'revision':'R820','base_revision':'R819','source_files':596,'base_source_tree_sha256':tree,'new_source_tree_sha256':final_tree,'new_tests':2,'physical_worker_force_release':False,'live_79_fields_certified':0,'mega_81_forms_image_certified':False,'real_original_MOV_blind_replay_certified':False,'ipa_created':False},indent=2)+'\\\
+        n')\nprint('R820_SHA_BOUNDED_SIX_MEMBER_PATCH_APPLIED',final_tree)\nR820_PATCH_PY\n"
+    - name: R820 Mac 600 test full regression including 2 race cases
+      shell: bash
+      run: "set -uo pipefail\nif [ '${{ matrix.lane }}' = real-apple-vision ]; then\n export\
+        \ R804_CALIBRATION_DIR=\"$GITHUB_WORKSPACE/pinned-r793/R804Proof\"\n export R794_DIAGNOSTIC_DIR=\"\
+        $GITHUB_WORKSPACE/pinned-r793/R796Proof\"\n export R792_AUTOMATIC_OCR_DIR=\"$GITHUB_WORKSPACE/pinned-r793/R796Proof\"\
+        \n export R761_FIELD_AUDIT_OUTPUT=\"$GITHUB_WORKSPACE/pinned-r793/R796Proof/FieldSafety.json\"\
+        \n export R761_APPLE_VISION_OUTPUT=\"$GITHUB_WORKSPACE/pinned-r793/R796Proof/RealAppleVision.json\"\
+        \n cd pinned-r793/source/R720_PORTABLE_TESTS\n swift test > \"$GITHUB_WORKSPACE/pinned-r793/R820Proof/Swift.log\"\
+        \ 2>&1\n status=$?\n printf '%s\\n' \"$status\" > \"$GITHUB_WORKSPACE/pinned-r793/R820Proof/Swift.exit\"\
+        \n echo \"R820 macOS Swift exit=$status\"\nfi\nexit 0\n"
+    - name: R820 iPhoneOS real xcodebuild of 596-file source
+      shell: bash
+      run: "set -euo pipefail\nif [ '${{ matrix.lane }}' = iphoneos-compile ]; then\n cd pinned-r793\n\
+        \ python3 - <<'R820_XCODE_PY'\nfrom pathlib import Path\nimport json,hashlib,subprocess,sys\n\
+        root=Path('source');sha=lambda b:hashlib.sha256(b).hexdigest()\nignored={'.build','__pycache__','.swiftpm'}\n\
+        def check():\n m=json.loads((root/'source_manifest.json').read_text())\n files={str(p.relative_to(root)):p\
+        \ for p in root.rglob('*') if p.is_file() and not any(x in p.parts for x in ignored)}\n\
+        \ assert len(files)==596 and set(files)==set(m)|{'source_manifest.json'}\n assert all(sha(files[n].read_bytes())==h\
+        \ for n,h in m.items())\n return sha(''.join(n+'\\t'+sha(files[n].read_bytes())+'\\\
+        n' for n in sorted(files)).encode())\nexpect=Path('R820Proof/SOURCE_TREE_SHA256.txt').read_text().strip()\n\
+        assert check()==expect,'R820_PRE_XCODE_SOURCE_DRIFT'\nsubprocess.run([sys.executable,'source/tools/generate_xcode_project.py'],check=True)\n\
+        assert check()==expect,'R820_POST_XCODE_SOURCE_DRIFT'\nfor fn in ('R767QuickEpochExecutionPool.swift','R768DetailEpochExecutionPool.swift'):\n\
+        \ assert 'beginPhysicallyIfCurrent' in (root/'app/ios/ChampionsOnDevice'/fn).read_text()\n\
+        print('R820_596_VERIFIED_XCODE_PRODUCTION_SOURCES')\nR820_XCODE_PY\n xcodebuild -project\
+        \ source/app/ios/ChampionsOnDeviceResearch.xcodeproj \\\n   -scheme ChampionsOnDeviceResearch\
+        \ -configuration Debug -sdk iphoneos \\\n   -destination 'generic/platform=iOS' ARCHS=arm64\
+        \ ONLY_ACTIVE_ARCH=YES \\\n   CODE_SIGNING_ALLOWED=NO -derivedDataPath \"$RUNNER_TEMP/r820_device\"\
+        \ build \\\n   > R820Proof/iPhoneOS.log 2>&1 || { grep -E 'error:|BUILD FAILED' R820Proof/iPhoneOS.log\
+        \ || true; exit 1; }\n grep -F 'BUILD SUCCEEDED' R820Proof/iPhoneOS.log\nfi\n"
+    - name: R820 upload delta evidence NO IPA
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: R820-${{ matrix.lane }}-NO-IPA
+        path: pinned-r793/R820Proof/
+        if-no-files-found: warn
+        retention-days: 7
+    - name: R820 fail closed Mac 600 and iPhoneOS source proof
+      shell: bash
+      run: "set -euo pipefail\ncd pinned-r793\ntest -s R820Proof/SOURCE_INTEGRITY.json\ntest\
+        \ -s R820Proof/SOURCE_TREE_SHA256.txt\nif [ '${{ matrix.lane }}' = real-apple-vision\
+        \ ]; then\n test \"$(cat R820Proof/Swift.exit)\" = 0\n grep -F 'Executed 600 tests,\
+        \ with 0 failures' R820Proof/Swift.log\n grep -F 'testR820QuickOldReservedJobCannotStartVisionAfterCaptureRollover'\
+        \ R820Proof/Swift.log\n grep -F 'testR820DetailReservedJobCannotStartVisionAfterRollover'\
+        \ R820Proof/Swift.log\nelse\n grep -F 'BUILD SUCCEEDED' R820Proof/iPhoneOS.log\nfi\n\
+        printf '%s\\n' 'R820_D80_SUCCESS_PHYSICAL_START_EPOCH_FENCE_NO_DEVICE_79_CERTIFICATION_NO_IPA'\n"
