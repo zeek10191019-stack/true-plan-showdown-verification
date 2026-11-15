@@ -1,0 +1,135 @@
+name: R834 D94 Production QUICK real PNG preflight NO IPA
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/r834.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - {runner: macos-26, lane: real-apple-vision}
+        - {runner: xcode-27, lane: iphoneos-compile}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: 4cc925234f9101a8875744e75049f06e96ce4d90
+        path: pinned-r823
+        persist-credentials: false
+        sparse-checkout: .github/workflows/r823.yml
+        sparse-checkout-cone-mode: false
+    - uses: actions/checkout@v4
+      with:
+        ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+        path: pinned-r821
+        persist-credentials: false
+        sparse-checkout: .github/workflows/r821.yml
+        sparse-checkout-cone-mode: false
+    - uses: actions/checkout@v4
+      with:
+        ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+        path: pinned-r819
+        persist-credentials: false
+        sparse-checkout: .github/workflows/r819.yml
+        sparse-checkout-cone-mode: false
+    - uses: actions/checkout@v4
+      with:
+        ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+        path: pinned-r793
+        persist-credentials: false
+        sparse-checkout: |
+          .github/workflows/d30.b64
+          .github/workflows/r793.yml
+        sparse-checkout-cone-mode: false
+    - uses: actions/checkout@v4
+      with:
+        ref: b783a785f97d0b74c9a1d48780dcee9626aef12c
+        path: pinned-r833
+        persist-credentials: false
+        sparse-checkout: .github/workflows/r833.yml
+        sparse-checkout-cone-mode: false
+    - name: Restore SHA-verified D93 source and apply bounded QUICK delta
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        from pathlib import Path
+        import subprocess,json,hashlib,os,base64,lzma
+        base=Path.cwd();root=base/'pinned-r793'
+        proof=base/'R834Proof';proof.mkdir(exist_ok=True)
+        env=os.environ.copy();env['GITHUB_WORKSPACE']=str(root)
+        def recipe(rev):
+            p=base/f'pinned-r{rev}/.github/workflows/r{rev}.yml'
+            rb="require 'yaml';require 'json';puts JSON.generate(YAML.load_file(ARGV.fetch(0)).fetch('jobs').fetch('verify').fetch('steps'))"
+            return json.loads(subprocess.check_output(['ruby','-e',rb,str(p)],text=True))
+        def run(rev,i,cwd):
+            step=recipe(rev)[i];cmd=step['run']
+            assert chr(36)+'{{' not in cmd
+            log=proof/f'restore_{rev}_{i}.log'
+            with log.open('w') as f:
+                r=subprocess.run(['bash','-e','-o','pipefail','-c',cmd],cwd=cwd,env=env,stdout=f,stderr=subprocess.STDOUT,timeout=360)
+            print('SOURCE_RESTORE',rev,i,r.returncode,flush=True)
+            if r.returncode:
+                print(log.read_text()[-6000:]);raise SystemExit(r.returncode)
+        for i in list(range(1,17))+[21,41,46,52,58,64]:run(819,i,root)
+        run(821,3,root);run(823,4,root)
+        for i in range(6,12):run(833,i,base)
+        src=root/'source';sha=lambda b:hashlib.sha256(b).hexdigest()
+        manifest=json.loads((src/'source_manifest.json').read_text())
+        def files():
+            return {str(p.relative_to(src)):p for p in src.rglob('*') if p.is_file() and not {'.build','.swiftpm','__pycache__'}.intersection(p.parts)}
+        def tree(fs):
+            return sha(''.join(n+'\t'+sha(fs[n].read_bytes())+'\n' for n in sorted(fs)).encode())
+        fs=files()
+        assert len(fs)==596 and set(fs)==set(manifest)|{'source_manifest.json'}
+        assert all(sha(fs[n].read_bytes())==h for n,h in manifest.items())
+        assert tree(fs)=='698401dc110214aae9f4383672a15e9c88d8342beed3a08d74cdfde9fdc3b85d'
+        payload=json.loads(lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4I24HcddAD2IhkNxnO04TyCRWPCGeyPwk7LKNN96XBElM48/xdlUKDjedxW3DjIVAFjuSAsLyxgpQNOP+c3lLWEdv3lKcr8gKQjMEt0dwgDsmJbrWTGTIMON1qZsxJOrHtCoQ3Es/qtQcPY16ZGiMXHecyaxGcpjyuybVg0RCTZmUm2TKPcTFzG3N2/dZL299FI5un8EcUMXKBBnwnukh/nAVpjx/1tSt6/+UA7qpgbtyrDH17LjG+gUmw2TQv9cLZRs4zogeD5EzsyGSeUjhwGRnC6ygUZrtZ0stBBeAyPxQsMmcUplk6Twme4CPNfLjTMhiZyBarqnSr57MAXlzJaMKYcqfzGwdAW4RL5b1xRmSSMg0yubvTGTECnz2odOEyCGvPnc7jOfXIupBs0QwDOBSQgfu9oVypaiyPLcQWGZFwLYV7ubjb9cQZ0wE6tYEVhiePLHnY25vu4HTKd0VAmARaTJoxX9GqIecdJRpPGoSlqWjVlLfOrQAZxC6qMuoWJBWWax4LlfG32Z+9QEPDECyABPvFeE7Rxk7iIX1vPkR8ry8S76C3RSoYvL4iNieLjPNh+Cyl+pURIaIaMIafuYvOc2vCAJfnWKahuMXHc439DsAgoMH3ysMOLVbRVxekoBmQdUdDZrQEr50YqA2rHRA8VmPgXztcmx7tPOyNxWaOFnYPIS/XKjQc52NNE3ySv+ajz1K5wvSn0ffTaCLTxug+g2tsaSyZ5Wpz6qGqr5SXG1gcLt+xaEb2igjRZhFwwlxnE24Cke18i4SSSPAnoReHTwkoHeMzr+p0HbqDfb6uQ9REA/QrhRQ+wMmZvx/OIDfI62zIF28L2Met+w+Nvz2zOFPojUPg2K+TT/063EnNac3I+uIPIS5GfgZNIu6VrzgIAxcamg6n+Ft7pQBS8GGyrdMcwS/M2uXfnbVRijOR/In5/TV37Eh0/p5bU7SSC8YsGqPkTf/c2giyaBOZxTHsxgPzURibaW05Qj4OES0pOVuz2z5aF1G6cJzVSYrV2W6TGh1G+DwhVJZK6Htvm3JzsKKHla2Ec2T1vGYshqDgBW/U0FWEgGWX61AYn9YGXCfRSnRmOOEm1GpC/f8r9jC6/HOTwYZwvZrG9tfUgw8G1mLuDxdz7e8W97aDbqhULRDAQ1HGuIne7Q4zp+7jPTa+BBzwqzMtFAsDaOrZUwNGtOpEaw4+aLPyjYhgzstAdl9WVpsaudx9/N6hxKOeF0b3LUYBpkGg9sgI9LO9+OSoVO7XofUuksNhhe6N1/8o9oLBo/HuiJGRjVC98yQS62uQ+2eW25VzHLhBfbAM2gsavVVe4Nrx5oJs0XkQLAWTdGEEuYvOBugVM9p8MIUkv6eQx7PiFGM6I7TXLRV0f1+eczh21we484LGux0YOP6W+Hfrfo6gVtNdMTatMfqNvGpufsJSgePDTnncjdXvBXSclupWNr+oDXXJzGmXNr8jLoYoVwNXC8pMdx+bI7Ftxzd8GHjcXx8XC8wVLRRnGKmX8TZzwo1AmMqQHBWEVRrPGA1wwbYtXbkaw/mwJLUGtgNKDq9y7eYJi34yPjwNrffKt9E+gHACWVFcz6eeGKrCNrdPN1SO1g3mx0n4xzRMtHJSGMzRKzjpUHf2xFkn61MWX7hXCi3iziYzxFDIhLczU648kUwDMTZadvVgdyftzuE105YQRAfPYpTlwHq7/L9tdZ7M9dreyHneQkA3r4GyTNB29Zmgul6nCrAycKlchRFR5k5o7zSOeA84dJrLwFZKAKzLz2tzjmRwgOOKfRFn3we0U9f78h/JxMMizA7lD3FmvcvLx4PDuJzGSh0eQ1U7NeTLWBub5NS77R7OcKT1XmBWYyP2Fa8u31x0U/eVZ7ooQQ2nqzy65PgaVM/xNjYRb2QDjkn6rBAVWeWPCfAvqqseIfzOegHaEnkUgTTpzmq6cFxKphd6Y562UST1J0nEIFL2mrX+GfZsORforB80mCCnQQZ+0m/+LlCUeUr/8WN2fEXSH2ueubprGXvSems0FEl2uNYgnMXhrm0n1JvEy+yeQ2Z/NZfYWEijN5pshRROjXdZKYXaIZN3FS36mJAbMN5oRXaZcB8VDcxz5gTe2bAoZulqYjVemSnbAaQFU77/TDyKBOyLOQDKaXofFbRXMICqLWrMgZ/smrwlqc6grkzaio5HjHIoMwLCH/TvU1+nP30AaCbWs3tEBlBpymIsioxOu3Ban04vHq1fp0Ilc7ASDIzg/VrBWHFENqQUY744F0qtfuPn4LxZUFUr3MxrfH28+llr/d9n8epvwzQg30FYvaUFhvx4BK23Vlg3iRIDueJWyVJrQcjiLSNKzcATp70V8my0qWWskFLWRrcqo5xo/xnXbuiVCmNrQFNnU7XOYe98lVoNzAuO4pRc09p63ndQ/XZoVvwHlKIzC+xdtqfsiXUImc5hhmJr8iU5t8UP2CPGGPYsKX1kF+uofSvIjW2/eoHMFu14/1LqW01SzFinPbmhTrCRdEPpePl6sUUMrOMVas/bEz3XvvF5x2CWaAf6CxPpXxaxMjB+CDJF7WxDb8o+NYYAemN/wgL3RW6GNrisu+tNlLsxITabyvL9YMt78jDpAHqXi8RCk6kARNjXSt+1tUSa0K+K0N/W5KB1edGHhafALrxbEPb8uGt6j72Rbw4FRPAqyHhFhhbJvzmFmU25ghVYrK4Hh51c2h13Vl8dUvnbhbbvmEuybeVDNPbD13ISJ6yrwkMXnip1FbhpWqOn3+IwWMMRq5sxysRbK5+mGLBG+j4o77f0nVZGEcy/93Yg2kVXSPCBKeDd0uTvf5WN0VVayO6ppQtx5sQHZaTuQ5T2YmKkgKeHdK7pb1sC6eSEfRguDlJGN6YGDTWb31vrW2gKNlyIKMaKnkNZsmaOt/d06Q/drF9R5+4uHuHGJZ67zfHslYwIx86zRBEvNL7qcXvBnTpIl5plMMaJri1ysQVSGrL4FIyFXx66GxRbyBe9rcLjPGuDbIiJBeaVRuDA55oUmLIn+cFS4z97weFs8bRyiYa/tVpR68YCcFl/QBTXjZZ4s9Kp3fgXBJRWFhpp29aAFvnS5EyS4rM0SWmPMmw/w6meAf0DqijO0B1CVQviF2AauQ0dQxOPaAbyd7i/XzmdVJlfItx8JDz1yTlwFJ5x0s0tuQh5xrO+03ogJ3xZP2VNYfhlaE9VBOczNzjJNZRqyhSkcGSgcB6/bSnEGAkXJPxM60l4fnIxOZtuQVE8NgI2N8LfghfxB6F5TKsK6CD5mMTjtH26jcwOsk+o7fQNeQATB4ZTKfDgwE7EGM/XJdLk2XSNHkoSZetCCINiSlFz8QFKLAZdtJT+EmjFNEVIm3JgFBBZDqa2AsjzwTziPDo6YM4V+1vFXIi5TAuHA9078150kh1m/I7Wmu5JZ2lO5An198m3VRX3kAUvL2ickJANjckj+OWdKBFJ2jjKnz2kEqKJOLK2uaxJzVyuJQXDKhRQRPJlbD/6xjTU8Jwt4aU8tEouvrBwosxoV0/bsXdQLhHEdfoIDK6l0b996kAwl5qpXNLaFnVsFM3NU8Kvt9t10g+7bXeKMlg9jszJbWPiArBZxa0XG35EI4YEFDn/jwfj2dxUYDfqZRCzW8bqHu9V9xrnhITJhSu81d4RVAtmItjb4+UDaE12YJdOFuMd3MVH6Y0U8+qbVbDwVYNnX+dxbSuAlL/rNxkrX68URBtebHkTvnRfcmQXxbHVfxVlSxrZ4qBoQM+U3iTMGfTT53+82ZkW0ld71GkrG3KzQsWosPhzH40hpIY2gUGDp1WfCAYyuH5e03t6sRoboEZOPqzDWbHiw101FlhmXlxLKP6K06LK6yxtTGt3N6Lta8NATfzRcgIeo00t7PgyvWE596DkIJumh45RmprdZ6a3++TtctCOCheaV3Ghw+Y6Q4y90SXDs70J3O8nUF3emYov2jAI8Hx94qyXmjpIqHxZgiukR90wRVIMoxKN0INdkY8/ANpt/BGiZ54M/O+wDWXQ1pyqcGvxK7qu4ybTw8chJW09DNlB9qs/4/36n7pHKdJZDBwgaL9QDl2AG59/DVewHMuCEEw9w8Kig12sluZhGiVCtgLztDzy299xXhNdTozFLUihZNz2cLUlqz/q4py+yZPbK8KM1UOOhdk1FpWw12OT8dJM9sEOe8Uzh0cWKRad+tHzsOa/Y5msfSEQWMueiZHYP6UPsa69Uc+5V1pve1A5+gqwSfYVwDRWRbuophLvvjIfytqLwJtynSc6l3STTwIM5H6bSfRuz8X2hQ41ba8pFa7EqGnV8pJ4HAkcYAgqp6G//DPmuZOiQfbsGZ3On6VfZfvaOWgvCGRKfZj8TaWJrxD7HYk+mj8GOcKcAmEKzLu1rTsLImcOQtcrHOQPtDzxiXsr1byS5QMgZnGdX0LSaWzYpGI8N+EwpT7HiEtB9CuJtZvz98jfpF1Qgl+arXj2rkqNWrabX0nvJ2TcUO0K/tPK2fmhWFhAUTclEflorE5SRupswqJsDrnBvIQxsw8Z7N5AUkmVNSBI5jKCjJREl3d2exAqsbaukTtRsNwMXXqI+NOOVd1Iv5UC2YVZ9T8+DroI5a30x1T5shcx1wHSgvikhJ6trpe0ZXbPpeTE+H0k8l4A4K0TbIPurG6kbeLslUmI4qMe/TjGO3Izwzo85wfulNho7SmCLmEFsOlEB9YaIEbckuZuX/wYRHHhCvrm+aeUfh1IlPqT5AZxwRF/9vhvGaAZOJuaXufN2LzC/YtTlo0OSJ9bJr6BhLwkUlTD2EDrOIVltSUWv8UB0rhRSE4rmEnhCX1QsU6+8Q6uFde+JTYpoH9Pu/9/788JIiy8cvwW1CLzf+94YVAxnF5csVlwPEwTcpb592L2yJfoqULc/CnAB4pESxcNOPYhnKqrq7XSzVvL6yMjfQuLg3y1mX2xdOW93sl0JKFjZEj846mwphTSq4vhNDAU8EQLojpjQH5Jo2j747T9leE/lj/esiU7ubCdwrPfg+q4xmWws1xy8xpVJhplahb6MPbMQefg0d4tI2o1nFZzBaSw81hYlYomy18DccKMi+h3xJlC9FSx41AWQIkDSHWrU4JToo9Y4LctrbwiMZUdgs+K93nFIutKHTGvRtSkWwQqdU3dd+YL6l6C5bm+lAphVBqKrbmxYGXCXDIVpIzv2YMljgFrUiEb4Ordy1kZdVH2eCdlag1oFwsh4zaEE9E7TUTLNLGVgAsPF9uXmHVLb0xE09M089xWZdE5E0ToMZtpvl0dPTUjiqJo4CNmkNE0yTfCrKWwerHATHcRxB85z2q4Sj51L/hFhataijZbomXbUrRQJifJwOx+SHTBzsk0fcz52bcmA9s2md7TWRA/YNSgo60cUoNIv+CnbzWYAymZwLyshdW3EXevnHG5JKoggYArE1kxr88EfVeRc6uLCfjVQJW3jh+zMA500Z3TTi/vj1RqVuvu4cdkQbr2ITOhvl2jmHc2tYejCjbpR86vgFNATaKIWBJoJPH3JWh4XwM9Nl8OJgV4g2LYTJGjO7dZYW6Z5C5sxdwaO0dF7SQ2pQ9CBV6UGpTKCaqn7quDtr0CuhnKhUGkj3EgjVMH7HtAyyAcgCOv46m2vXMdb96Pf8PosTMNU37lkHQV0MCQm6UteluqH58im5BckIP/w7NnP0jKUdlwix+c7C10O/vhcRvGfgeY8MStlQftUVdWY1KreUeLMLGCSCw8E3//8om5rKZ0S9SLv0uJAaXgMsq4iqN4jdKewE6hvKMEdxDGU8QWuuoR4eUCZdF37BFjJyabCuTqUyt+/FQ0ujzfDCcSh2uLk+meCt7FdtbQOkcbNBvKzbeakyjZ9U9i4NVcXtRax0QoJxr8DThH8X0gQ+SJasn+ui4uvoC8FAr0RVRtxWqwj9c3UeQX3mDNAenJ4n7BM9jtcpf5gwB3jCaB8gBJBoUU96lw2p2Ke4SLUiOtXT4VzZ5gm+4nzXKKz9P6c9w5ITAqGf9eATEe1BEqX/w4ss/wycXnA/8/PsXV0JsEN1S2GbFTYycPiWk8U+BV6bis5vFf+KUcmnTmU3Refgetatv/jPaiT9dhiYOS9K90cHMb3PgDaNFQE0KzMHrjdzRS1ROz+Z64ORra797PfAa0zcqnqxEMQ29yEILd0bD2jTQ9ITF3deSG+1i8/44NK1BdXYAneasM5cSehTXdNH1XaGHdyV26sHJIsA40ZHkcpsVWMoYMbWRhveH9q+1v7GiSFLjGZcMg2OYWa3c/M7pspLuQcJbAu1iv0+263M3BAFOTV9d9UsUebwclvZLoW3ojzc0zzkDcIw2RV+aXWD4ZlObcGziWLodx++bb0WdIkJJ8RSv5pUGVcUMrIwPS31joOETgCcrJcEnsncaT9mzN4pXgUaujGt5AStrkwu8dWP1b2CujP463GgrQPPjrlD9dJTrlTebvmYl4zjKqlGRfanUE60k1GoA26LmeIvcwd34vetT46cmImYUQh4oUOInvfvMSxfwOFZt+VnMlLQ1u3PQGcP3CcR6odvt5+yP7pOYRZPFwt7raGW9yUFHKevexeFxOJi9wtTJ0znWFj0m2u7IBVBXE5BMbl7lVrcTDqMAyXGDfwFIPVVsWpxMIkWtiJj2WjOOm+Z3gLTSf6RwXBf0YBoPrQxEmDv+XBqXJO72wQUzEaiWf0aio1mNvh0XXEkYFpfZSCDC0H/8xYmTNSJloT0wzEHSPN8JGJ9QnipeZvijpD00AhBIAD2WwgEBRqzQ36ik9kkZleeXWxkXBbAAZUoAo3tWvwCZTHAVRW2MyYbc7JXAE+R6s6K6zRzZbUjeEyn+ZbtT+2Befrylmpm2hcbJ+FyREC5LWWixAi9sGz6kgA64G2wIr05RPO0+GxZGpWXXk/lVr+AnvmkgkOSRwpRyIF2luCMXG6n3IJshAIC7mV69XE9GYoiyH1Ra5kUCPtQHk8w2C4H3NNmWaw7VFhkDXjbVym3fPu0MMiJ0LCGnv/5SqyXwxVJBPLLjVb7Ur9Pyu04SseQhet4YFiQZEeAG7DfmlinBG2HKZjcdVdraxRVyoE17xvU4csZxtez0Y3gfDLbPt7Xu1X+6CGJsgc2rBairQVS/kYxYWuiMohXeWJEton6yZx+vWHT3gC8q2gZE2SpGV6XUOIMXAv9ocWxv+XoIzpNk0j8EZW+dFjihHdsxu2oq4f7e+WNatxJW/a7vLvZlAi71tAKFcXAdrCyrQXXhYbR+GiCqqN7CEuWbsotd0+9BNYl06ViVZiv2L4ofELlPXChMjKw0+jpg5YGMgalnuNOJ0Zf0f76VTQcBzxvtsjm6R9NAK7jdKz7mjSueSV4XFTJqJJBzFQ5JtQJqp0MyULP3Dj4V3B93KcstscV1pcBhAv4OBVoxn2D3UlxAvG4Vy89prm2HVcNpvFSvyBZbkIFkxn5xvhOtovjuDNJXgY+lypnjtCzz1w8j/ugcirhw9eNvuP4hBhYD49JkpK/Ea6KNj0k2YqxyzuG+kXTBX0DOfH59vqR4KVCMGrGfiuUdRHMbYV58A/YWs42hfFs/fMG3CMV7J9gRc6YZp7GKWlw+0hLYhZl9vVZ+EATRQmDqSgPHB5S93OBOovoWXTsp69LopMKXWUe2V9tZT2T9K2KMl1z6ufK776CEXW0+2pUIRDp0ZqslcRQJKJnpbmAC9OWb7GbOnW6kaWByvYuySNSFsk95N3urWs7F6k4+/vhpsNaL0rn9JT1I2FbeShNWHbujXeV0775jtcTe5Xc8UTyLDhDqcdNzvfgMlPjYgHYPuZ/M/Awl0lv54v2KNM2bSWFtXaV5dCqJpR4l8orSaiypleJQrnWcGa5jTWSe+JizCWkPQGVdOUPtB/0uhLdKGw5M5xTlEK4qV0hi6GDAE0f4Np7H4m50rOhMattqaKBerNRe61+miBZTD0AbU/u9FM7PsVAJ2FKdN/5t6hbJkv101srXNSod8GgRE+x5+mAK2dnK5hfMs+oAQv51IGNiG0ODKUHsJVBmEM7eqk3lRp4hLC3KRzorckUMT4TMH8rS1T4cVY32h+TApaK0ixe+4BFwDNziyjxc2Vlqi/l3j4bTngpGZKAJq+KP/T0gVeqq3rkcP4YA17znFfJ717ZZBUNN1HkL0mtDsi6gG/mkpFjmkAqrEj/ld+NQqKvv8dkrtZREknLnHyrbL/263GA0dfysqTdm/U6B13RwQHlK/CNYU1gU7/fYanFe969lnnE4++h9IOei5dYNeG5DdME63ovXhcq5sEs7+nfgG4Zyx/tHxHLyLZwtzsFtTY6KBeT7zMXEtRdhz7OF64Vnrdk1NfNQOW2/h+JF7bIcTpVkwEoZXaUk6Z6ARrdNqsZw9WK2ovbkljk5eYoOKnU4iyCaZRKauTXRjhwJq7V2UfF+3pGUvdToO+U3U1KUH49bVAkUtwkQhRVRQBs54cBeIM+pGmYKgc5ChjbpYrCdfvT4wgxh6WcIHj1rKrkt4Fw0Vdn4Ck4fDejHIvCl9uNXmVUgBcOV6rSgVFWN1e0mTbgUN+qeN8yF+KwoWznJ9Y9EWWFvZSWwKtccuzZP58LlHscl91kdOS3Rfy3hB5poH3KHOVVh6Etbyk/VJcM03ejZJdJC4pOpxA/5wllW//+6l8mP2nothpqxAf2y1oU4z6GuZV1939EmM/UtdW2LcSGcklCesEd+xST/CNB1nLHWVmH2KfQbmavAUgF2vQs3J0pqHu4n260DE4gSg4pdV1iZPq2otmnjrsToH4HyLSPflfUulpGSpgvWaokPA1qUW7K5mkeKnK7eWgwgv0z7EUNYbVDem/RgScJhDmoIZbVzURJXkFCeZW1NeUG7eonC5wZq0wW+8JXKVhUyNAgwPB5p+88RghKbUlthHJjhKh1K20gO5lV/HlrYyxwsPU6YTSzfVtQ0zWX73y7YMjiWcgjWjhlIMgUjqrBRrd03T/wGyzXdU8IMD0xS2uxADuDbCNBs1nRY1gH5yoLgkW14QatLLVFHyTGl0Jo86xk5oMcbkKH6ifjMKMOB4rviYfPAqwd3L+K80wVuWKeXGzPyOrEXERxGra0SIE6Qtu+NjpTDMaHUQvYFZvBr6RFPC3NLt6r9LW/E2YvI87E0EolCOh4IUkZG/l9rJ7d3vIXOMVKJ+xkohYRdqUhX7N0CriZigPMplXSCf3Dy7JYNZx8GySx+M0uPN9zyemBBeMLQz7q9DLRyqBj6kUY0/j9mtdiD4gYkdHobCRz4RH74ho+UyKscdSZxI+I/mJ4ePaSIqgX659DSKF9Q0323siZ9mHqIMKNLd3Vm0ON+T5zv9j/BzdDm6D9/3/0NpnHRTBfiYJCGWfU3Go59IioHkNwhocesvz+//mZHUhybGvgDgtpbwIF9byrF0m2xgaliENtiuuEWsMxI2AdhDUnQwH1AAQmfQhIYcYkXjTshVLbEr/QOXmtMjX4Jr+G1/qnmZXz1kJUh50B22AHCHz30Y4rIUAE+U2szoG7VmegFaDdNHW2zPP8mJJ41bkIqZ6DJWAcjqPU9EZ1AB1qktInFNNRF24eib8D7Q4u7kyX9ly+fuNk0y8lzW5+7F2Yt7tQDM+mg5AB2xBLB/cA+wHxUm34MqrM3lKYMS/yNh31/cPGANwNu/SYus1OGAFXVZj7Bvzd5RarWcDrsbRinormEIANczCEOxWkU8a56SJwcgl3r9MpwROidEhqAscxRXS4gAO40QAFapfLTBk5dy9o9XOHruXeMXpwrMsUSuma5QDgdjHZNCigyANTzkKooO35omAWEmc1wrWpogd2OehQSOqpDm+OHJIfowXBma+ECc8haNoyXlpi6s+s74pljd98wcZxv5c83XszthJHfywSYDmhcRT/Jau2fYqHwq8HG50xy3oZyezXXvqd88wGewCC2/ggiKFnAC1T4bupiUHKNVLHP0uCusXYsWCQ2Um2D583ZGiIeqiBwXT6bQVhq9ibO6HUxDx0V0lUrPRV527PxussLgxrcRxbyN0vtPU6WM+oWp+wD4B3auS2yqMPJNQMSAGD4ivQhT9fZl58tZWC7+qynGxF1r1HhC12upKW7C99GqEjQEyBp3kNjLdq2BnYbwrrhGL2rKf0hl1xYgokN0Kdj5XDyGpIRiJvCIx6LN9+u357tmYqDf6XYAAAuWMn94wEBUEAAeM7uZsCAOUAfiaxxGf7AgAAAAAEWVo=')))
+        for n,v in payload.items():
+            p=src/n
+            assert not Path(n).is_absolute() and '..' not in Path(n).parts
+            if v['old'] is None:assert not p.exists()
+            else:assert sha(p.read_bytes())==manifest[n]==v['old']
+            b=base64.b64decode(v['b64']);assert sha(b)==v['new']
+            p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b);manifest[n]=v['new']
+        (src/'source_manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,sort_keys=True,indent=2)+'\n')
+        fs=files()
+        assert len(fs)==601 and set(fs)==set(manifest)|{'source_manifest.json'}
+        assert all(sha(fs[n].read_bytes())==h for n,h in manifest.items())
+        assert tree(fs)=='04be5fed1f3206122a8d70502d1e6628e8eac96d15f3d093c5cb400a2b109ff5'
+        for n in ['R733QuickTextSampler.swift','R750RawPixelSampler.swift','R834QuickLatencyPolicy.swift']:
+            assert (src/'app/ios/ChampionsOnDevice'/n).read_bytes()==(src/'R720_PORTABLE_TESTS/Sources/R719Core'/n).read_bytes()
+        (proof/'SOURCE_TREE_SHA256.txt').write_text(tree(fs)+'\n')
+        print('R834_601_MEMBERS_VERIFIED',tree(fs))
+        PY
+    - name: Full 622 Swift regression and original PNG QUICK timing
+      if: matrix.lane == 'real-apple-vision'
+      shell: bash
+      run: |
+        set -euo pipefail
+        export R834_PROOF_DIR="$PWD/R834Proof"
+        swift test --package-path pinned-r793/source/R720_PORTABLE_TESTS > R834Proof/Swift.log 2>&1 || { tail -n 150 R834Proof/Swift.log; exit 1; }
+        grep -F 'Executed 622 tests, with 0 failures' R834Proof/Swift.log
+        grep -F 'R834_QUICK_ORIGINAL_PNG_MEASUREMENTS' R834Proof/Swift.log
+    - name: iPhoneOS SDK compile NO IPA
+      if: matrix.lane == 'iphoneos-compile'
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 pinned-r793/source/tools/generate_xcode_project.py
+        xcodebuild -project pinned-r793/source/app/ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r834_device" build > R834Proof/iPhoneOS.log 2>&1 || { grep -E 'error:|BUILD FAILED' R834Proof/iPhoneOS.log; exit 1; }
+        grep -F 'BUILD SUCCEEDED' R834Proof/iPhoneOS.log
+    - name: Record scope without paid artifact storage
+      if: always()
+      shell: bash
+      run: |
+        if [ -f R834Proof/quick_original_pngs.json ]; then cat R834Proof/quick_original_pngs.json; fi
+        if [ -f R834Proof/SOURCE_TREE_SHA256.txt ]; then cat R834Proof/SOURCE_TREE_SHA256.txt; fi
+        echo 'R834 NO IPA. macOS original PNG replay is not iPhone capture-to-render certification.' >> "$GITHUB_STEP_SUMMARY"
