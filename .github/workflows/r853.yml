@@ -1,0 +1,186 @@
+name: R853 D113 Audit repair retained index and save cutoff plus capture orientation NO IPA
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/r853.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            lane: real-apple-vision
+          - runner: xcode-27
+            lane: iphoneos-compile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4cc925234f9101a8875744e75049f06e96ce4d90
+          path: pinned-r823
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r823.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          path: pinned-r821
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r821.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+          path: pinned-r819
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r819.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          path: pinned-r793
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r793.yml
+            .github/workflows/d30.b64
+      - uses: actions/checkout@v4
+        with:
+          ref: b783a785f97d0b74c9a1d48780dcee9626aef12c
+          path: pinned-r833
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r833.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 73b62dff5e71b7889e90b7be1e1ba311e6205ec2
+          path: pinned-r843
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r843.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 2529b32878004b846bcbfc7c3a62aa73df6302d4
+          path: pinned-r844
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r844.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: d09e35c616f7d8056b967d51a6936f13b1d11ef7
+          path: pinned-r845
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r845.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: ee9255ad4179d01dadc595a5b5d380125f427851
+          path: pinned-r846
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r846.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: e8e28eb774bd790f1b08c7ff7e9d5defa837f469
+          path: pinned-r847
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r847.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: b2e09fa3a86ba9488ea514382bd10cc0b98d8c92
+          path: pinned-r848
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r848.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: a941556604317c96eeaf23d0fd727c53593db02e
+          path: pinned-r852
+          sparse-checkout: .github/workflows/r852.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Restore exact R852 and apply bound R853 repairs
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(11).fetch("run")' pinned-r852/.github/workflows/r852.yml > "$RUNNER_TEMP/restore_r852.sh"
+          bash "$RUNNER_TEMP/restore_r852.sh"
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import json,hashlib,base64,lzma
+          s=Path('pinned-r793/source');sha=lambda b:hashlib.sha256(b).hexdigest()
+          def disk():return {str(p.relative_to(s)):p for p in s.rglob('*') if p.is_file() and not {'.build','.swiftpm','__pycache__'}.intersection(p.parts)}
+          def tree(fs):return sha(''.join(n+'\t'+sha(fs[n].read_bytes())+'\n' for n in sorted(fs)).encode())
+          fs=disk();assert len(fs)==646 and tree(fs)=='bfb7b2a6f69a343dd1af1503fc9fdd98551e955a07eafc8e3c94981b3ebe3c21'
+          m=json.loads((s/'source_manifest.json').read_text());assert all(sha(fs[n].read_bytes())==h for n,h in m.items())
+          d=json.loads(lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4B5tCuxdAD2IhkNxnO04TyCRWPCGeyPwk7LKNN96XBElM48/xdlUKDjedxW3DjIQpgqEXkyJTxzR2lBp1zOCqbFR1S4EMzh4aMccTfj53fSq+FAeTbwjzJLGnjOahpGLU50Vgjt2VMRCc81HkEjd8xUUWVmrbnFAl4tLWfNdJ0oARvXRkU22gQgCAQL02cL0HDQlnwduvoTZjFnQ4OJZVoUygB0X9lHpRiwsaTMARqowB8Bi0von5SeY9yIJX88bbv2NKveAPi6zOJw9/S5yaKFHN3BeMIrtDkwInV0VhPuVV+c3QJj378e75AFJ9E0W4rmTfk/k1Z0vwf/v4izID3xqWxXtNl+aMwxlT81ggY6usIxSI6OtESJ9tTLp2ShkQNIpmGgLvTOpYWEovK5KAyst+h5CDlzkrB2ia9oeZESEZky3I8GIsld0MgH2bvwvspL+IEffWIygMFnS+Jvc7osMOECwDHIUWnGtV8yb64BnIwtJGaOnZe7pmsWLzqX1j+BU4EhroVofCyA6IQk23p2BHsBVm0DZ2xyH4dXcLqKaNAuhfA9p/rT3XBYe33G+VEInOJm4xaLfo++RqROlcLcMgNT7g9s/1GPkKNQVFSVMLmQM01P86WTM/8rXf6Eiz/Rcu8Sg4D/9K0/jrhmU3CG2gtHn92gWWZASRpmp8+V9oWPsruLnXaq/2tJQxENBCC4hE42TTu+AFkoXkN0XNVFnrYWeyyxSKTkBiKAlm4iW1rbVaWFgmiCUKaaWQeGca20D2Lj+yJmDbf1d9pTHW1tpSpGLAJ7eluQizhZlA/Y9JC9E8dXiLnhAh5t1RnuD2kQslUnxaa1EG6q44UhLucbVNWDx9rqq7ACzGO9zVYncwaEnNKY9f+cwJ1/8Smc9E/gHY5tEr7Km/9UDtISoVMd5GJaNNGV0j0OS1XP5KfmhzfWtFRpTQOwi6UqGtbUcvbsUYyZgUnjMDZWBq3WUJId+xzLhhuw1vPsqwi5LNNz6Un08p6H7sc3bpjyVnsHzIhsUVMzw2+zO9A4FGqOcDC8d4WPtLkArXIw7fOCG0PxfVCGmhMDj2w9KCWgtdpMWjswqXW4g8PVrw2apkSXA8Sr4rgQqfPdeGYyKVZ6OOZe4xzzuUCK+DZIRCVJExWdm7yXoOkfJHkaFoRgHgBV0L7MfByzmR7ydKK2mcxvHHgvHhAOhArLwIl38+BWONC267K+Cbmfjbg1rHA9EoAe/Nlm6K33MXOGrexClqam87dcclLN3jLhEGhGWp4EQuxMKWRpFFh561lSX3jwPOWAnwAbQF/GwX7KOREf1Xdr6o867bF6sDbFFn0a1FzYgy194dscXp4nl4f+gUNUdMkzK8sJNGJnqei5bsqsQaSvt0uULZS72lBOepUi1bcHw1S4979AVM+flI+0ug8MQnbk7JwTyvYpwuIBY7sOWGUR5uBqaDa6JkLm3rsG/gczolqGE0lg82//H5ZaGF5bEAP1wmL2O3vK5Lc2FRxdB4hAkRjs3LXydeZ1DPUC5VHtF19SUrwrtie5/ZNE7PWQTwlVBy2rudWWx/3cDfVrXaJFzWBddtLfyqk7AeY2pTY/VFIl40XzJGgyYZ0b5pmZ8YQhn1EidR95lArmqgrP4HK/cd+4tHNMN8SmgPoeYfNexKZfJlbuZJ+L0toW3fnmc1NbUiFIcHRgKUqa45JFo8k53Cg37z8b/nYPMG0uj3M/UdGRjJ3qyclDCULll5v1jOB5XitPIgwW1Z9sx/jW/hX/mku6oSrqEUj2s3f7KPPkufpKq5www2TA1PSpCYT5O3s2qyxeZV1m8lPvYpybfb9GOuhkOPaA8Cbr53HuUF+V7QIIn84D+jqHGUyb9ikw9NMayHUJYbKSNJ5zfKUG2DZm3H+L3e9P/FAhlFo6ZonWyk+ZgYqW0yv9y/izcfUW9EM5hS5O6Pt48Flk9IYqk0DR9RW5NFmWSHUhrj7xR5MGrC8fvElLufSFG0qGYH5kSgKZoG3S1PY94j/Ni9JVmf/WHU0G9E6U4aePJMfR1NSsZsUXOC5Ojg8lEZ4OQiHE9AnGEzH6vFqnLbteR8i1B3YqqdScMKvF5scvri1CaPX6acxE1HUsxtm1PgBAY0JRVH/PMt3DCik1CdjV3K/iUE2ym5NHHFktHU41OaQkYAc9UzkLKBVBSTmawoUW35idHy63g2FzHEhhWpvP/3pfQryfghFC3m/fnoa0yVc6zyfn+TMVEMAqk7Hi7BFcx3wVancOsNldaXmGv3s26t5XHrjOUEQo/EhtmiHEuha449r1keI9f99z8dS1owqCSDgZJOz1iFFtrT9qO5V8+wPclfAdwN2J3Ljr0Qo05yo1N3VlPDEQ35PTVDvG3+H/9iJjY1MqoWsO0Ga6frRijuIap2pM+HBnUsbuLl2yM+xIloGNrxOnrbTIFVMZHwgS4vYipctOPAF3VqBwCqFSTQjxPuV0fcnAdn8ip/RpfcrCBfPKiAhXKUsgV21H5WIbT2nyRL0l6tX9P0Eeo5waIlFtWXdSI6vc1q2JPvNoWAWFP4Q8dIonqnyeUL1zOsp7DfKSwoVa+2Zpoiw3GLleihAoUdykrwJx3Kgc6U3qomI6Gi7dPJIUQwSc1UdiNh9m+ze/k+2pALbicR5gCYaRW2bYwSw5PLyPFUk/FcQ2xRTLb/H7qoVrzal/kS0Ac4OY7VxbDvkf7IOiGkZfOl0AypuHvflbxOn/huaGDB1tuBaOp9JO6kCjJ+bLRwxNXhgKStHniDSQg7N6TOXLE/MiXY3XZyyCJ0fQj+NC5MZ3CFlOiPoVEjYgNerZfPiWdnaMd0odpdLaq5FA4qaBrkVTuFpZNe+45Euel2ifL97QvH5kUmRgxWotUdzOZC9N8IGVHTYxDv9mpvyMJVKG9sk6CUa8fI5H3yUI4XrkrrDldKUD8dcn93Xo4d625tECvHjKbQlc3eD1uaN6HkSh8XGVBeC2wZHEmCf7QqchHJZmXj2GIA6llnPTaCmUSkBzrZ4dp4S765a6vDlcm6n+1/HfjMJGpiJhD4N+QAFXwSKvUFh35TXUhjcotJhVj43KSyl6Gb4zBDDReq17+HWGVk5oGOalDvtLRQFRcGmi8xmQpglmVK/4tWHliihp5imBvXZhVQpRSg2UNPAu53Q89uufZG5iEhsPBBWK7ArWnoSIDArpCizzmzzzpjlkpXdJkSQDtNAt6EjoEWNQRH4aUQiAo8mTuMxe12R037HPIKhHDChZ1iaUn3QuMCilYaeG6xuIlyhKF37Vf9nbmdXJFpyHeu1x6/isjPNFpgj9OYIxB00oq4+WpG7Yj0yKZ9MAE7vl/P8pRcWPKP/spBK0UAG0Kv0pi1AVTlJqwpRoSndPB/ikveDXw3b3ZB6WcQ8b/Gu/C/S7Y7VheRFof0NbEzi6cvZqAO5/dOn3zBlS4uU/uLoOVWBB0MJEsLwoht9pGtOsfwwK3Zqr+bpWvVsD7o0PBjX1Ysw84Qgqhx/SSp+1W2no1+FB2KUhErxofPTAJffnnvZLTM7CUR4/dSSAFvZrhm5VjxWcK/PqpHRgrretQJ1VfM416+9cVDjzW8F9aPBydStaEkoq+QbS7e7eqxLDmKV3WsC8irb/ohDHg0CtU+zP5j2shZfbVAuDIHATACNppHYDkQCHAGMNgZpQdH3GVbPlITnRgCXrZsPLkl0mJHPSH4kX3aWjoACmnyxTLTQIAhTPoxNuc7AIgAADz5s9HucX/AgABiBbuPAAAtQrHxbHEZ/sCAAAAAARZWg==')))
+          for n,v in sorted(d.items(),key=lambda item:'copy' in item[1]):
+           p=s/n;assert not Path(n).is_absolute() and '..' not in Path(n).parts
+           if v['old'] is None:
+            assert not p.exists()
+            if 'copy' in v:
+             original=s/v['copy'];assert not Path(v['copy']).is_absolute() and '..' not in Path(v['copy']).parts
+             assert sha(original.read_bytes())==v['source_sha']
+             b=v['prefix'].encode()+original.read_bytes()+v['suffix'].encode()
+            else:b=v['text'].encode()
+           else:
+            assert sha(p.read_bytes())==v['old']==m[n]
+            lines=p.read_text().splitlines(keepends=True)
+            for i,j,t in reversed(v['edits']):lines[i:j]=[t]
+            b=''.join(lines).encode()
+           assert sha(b)==v['new'];p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b);m[n]=v['new']
+          (s/'source_manifest.json').write_text(json.dumps(m,ensure_ascii=False,sort_keys=True,indent=2)+'\n')
+          fs=disk();assert len(fs)==649 and set(fs)==set(m)|{'source_manifest.json'}
+          assert all(sha(fs[n].read_bytes())==h for n,h in m.items())
+          assert tree(fs)=='9042e84a3e17d5367a5e4d280e518d0cd4725ce31d8b96a39ddd8955b834d9d4'
+          Path('R834Proof/SOURCE_TREE_SHA256.txt').write_text(tree(fs)+'\n')
+          print('R853_SOURCE_649_VERIFIED',tree(fs))
+          PYCODE
+          python3 pinned-r793/source/tools/r852_preflight_wiring.py
+      - name: Full 673 Swift regressions source buffer and preserved source readback
+        if: matrix.lane == 'real-apple-vision'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(8).fetch("run").gsub("652 tests","673 tests")' pinned-r845/.github/workflows/r845.yml > "$RUNNER_TEMP/r853_swift.sh"
+          bash "$RUNNER_TEMP/r853_swift.sh"
+          
+          grep -F "R852_CVPIXELBUFFER_PNG_FSYNC_PIXEL_OCR_STATE_MAIN_MS" R834Proof/Swift.log
+          grep -F "R852_31_RETAINED_FRAMES_RELAUNCH_ZIP_READBACK_NO_OCR_PASS" R834Proof/Swift.log
+      - name: iPhoneOS production build version 853 NO IPA
+        if: matrix.lane == 'iphoneos-compile'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 pinned-r793/source/tools/generate_xcode_project.py
+          xcodebuild -project pinned-r793/source/app/ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r853_device" build > R834Proof/iPhoneOS.log 2>&1 || { grep -E 'error:|BUILD FAILED' R834Proof/iPhoneOS.log; exit 1; }
+          grep -F 'BUILD SUCCEEDED' R834Proof/iPhoneOS.log
+          python3 - <<'PY'
+          import plistlib,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'r853_device/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app/Info.plist'
+          d=plistlib.loads(p.read_bytes());assert d['CFBundleVersion']=='853' and d['CFBundleShortVersionString']=='0.8.53'
+          print('R853_BUILT_IDENTITY_VERIFIED',d['CFBundleVersion'],d['CFBundleShortVersionString'])
+          PY
+      - name: Scope and source receipt
+        if: always()
+        shell: bash
+        run: |
+          if [ -f R834Proof/SOURCE_TREE_SHA256.txt ]; then cat R834Proof/SOURCE_TREE_SHA256.txt; fi
+          echo 'NO IPA until both lanes pass. Actual iPhone continuity and LCD latency remain unverified.' >> "$GITHUB_STEP_SUMMARY"
