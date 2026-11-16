@@ -1,0 +1,482 @@
+name: R845 D105 Visual-first form history turn and transport preflight NO IPA
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/r845.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            lane: real-apple-vision
+          - runner: xcode-27
+            lane: iphoneos-compile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4cc925234f9101a8875744e75049f06e96ce4d90
+          path: pinned-r823
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r823.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          path: pinned-r821
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r821.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+          path: pinned-r819
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r819.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          path: pinned-r793
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r793.yml
+            .github/workflows/d30.b64
+      - uses: actions/checkout@v4
+        with:
+          ref: b783a785f97d0b74c9a1d48780dcee9626aef12c
+          path: pinned-r833
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r833.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 73b62dff5e71b7889e90b7be1e1ba311e6205ec2
+          path: pinned-r843
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r843.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 2529b32878004b846bcbfc7c3a62aa73df6302d4
+          path: pinned-r844
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r844.yml
+      - name: Restore exact passing R844 and apply R845 source fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(6).fetch("run")' pinned-r844/.github/workflows/r844.yml > "$RUNNER_TEMP/restore_r844.sh"
+          bash "$RUNNER_TEMP/restore_r844.sh"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,hashlib,base64
+          s=Path('pinned-r793/source');native=s/'app/ios/ChampionsOnDevice';portable=s/'R720_PORTABLE_TESTS/Sources/R719Core'
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          def disk():
+           return {str(p.relative_to(s)):p for p in s.rglob('*') if p.is_file() and not {'.build','.swiftpm','__pycache__'}.intersection(p.parts)}
+          def tree(files):return sha(''.join(n+'\t'+sha(files[n].read_bytes())+'\n' for n in sorted(files)).encode())
+          files=disk();assert len(files)==620 and tree(files)=='99f2dcfd1632f8835623547c20da318d65e7eb799781584cbfc6128d152eca9c'
+          original=json.loads((s/'source_manifest.json').read_text());assert all(sha(files[n].read_bytes())==h for n,h in original.items())
+          f=json.loads(r'''{"base":"inNck4aBfoSEcDRfizRulTRzlTRzlTRzmIZ8Y1ZuiKBxdYFfk19i4EN+50WD5kWCiHqUij1ZkrB3kK52inFk1zt15Tx83U2FbGmDgY9poLqQcYlcl6Z6yEBw4jd43DV2hzVkeWdtbY+onL+BfZFohnpozDVsny9tvzZrlrCCfJ+QlrZ9mbWBm1Bg2DNxbjpwzTxzkYFwpVBlmmBlfoZmyDdsmi1qbWN/hS9sgy9rhS5reTBoZVBxcDxwemyDfGdV","mega":"ZEsng3BleWOEkjp5WDl3Yy9JrEc9RTNwcl1Ec1CBkmBn1VOE3mqkZ1OHeleBzm2mfG91il9moKN+oGxvxll7sWd55UyL5laReV6JlYx1ippwk6p6kZx1n3Bv3D9/4j6BgUB3j4Jui590fohnhYVqwENz5D6CsjR3pztxgXBhpm1Uj5xxdmtf4T+B4Dt+gD17ykV6hY9vmE9bmWdpgn9o3Dx9pjFzbmOFdTlxaEVxgzd2gDZ1WkhvcEh8b2WETEE7","holdout76":"4J9qqY2JdFN4kDJtTzpzXSY5nUE+Sy9m7sGdbkd1k1dh1EZ7zWOcZlWGdVN80WGbsJygilpej5hvqVZqvFJurFtw30F+3U2Fg12JgIhkgpJni6Nyh49qm2Vo2jZ13DV2fzVhfXpigpRrbnxYfnlivjhp4DV3ny9tpTZibWlSmWZMfpBld15Z3TV02TNybjpvr0FmeYdlkUZQgGVbg3Nj2DNxmS1qaWJ/aTRkYz5lhC5reC9mUUFibD5wbGOCUUhI","holdout96":"4qJrr5OKdVR3kTJuTzpyXCY4nkE+Si9m7sOebkd1k1Zh1EZ6zWOcZVWFdlN80WGasJyfilpejphuqVZqvFJurFtw30F+3U2Fgl2Jf4hjgZJmi6Nxh5BqnGVo2TZ03DV1fzVhfnthgZVrbnxXfnlivzhp4DV2ni9tpTZibmlSmmZNfJBldl5Y3TV02jNybjpwsEFmeYdjkUZRgGVagnNi2DNxmi1paWKAaTRkYz5khC5reC9mUUFibD5xa2OBUUhI","holdout4220":"blw+gXVxeGOEkjp5WDl3Yy9JrEc9RTNweGlVc1CCkmBn1VOE3mqkZ1OHeleBzm2mfXN7il9moKN+oGxvxll7sWd55UyL5laReF6KlYx1ippwk6p6kZx1n3Bv3D9/4j6BgUB3j4Jui590fohnhYVqwENz5D6CsjR3pztxgXBhpm1Uj5xxdmtf4T+B4Dt+gD17ykV6hY9vmE9bmWdpgn9o3Dx9pjFzfXKVdTlxaEVxgzd2gDZ1Wkhvb0h8b2eHf3Zy","selection":"CAcOCAcPCAgPCAcOCAcPCAcOCAcOCAcOFgwVHA4YHA4XHA4YHA4XHA4XHA0YHA0YvlZrwFZswFRswFJsv1FswFRvvk9svktrwVdtwFZtwFRtwFJsv1Fs0H6T2ZeoxWJ+wVhuwVZtwFRtwFNsv1Fsw1l1yWmDwlZ0KxokMx0oMxsnMhsnMRkmMBglMBgkMBclWAkrjgQ6iAQ4hgQ3hgQ3ggQ1hgM2hgM2cAkziAU4fgU0fAUzfAQzVRQtXhMwdQYy","ownToucan":"TD0gkZ41sYy1Z1+kXV6egXXpi338i339S0kefF1avDlzbDp4U1d9YWC1g3T+gnP7WV0qWFF3eVbAdWas5eTmbmmcf2/7fW34pLtkiHj1gnH/iX+219TKTVFSZ1zKemz1vsbCgnH/gnH/f27qUk1YRjs/bj5+dmrmrKH3gXD/gXD+bWTKVl+eUVOET0l8mp6ovLjttbHstbDsrqvfp6fQnaS3tMmfmLFFcHseeogkeogle4kleogkeIYlZmgpQD8k","turn_png":"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","turn_png_sha256":"a001cc3e0534ca9847bfe7bc7e424c53d1eeeefe423bc9b2ca36abb3967675a7","original_png_sha256":"b030874a41d346215eb15286b5aba3c1a689991d7432bbc9d8d5b635f213f1ab","mega_reference_png_sha256":"55c00eb9e7cae9620f1e6d9af1ebb9fd13eabfdbb601401a271b5ab41c877884"}''')
+          def both(name,content):
+           assert not (native/name).exists() and not (portable/name).exists()
+           (native/name).write_text(content);(portable/name).write_text(content)
+          both('R845VisualForm.swift',r'''import Foundation
+          
+          /// Appearance estimates for two Tyranitar HUD references. Names cannot assert
+          /// Mega. Unknown species, ambiguous matches and missing cards remain unknown.
+          /// Developer-reviewed pixels are not user/device accuracy certification.
+          enum R845VisualForm {
+              static let references:[(String,[UInt8])] = [
+                  ("BASE",Array(Data(base64Encoded:"@@BASE@@")!)),
+                  ("MEGA",Array(Data(base64Encoded:"@@MEGA@@")!))]
+              static func distance(_ a:[UInt8],_ b:[UInt8])->Double? {
+                  guard a.count==192,b.count==192 else{return nil}
+                  let cells=(0..<64).filter{!($0/8<3 && $0%8>=6)} // Exclude status badge.
+                  var sum=0
+                  for cell in cells {for c in 0..<3 {sum+=abs(Int(a[cell*3+c])-Int(b[cell*3+c]))}}
+                  return Double(sum)/Double(cells.count*3)
+              }
+              static func classify(_ descriptor:[UInt8],side:String,profileMatched:Bool)->[String:Any] {
+                  var r:[String:Any]=["schema":"trueplan.r845.visual-form-estimate.v1","display_side":side,
+                      "status":"HOLD_VISUAL_FORM_UNKNOWN","knowledge_state":"UNKNOWN","value":NSNull(),
+                      "reference_species_count":1,"user_label_reviewed":false,"device_accuracy_certified":false,
+                      "individual_id":NSNull(),"mega_event_confirmed":false,
+                      "battle_advice_authorized":false,"name_only_promotion":false]
+                  guard ["own","opponent"].contains(side),profileMatched,descriptor.count==192 else{return r}
+                  let ranked=references.compactMap {name,reference -> (String,Double)? in
+                      distance(descriptor,reference).map{(name,$0)}
+                  }.sorted{$0.1<$1.1}
+                  guard ranked.count==2 else{return r}
+                  r["distances"]=ranked.map{["reference":$0.0,"mean_rgb_error":$0.1] as [String:Any]}
+                  let margin=ranked[1].1-ranked[0].1;r["margin"]=margin
+                  guard ranked[0].1<=16,margin>=7 else {
+                      r["status"]=ranked[0].1>16 ? "HOLD_NO_CLOSE_VISUAL_REFERENCE":"HOLD_COMPETING_VISUAL_REFERENCES"
+                      return r
+                  }
+                  r["status"]="VISUAL_REFERENCE_FORM_ESTIMATE";r["knowledge_state"]="ESTIMATED"
+                  r["value"]=["species":"TYRANITAR","form":ranked[0].0]
+                  r["basis"]="HUD_ICON_RGB_REFERENCE_MATCH_NOT_NAME_OR_LOG"
+                  r["reference_source"]=ranked[0].0=="MEGA" ? "R715_ORIGINAL_PNG_FRAME_8_4162":"R732_ORIGINAL_PNG_MOVE_PANEL"
+                  return r
+              }
+          }
+          '''.replace('@@BASE@@',f['base']).replace('@@MEGA@@',f['mega']))
+          both('R845HUDFormSampler.swift',r'''#if canImport(Vision) && canImport(CoreImage) && canImport(ImageIO)
+          import Foundation
+          import CoreGraphics
+          
+          /// Tiny original-pixel crops on the existing bounded QUICK worker. No extra OCR.
+          enum R845HUDFormSampler {
+              static func inspect(_ source:CGImage,profileMatched:Bool)->[[String:Any]] {
+                  let portrait=source.height>source.width
+                  let width=portrait ? source.height:source.width,height=portrait ? source.width:source.height
+                  let rois:[(String,Double,Double,Double,Double)]=[
+                      ("own",0.083,0.858,0.047,0.105),("opponent",0.755,0.040,0.047,0.105)]
+                  return rois.map {side,x,y,w,h in
+                      guard profileMatched else{return R845VisualForm.classify([],side:side,profileMatched:false)}
+                      let left=Int(floor(x*Double(width))),top=Int(floor(y*Double(height)))
+                      let right=Int(ceil((x+w)*Double(width))),bottom=Int(ceil((y+h)*Double(height)))
+                      guard let crop=R836NumericHUDOCR.cropFromOriginal(source,portrait:portrait,
+                          x:left,y:top,width:right-left,height:bottom-top) else {
+                          return R845VisualForm.classify([],side:side,profileMatched:false)
+                      }
+                      var rgba=[UInt8](repeating:0,count:256)
+                      let ok=rgba.withUnsafeMutableBytes {data -> Bool in
+                          guard let c=CGContext(data:data.baseAddress,width:8,height:8,
+                              bitsPerComponent:8,bytesPerRow:32,space:CGColorSpaceCreateDeviceRGB(),
+                              bitmapInfo:CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
+                              else{return false}
+                          c.interpolationQuality = .high
+                          c.draw(crop,in:CGRect(x:0,y:0,width:8,height:8));return true
+                      }
+                      var rgb=[UInt8]()
+                      if ok {for i in stride(from:0,to:rgba.count,by:4){rgb.append(contentsOf:rgba[i..<(i+3)])}}
+                      var result=R845VisualForm.classify(rgb,side:side,profileMatched:ok)
+                      result["source_display_roi"]=["x":left,"y":top,"width":right-left,"height":bottom-top]
+                      return result
+                  }
+              }
+          }
+          #endif
+          ''')
+          for folder in [native,portable]:
+           p=folder/'R836NumericHUDOCR.swift';t=p.read_text();assert 'private static func cropFromOriginal' in t
+           p.write_text(t.replace('private static func cropFromOriginal','static func cropFromOriginal'))
+           p=folder/'R750RawPixelSampler.swift';t=p.read_text();needle='        audit["r837_display_hp_profile"]=R837HUDProfile.inspect(normalized)';assert needle in t
+           p.write_text(t.replace(needle,needle+'''
+                  #if canImport(Vision) && canImport(CoreImage)
+                  let matched=(audit["r837_display_hp_profile"] as? [String:Any])?["matched"] as? Bool==true
+                  audit["r845_visual_form_estimates"]=R845HUDFormSampler.inspect(source,profileMatched:matched)
+                  #endif'''))
+           p=folder/'R837FrameHPRecognition.swift';t=p.read_text();needle='        // Explicit battle turn requires a separately validated screen route.';assert needle in t
+           t=t.replace(needle,'''        // Appearance is an estimate bound to this frame, never an old log/name.
+                  if accepted,let estimates=pixel?["r845_visual_form_estimates"] as? [[String:Any]] {
+                      for estimate in estimates {
+                          guard let side=estimate["display_side"] as? String,
+                                ["own","opponent"].contains(side),
+                                estimate["knowledge_state"] as? String=="ESTIMATED",
+                                estimate["status"] as? String=="VISUAL_REFERENCE_FORM_ESTIMATE",
+                                let value=estimate["value"] as? [String:Any] else{continue}
+                          let key=side+".mega_visual_form"
+                          guard rows[key]?["knowledge_state"] as? String != "CONFLICT" else{continue}
+                          rows[key]?["value"]=value;rows[key]?["knowledge_state"]="ESTIMATED"
+                          rows[key]?["source"]=source;rows[key]?["visual_evidence"]=estimate
+                          rows[key]?["reason"]="LIMITED_VISUAL_REFERENCE_NOT_EVENT_OR_INDIVIDUAL_PROOF"
+                      }
+                  }
+          '''+needle);p.write_text(t)
+           p=folder/'R716SpatialFieldProjection.swift';t=p.read_text();old='''                if (scene=="battle-log" || scene=="battle-command") &&
+                              exactMatch(norm,#"^ターン[0-9]{1,3}$"#) && y<0.15 {
+                              typed.append(("battle.turn",String(norm.dropFirst(3)),"TURN_LOG_LABEL_CANDIDATE"))
+                          }''';assert old in t
+           p.write_text(t.replace(old,'''                let compactTurn=norm.replacingOccurrences(of:" ",with:"")
+                          if scene=="battle-log",exactMatch(compactTurn,#"^ターン[0-9]{1,3}$"#),
+                             (0.35...0.65).contains(x),y<0.15 {
+                              typed.append(("battle.move_history","SELECTED_HISTORY_TURN:"+String(compactTurn.dropFirst(3)),
+                                  "HISTORY_SELECTED_TURN_NOT_CURRENT_TURN"))
+                          }'''))
+           p=folder/'R761FieldSafetyContract.swift';t=p.read_text()
+           t=t.replace('// Existing image matcher remains retrospective, not a live decoder.','// Limited live appearance estimates coexist with historical audit.')
+           t=t.replace('return ["R595FormReferenceMatcher","R747JournalFormHistory"]','return ["R845HUDFormSampler","R845VisualForm","R595FormReferenceMatcher","R747JournalFormHistory"]')
+           t=t.replace('let retrospective=key.contains("mega_visual_form")','let limitedVisual=key.contains("mega_visual_form")')
+           t=t.replace('(retrospective ? "RETROSPECTIVE_REFERENCE_MATCHER_ONLY" :','(limitedVisual ? "LIMITED_LIVE_VISUAL_ESTIMATE_ONE_SPECIES_TWO_FORMS" :')
+           p.write_text(t)
+          p=native/'Info.plist';p.write_text(p.read_text().replace('<string>0.7.93</string>','<string>0.8.45</string>').replace('<string>793</string>','<string>845</string>'))
+          f['scope']={'own_mega_real_positive':'NOT_PRESENT_IN_AVAILABLE_RECORDINGS','all_forms_coverage':False,
+           'labels_reviewed_by_user':False,'movie_capture_alignment_certified':False,'turn_crop_display_xyxy':[590,10,710,40],
+           'descriptor':'8x8 RGB BOX; upper right status badge excluded',
+           'holdouts':'R711 original MOV decode at 76/96 seconds; R715 original PNG frame 8/4220',
+           'mega_log':'R715 frame 8/3925 actual prior OCR: 相手のバンギラスは / メガバンギラスにメガシンカした！; not a current actor proof'}
+          (s/'tests/fixtures/r845_real_visual_history.json').write_text(json.dumps(f,ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n')
+          
+          tests=s/'R720_PORTABLE_TESTS/Tests/R719CoreTests'
+          (tests/'R845VisualHistoryTests.swift').write_text(r'''import Foundation
+          import XCTest
+          @testable import R719Core
+          final class R845VisualHistoryTests:XCTestCase {
+              func fixture()throws->[String:Any] {
+                  try JSONSerialization.jsonObject(with:Data(contentsOf:R761RealImageRegressionTests.fixtureDirectory
+                      .appendingPathComponent("r845_real_visual_history.json"))) as! [String:Any]
+              }
+              func descriptor(_ name:String)throws->[UInt8] {
+                  Array(Data(base64Encoded:try fixture()[name] as! String)!)
+              }
+              func testNormalAndMegaUseAppearanceAndKeepSpeciesUnchanged()throws {
+                  for (name,form) in [("base","BASE"),("mega","MEGA")] {
+                      let r=R845VisualForm.classify(try descriptor(name),side:"opponent",profileMatched:true)
+                      XCTAssertEqual(r["knowledge_state"] as? String,"ESTIMATED")
+                      XCTAssertEqual((r["value"] as? [String:String])?["species"],"TYRANITAR")
+                      XCTAssertEqual((r["value"] as? [String:String])?["form"],form)
+                      XCTAssertEqual(r["mega_event_confirmed"] as? Bool,false)
+                      XCTAssertEqual(r["device_accuracy_certified"] as? Bool,false)
+                  }
+              }
+              func testOtherRecordedFramesSeparateMegaAndNormal()throws {
+                  for name in ["holdout76","holdout96","holdout4220"] {
+                      let r=R845VisualForm.classify(try descriptor(name),side:"opponent",profileMatched:true)
+                      XCTAssertEqual((r["value"] as? [String:String])?["form"],"MEGA",name)
+                  }
+              }
+              func testUnrelatedSpriteSelectionMissingPaletteAndAmbiguityAreHeld()throws {
+                  for name in ["ownToucan","selection"] {
+                      XCTAssertTrue(R845VisualForm.classify(try descriptor(name),side:"own",profileMatched:true)["value"] is NSNull)
+                  }
+                  let a=try descriptor("base"),b=try descriptor("mega")
+                  let average=zip(a,b).map{UInt8((Int($0)+Int($1))/2)}
+                  XCTAssertTrue(R845VisualForm.classify(average,side:"opponent",profileMatched:true)["value"] is NSNull)
+                  XCTAssertTrue(R845VisualForm.classify(a,side:"own",profileMatched:false)["value"] is NSNull)
+                  XCTAssertTrue(R845VisualForm.classify(a,side:"UNKNOWN",profileMatched:true)["value"] is NSNull)
+              }
+              func testBothSidePolicyIsNotAnUnseenOwnMegaRecording()throws {
+                  for side in ["own","opponent"] {
+                      let r=R845VisualForm.classify(try descriptor("mega"),side:side,profileMatched:true)
+                      XCTAssertEqual(r["display_side"] as? String,side)
+                      XCTAssertEqual((r["value"] as? [String:String])?["form"],"MEGA")
+                      XCTAssertEqual(r["user_label_reviewed"] as? Bool,false)
+                  }
+                  let scope=try fixture()["scope"] as! [String:Any]
+                  XCTAssertEqual(scope["own_mega_real_positive"] as? String,"NOT_PRESENT_IN_AVAILABLE_RECORDINGS")
+                  XCTAssertEqual(scope["all_forms_coverage"] as? Bool,false)
+              }
+              func row(_ text:String,_ x:Double,_ y:Double,_ w:Double=0.2)->[String:Any] {
+                  ["raw_text":text,"confidence":1.0,"source_frame_id":3925,"source_epoch":8,
+                   "source_image_sha256":String(repeating:"a",count:64),
+                   "roi_rect":["x":Int(x*1290),"y":Int(y*596),"width":Int(w*1290),"height":24]]
+              }
+              func testSelectedHistoryTurnIsNotCurrentTurn() {
+                  // Annotation geometry reproduces the visible R715 selected history header
+                  // and previously recorded Japanese OCR. This is not fresh full-frame OCR.
+                  let rows=[row("ターン 1",0.46,0.02,0.10),row("COMMAND 35",0.69,0.02),
+                            row("相手の バンギラスは",0.386,0.25),row("メガバンギラスに メガシンカした！",0.386,0.29)]
+                  let r=R716SpatialFieldProjection.project(rows:rows,width:1290,height:596,
+                      frame:3925,epoch:8,imageSHA:String(repeating:"a",count:64),sourceVerified:false)
+                  XCTAssertEqual(r.scene,"battle-log")
+                  XCTAssertFalse(r.candidates.contains{$0["field_key"] as? String=="battle.turn"})
+                  XCTAssertTrue(r.candidates.contains{$0["candidate_value"] as? String=="SELECTED_HISTORY_TURN:1"})
+                  XCTAssertTrue(r.candidates.contains{$0["field_key"] as? String=="battle.mega_history"})
+                  XCTAssertTrue(r.candidates.allSatisfy{$0["turn_certified"] as? Bool==false})
+              }
+              func testWeatherCountdownAndOffHeaderTurnStayHeld() {
+                  let rows=[row("ターン1",0.46,0.5),row("COMMAND 35",0.69,0.02),
+                      row("メガシンカした！",0.386,0.29),row("5/5",0.37,0.06)]
+                  let r=R716SpatialFieldProjection.project(rows:rows,width:1290,height:596,frame:3925,epoch:8,
+                      imageSHA:String(repeating:"a",count:64),sourceVerified:true)
+                  XCTAssertFalse(r.candidates.contains{$0["field_key"] as? String=="battle.turn"})
+                  XCTAssertFalse(r.candidates.contains{($0["candidate_value"] as? String ?? "").hasPrefix("SELECTED_HISTORY_TURN:")})
+              }
+          }
+          #if canImport(Vision) && canImport(CoreImage) && canImport(CryptoKit)
+          @preconcurrency import Vision
+          import CoreImage
+          import ImageIO
+          import CryptoKit
+          final class R845ApplePixelHistoryTests:XCTestCase {
+              func testProductionSamplerOnOriginalNormalSpriteAndSelection()throws {
+                  let dir=R761RealImageRegressionTests.fixtureDirectory
+                  for name in ["r761_real_move_panel.png","r761_real_selection.png"] {
+                      let data=try Data(contentsOf:dir.appendingPathComponent(name))
+                      let r=R750RawPixelSampler.inspectPNG(data,sha:R719SHA256.hash(data),epoch:1,frame:1,observedMs:1)
+                      let forms=try XCTUnwrap(r["r845_visual_form_estimates"] as? [[String:Any]])
+                      print("R845_REAL_PIXEL_FORMS "+String(decoding:try JSONSerialization.data(withJSONObject:forms,options:[.sortedKeys]),as:UTF8.self))
+                      if name.contains("move_panel") {
+                          XCTAssertEqual((forms[1]["value"] as? [String:String])?["form"],"BASE")
+                          XCTAssertTrue(forms[0]["value"] is NSNull)
+                      } else {XCTAssertTrue(forms.allSatisfy{$0["value"] is NSNull})}
+                  }
+              }
+              func testFreshJapaneseVisionOnLosslessOriginalTurnCrop()throws {
+                  let data=try Data(contentsOf:R761RealImageRegressionTests.fixtureDirectory.appendingPathComponent("r845_real_visual_history.json"))
+                  let f=try JSONSerialization.jsonObject(with:data) as! [String:Any]
+                  let png=try XCTUnwrap(Data(base64Encoded:f["turn_png"] as! String))
+                  XCTAssertEqual(R719SHA256.hash(png),f["turn_png_sha256"] as? String)
+                  let decoder=try XCTUnwrap(CGImageSourceCreateWithData(png as CFData,nil))
+                  let image=try XCTUnwrap(CGImageSourceCreateImageAtIndex(decoder,0,nil))
+                  let request=VNRecognizeTextRequest();request.recognitionLevel = .accurate
+                  request.recognitionLanguages=["ja-JP","en-US"];request.usesLanguageCorrection=false
+                  try R761Deadline.perform(milliseconds:15_000,cancel:{request.cancel()}) {
+                      try VNImageRequestHandler(cgImage:image,orientation:.up,options:[:]).perform([request])
+                  }
+                  let text=(request.results ?? []).compactMap{$0.topCandidates(1).first?.string}
+                      .joined().replacingOccurrences(of:" ",with:"").replacingOccurrences(of:"　",with:"")
+                  print("R845_REAL_HISTORY_JAPANESE "+text+" scope=LOSSLESS_HEADER_CROP_NOT_CURRENT_TURN_PROOF")
+                  XCTAssertTrue(text.contains("ターン1"))
+              }
+          }
+          #endif
+          ''')
+          p=tests/'R837FrameHPRecognitionTests.swift';t=p.read_text();needle='    func testPublicationDeadlineAndSessionFence() {';assert needle in t
+          p.write_text(t.replace(needle,'''    func testVisualEstimateIsSourceBoundAndNotObserved() {
+                  var p=pixel();p["r845_visual_form_estimates"]=[R845VisualForm.classify(
+                      R845VisualForm.references[1].1,side:"opponent",profileMatched:true)]
+                  let r=state(nil,p)
+                  XCTAssertEqual(row(r,"opponent.mega_visual_form")["knowledge_state"] as? String,"ESTIMATED")
+                  XCTAssertEqual((row(r,"opponent.mega_visual_form")["value"] as? [String:String])?["form"],"MEGA")
+                  XCTAssertTrue(row(r,"own.mega_visual_form")["value"] is NSNull)
+                  p["source_session_token"]=UUID().uuidString
+                  XCTAssertTrue(row(state(nil,p),"opponent.mega_visual_form")["value"] is NSNull)
+                  p=pixel();p["r845_visual_form_estimates"]=[R845VisualForm.classify(
+                      R845VisualForm.references[1].1,side:"opponent",profileMatched:true)]
+                  XCTAssertTrue(row(state(nil,p,now:4001),"opponent.mega_visual_form")["value"] is NSNull)
+              }
+              func testConflictingOrAbsentVisualTemplateStaysUnknown() {
+                  var p=pixel();p["r845_visual_form_estimates"]=[R845VisualForm.classify(
+                      R845VisualForm.references[1].1,side:"opponent",profileMatched:true)]
+                  var s=snapshot();s["fields"]=[["field":"opponent.mega_visual_form","knowledge_state":"CONFLICT"]]
+                  XCTAssertTrue(row(state(nil,p,s),"opponent.mega_visual_form")["value"] is NSNull)
+                  p["r845_visual_form_estimates"]=[] as [[String:Any]]
+                  XCTAssertTrue(row(state(nil,p),"opponent.mega_visual_form")["value"] is NSNull)
+              }
+          '''+needle))
+          header=(s/'tests/R689StreamingZIPSmoke.swift').read_text().split('@main struct Check')[0]
+          (s/'tests/R845TransportSmoke.swift').write_text(header+r'''@main struct Check {
+              static func main()throws {
+                  let dir=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+                  try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+                  defer {try? FileManager.default.removeItem(at:dir)}
+                  let work=R551EvidenceWork(),payload=dir.appendingPathComponent("zero.bin")
+                  precondition(FileManager.default.createFile(atPath:payload.path,contents:nil))
+                  let writer=try FileHandle(forWritingTo:payload)
+                  try writer.truncate(atOffset:299_000_001);try writer.synchronize();try writer.close()
+                  let entry=try R689StreamingZIP.describeFile(name:"evidence/source.bin",url:payload,work:work)
+                  let source=dir.appendingPathComponent("original.zip")
+                  let original=try R689StreamingZIP.write(memory:[],files:[entry],to:source,work:work)
+                  let split=try R714ChunkedEvidence.split(source:source,destination:dir.appendingPathComponent("large"),work:work)
+                  precondition(split.parts.count==2 && split.originalSHA256==original.archiveSHA256)
+                  let sizes=try split.parts.map{try $0.resourceValues(forKeys:[.fileSizeKey]).fileSize!}
+                  precondition(sizes.allSatisfy{$0<300_000_000})
+                  let preserved=try R689StreamingZIP.describeFile(name:"original.zip",url:source,work:work)
+                  precondition(preserved.expectedSHA256==original.archiveSHA256)
+                  print("R845_REAL_299MB_SPLIT_READBACK_PASS source=\(original.totalBytes) parts=\(sizes)")
+                  let small=dir.appendingPathComponent("small.zip")
+                  _=try R689StreamingZIP.write(memory:[.init(name:"evidence.bin",bytes:Data(repeating:77,count:100_000))],files:[],to:small,work:work)
+                  let n=try small.resourceValues(forKeys:[.fileSizeKey]).fileSize!
+                  let ten=try R714ChunkedEvidence.split(source:small,destination:dir.appendingPathComponent("ten"),work:work,maxSegmentBytes:(n+9)/10)
+                  precondition(ten.parts.count==10)
+                  let rejected=dir.appendingPathComponent("eleven")
+                  do {
+                      _=try R714ChunkedEvidence.split(source:small,destination:rejected,work:work,maxSegmentBytes:n/11)
+                      preconditionFailure("Eleven parts accepted")
+                  } catch R714ChunkedEvidence.Failure.tooManyParts {}
+                  precondition(!FileManager.default.fileExists(atPath:rejected.path))
+                  let bad=try FileHandle(forUpdating:ten.parts[0]),size=try bad.seekToEnd()
+                  try bad.seek(toOffset:size-1);let byte=try bad.read(upToCount:1)!
+                  try bad.seek(toOffset:size-1);try bad.write(contentsOf:Data([byte[0]^1]));try bad.close()
+                  do {_=try R730SplitReadback.verify(source:small,parts:ten.parts,index:ten.index)
+                      preconditionFailure("Corrupt part accepted")
+                  } catch {}
+                  precondition(FileManager.default.fileExists(atPath:small.path))
+                  print("R845_TEN_PARTS_READBACK_ELEVEN_REJECT_CORRUPTION_HOLD_SOURCE_PRESERVED_PASS")
+              }
+          }
+          ''')
+          (s/'tests/R845_PRE_IPA_SCOPE.md').write_text('''# R845 pre-device scope
+          
+          Base R844/D104: commit 2529b32878004b846bcbfc7c3a62aa73df6302d4, Swift 642/0, iPhoneOS build passed. Mac original PNG to main publication: 494 ms, not iPhone LCD latency.
+          
+          HP: original PNG 187/187 and opponent 100 percent; exact source/session/epoch/frame/time and independent side-card pixels. Current turn remains UNKNOWN. R715 history header selects turn 1; COMMAND is a countdown. Preserve selected history turn without assigning current turn.
+          
+          Mega: production RGB HUD icon matching, two Tyranitar forms, visual ESTIMATED values only. Different recorded Mega frames and normal/unknown/ambiguous samples are checked. Both-side policy tests are not real own-Mega proof. No real own-Mega positive exists in the inspected recordings. Unsupported forms remain unknown. R715 opponent Mega log is independently visible and present in prior OCR; the fresh Japanese test here is the original lossless turn-header crop, not a fresh full-frame Mega-log OCR claim. Names do not prove form, and history events do not prove a current individual.
+          
+          All 79 fields retained with explicit per-field route/owner/source/expiry/conflict inventory. Missing routes and hidden values stay UNKNOWN; no complete 79-field certification or battle advice. QUICK remains strictly below 1000 ms in Mac replay; original source writes, pixels and main publication are included in the separate R839 gate. Physical iPhone capture/display, sustained continuity beyond the old 48-second stop, own/opponent Mega, rotation/resolution and kana require device testing.
+          
+          R844 common stop finalization and late-journal export refresh remain active. No eight-frame evidence cutoff. Real ZIP SHA/CRC readback, actual 299 MB boundary, ten-part scaled readback, eleven-part rejection and corrupt-part/source preservation are mandatory. Actual ten full-size 300 MB parts and iPhone free-space behavior are not measured by the scaled ten-part test.
+          
+          IPA may only be packaged after these gates pass, from the exact passing source tree. Retain original recordings and all failed/timeout/late/stop evidence. Device workflow: install with existing iLoader; collect from selection for over 48 seconds; stop; wait for saved/export complete; save every part and index. Never discard evidence to fit transport.
+          ''')
+          files=disk();assert len(files)==628 and set(original).issubset(files)
+          manifest={n:sha(p.read_bytes()) for n,p in files.items() if n!='source_manifest.json'}
+          (s/'source_manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,sort_keys=True,indent=2)+'\n')
+          for name in ['R716SpatialFieldProjection.swift','R750RawPixelSampler.swift','R761FieldSafetyContract.swift','R836NumericHUDOCR.swift','R837FrameHPRecognition.swift','R845VisualForm.swift','R845HUDFormSampler.swift']:
+           assert (native/name).read_bytes()==(portable/name).read_bytes()
+          files=disk();assert len(files)==628 and set(files)==set(manifest)|{'source_manifest.json'}
+          assert all(sha(files[n].read_bytes())==h for n,h in manifest.items())
+          digest=tree(files)
+          Path('R834Proof/SOURCE_TREE_SHA256.txt').write_text(digest+'\n')
+          print('R845_SOURCE_628_MANIFEST_AND_PRODUCTION_PARITY_VERIFIED',digest)
+          
+          PY
+      - name: Full 652 Swift regressions real PNGs and streaming transport
+        if: matrix.lane == 'real-apple-vision'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export R834_PROOF_DIR="$PWD/R834Proof"
+          export R761_FIELD_AUDIT_OUTPUT="$PWD/R834Proof/fields79.json"
+          swift test --package-path pinned-r793/source/R720_PORTABLE_TESTS > R834Proof/Swift.log 2>&1 || { tail -n 160 R834Proof/Swift.log; exit 1; }
+          grep -F 'Executed 652 tests, with 0 failures' R834Proof/Swift.log
+          grep -F 'R834_QUICK_ORIGINAL_PNG_MEASUREMENTS' R834Proof/Swift.log
+          grep -F 'R836_REAL_NUMERIC_GOLDEN' R834Proof/Swift.log
+          grep -F 'R837_REAL_SOURCE_TO_FRAME_STATE' R834Proof/Swift.log
+          grep -F 'R839_ORIGINAL_PNG_SOURCE_FSYNC_PIXEL_OCR_MAIN_PUBLICATION_MS' R834Proof/Swift.log
+          grep -F 'R845_REAL_PIXEL_FORMS' R834Proof/Swift.log
+          grep -F 'R845_REAL_HISTORY_JAPANESE' R834Proof/Swift.log
+          swiftc -O pinned-r793/source/app/ios/ChampionsOnDevice/R731ArchiveCapacity.swift pinned-r793/source/app/ios/ChampionsOnDevice/R689StreamingZIP.swift pinned-r793/source/tests/R689StreamingZIPSmoke.swift -o R834Proof/archive_smoke
+          R834Proof/archive_smoke
+          swiftc -O pinned-r793/source/app/ios/ChampionsOnDevice/R731ArchiveCapacity.swift pinned-r793/source/app/ios/ChampionsOnDevice/R729EvidenceTransportPolicy.swift pinned-r793/source/app/ios/ChampionsOnDevice/R730SplitReadback.swift pinned-r793/source/app/ios/ChampionsOnDevice/R689StreamingZIP.swift pinned-r793/source/app/ios/ChampionsOnDevice/R714ChunkedEvidence.swift pinned-r793/source/tests/R845TransportSmoke.swift -o R834Proof/transport_smoke
+          R834Proof/transport_smoke
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path('R834Proof/fields79.json').read_text())
+          assert d['canonical_79_valid'] and len(d['fields'])==79
+          print('R845_79_ROUTE_SCOPE',d['fields_without_inventoried_live_decoder'],d['retrospective_only'])
+          print('R845_UNKNOWN_ROUTE_KEYS',[r['key'] for r in d['fields'] if r['implementation_status']=='NO_INVENTORIED_LIVE_DECODER'])
+          PY
+      - name: iPhoneOS SDK build and verified bundle identity NO IPA
+        if: matrix.lane == 'iphoneos-compile'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 pinned-r793/source/tools/generate_xcode_project.py
+          xcodebuild -project pinned-r793/source/app/ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r845_device" build > R834Proof/iPhoneOS.log 2>&1 || { grep -E 'error:|BUILD FAILED' R834Proof/iPhoneOS.log; exit 1; }
+          grep -F 'BUILD SUCCEEDED' R834Proof/iPhoneOS.log
+          python3 - <<'PY'
+          import plistlib,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'r845_device/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app/Info.plist'
+          d=plistlib.loads(p.read_bytes());assert d['CFBundleVersion']=='845' and d['CFBundleShortVersionString']=='0.8.45'
+          print('R845_BUILT_IDENTITY_VERIFIED',d['CFBundleVersion'],d['CFBundleShortVersionString'])
+          PY
+      - name: Record actual scope without paid artifact storage
+        if: always()
+        shell: bash
+        run: |
+          if [ -f R834Proof/SOURCE_TREE_SHA256.txt ]; then cat R834Proof/SOURCE_TREE_SHA256.txt; fi
+          echo 'NO IPA. Mac replay is not iPhone display latency or complete 79-field certification.' >> "$GITHUB_STEP_SUMMARY"
