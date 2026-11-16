@@ -1,0 +1,164 @@
+name: R848 D108 Japanese single-row HP and same-frame conflict preflight NO IPA
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/r848.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            lane: real-apple-vision
+          - runner: xcode-27
+            lane: iphoneos-compile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4cc925234f9101a8875744e75049f06e96ce4d90
+          path: pinned-r823
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r823.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          path: pinned-r821
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r821.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+          path: pinned-r819
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r819.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          path: pinned-r793
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r793.yml
+            .github/workflows/d30.b64
+      - uses: actions/checkout@v4
+        with:
+          ref: b783a785f97d0b74c9a1d48780dcee9626aef12c
+          path: pinned-r833
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r833.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 73b62dff5e71b7889e90b7be1e1ba311e6205ec2
+          path: pinned-r843
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r843.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 2529b32878004b846bcbfc7c3a62aa73df6302d4
+          path: pinned-r844
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r844.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: d09e35c616f7d8056b967d51a6936f13b1d11ef7
+          path: pinned-r845
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r845.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: ee9255ad4179d01dadc595a5b5d380125f427851
+          path: pinned-r846
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r846.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: e8e28eb774bd790f1b08c7ff7e9d5defa837f469
+          path: pinned-r847
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r847.yml
+      - name: Restore SHA-verified R847 and apply single-row HP delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(9).fetch("run")' pinned-r847/.github/workflows/r847.yml > "$RUNNER_TEMP/restore_r847.sh"
+          bash "$RUNNER_TEMP/restore_r847.sh"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,hashlib,base64,lzma
+          s=Path('pinned-r793/source');sha=lambda b:hashlib.sha256(b).hexdigest()
+          def disk():return {str(p.relative_to(s)):p for p in s.rglob('*') if p.is_file() and not {'.build','.swiftpm','__pycache__'}.intersection(p.parts)}
+          def tree(fs):return sha(''.join(n+'\t'+sha(fs[n].read_bytes())+'\n' for n in sorted(fs)).encode())
+          fs=disk();assert len(fs)==631 and tree(fs)=='401d7bb674a3c9d36da1c90dcb1f065d2b13711f42f8c4bf02d63bb6cc19a1b7'
+          m=json.loads((s/'source_manifest.json').read_text());assert all(sha(fs[n].read_bytes())==h for n,h in m.items())
+          d=json.loads(lzma.decompress(base64.b64decode('/Td6WFoAAATm1rRGAgAhARwAAAAQz1jM4CSqCWxdAD2IioaUXFZoXZfqp4mwtHGxtdedImCYcB0Z+iYW5LytHpH2OePFb8h/oxPBCCW2R8JZqRAOoCBhdeCpGWuED9mb/clKpLhEL3mEh/5Nj6izq278KcYDK7Y+bNV8kzeBrYI3/jtM9mBqjoIf63bmYF51VCSTbQ3TQC4NFDDcw+E+UtymZevtJBUg74SQ6k9bCI0H8hPbiI7V082jM3hexfvHSgzFpSA7NVJc0DTE2F9r4AsIfGYARjYHF0VCtrnxhd98TFvnpAdyfgGPdp49yMkAnvhcQMyr7xBKLib20bAsuFwkSvNQWv1iNgSYRS/+rQ61MowIdP/jLoqLXSj/tsX0yF+2DYVN7xkIDe+lbW+uFLyxY0Pkmaw1+uN7BZvbhv12fFUGKbW+ZcOLRAA+s5vNTEmFa2QYDre/GXP5niZiDZrYNd5sC6pPc1VnBA5/Q7uE0TvvRDCff9Y1iroVkp/0jjtkpzs1eoKgefNAKV65LyA+ZF3HKfVkv0moFuEVhcFUm/mcknIQniiMbzvmmWSredV438sVW4IacD2f6kpEf0dDB4AWMb57/zSqR56Mp6oHSZK5oJBGhRMYZ1eKYmpRAtZXrecqTw6XwG7COZ5LXhYDlc3dz6ZKQfTPERCoDVufC+cLzrhvT1hu8kmuBx1zyaO1u9p/3ZmWLEEZZ3fw5/MZNQZkpDlY92zqKBKDZkJO8+Hlc20p/mo5Jhx0ZRF8Aydc2dvYfPzWRBbr52irx2sr5EXsTOJzEHjODrSS+ha5g3vcjFQTYIrv/v12OT8lONOnpvjsKVbpYNMlwNaQrsjbNDBXiMSKWuBxqah2Wj7O9R5q6+2QNR2LTcKVfqp8i/KL78PmHWKejcgC6odBR5QICZJrbM8HZir9Xh5uUagoXWi6om61PVvxShUmdVvWUBm+kkl1TIc5qd8k48tF2o98GwRYZGIfwKgGVcQl2opLdIPNGyRlng1HbivWAka/yDnoFXJuBaTYcQYIB+KYYogSGHn2xNM8krzM2EX9RL19s6x04DCzg6D8oA+h7CtmcCLBSiThJ8X5oMcmV6CGFFew5yiEfJLcGvfchi2CLug81qwDj/pvHtOCoproL1MnpQ3LpPrIYa4jt+c0pfGueZ4qKKaXevV74zkwgmROqiT/NUif4GCs01ipvUC21zj7Vn98/cebNQFeVCzSxlmYp+gAf/mqyNbaQHDBwlRU7Va4KYf3MyKfo09Q9KHFqhtQHnWw+wCbq36ovWXJfj3yUHb59eU48sEmkT9CeTyjj+Pw5dJDsDSfF2M6Z736giY0b4tPBCLxrULq0a/iT3o+kuOaCp7eUeHOk6bW/TH4WXPJETFDCZqpwLEKYBc5FHAd1UvtrPsDr1qlMrmd/DrRv0Rm3iJvpiClo0A+m3F+aQQ0G0eFEWooxaL9LJ+5j1+uHqJT2kskBW4s8WRVlIyM4AS9xn8wkpvsOeXrjggQUBx5ZmLFhT8wGSECdUh+L8C7P5FARn55Iv4BReLhNLj+fMAOE3ua33hF+AdG3WZuDWGyZGV9Ee8RMBQ/sNlkrYQc5Yp4t+KdJUgh0PdBgM1FjJ+Z+o/7pRJRpfadcfKMwvDqM1gkIuRUkzdA7nHnQN/YXN9muHIzDoelYabnIqzLXs3Z+vgcGHvbAV1xJlLsHPNDBr6dfwxhaF52xrN7zvtERM7pWIPvXWE42+O/WUSw+FASEnwP0a++dm3OHJE7hvUp34NCAQzy6aY2JsYsk3l1k5H2z/TNCyj4ntac3Vag1rR7i+LLJCB/FLpqHtopWXDeeVpLGUVud7xLK/Ep520VZNOG5Xe7P3bSApZLWrkgVtRk24OQwXpT07K0bi2CANNapQFFomFRXz7UR9nrv1FLSAbSX6GwU8G6R9k4/RSNAa9sN40ydWgD6Hfu4Fy0fsI9fRj2ekdSyCZWeFij8SAw42vzEMUr8xnKxJMIWXJD6Tvc+m9pSxKBfpAFLGGH/8mKsdSVia0XlkhgnknZoLH3zj3Zy/fbkwXvI+X9NOSOl7jbJna983b5ibDhGNYPzs5JPUU8PriDwATrPuhn7z5TS1yxcZiF6nCYNPHG10xPUuDeKSU4a3+4/mkioB2EwwfiPvK/QAPuAYmKnfrgE7HPz8Sh7O1DQI1fOQ24DvK6ItmIaiLH+8cU4v0yUZmLAbMZn9ajOGgWVa9bGqSXnems4Jx+ax4odyOR7HHTu1KfNKoOutXPSbgWziXPDjLCjO1ZSfLup76fegdPhoVHx62FYMccRYWSPIyin6fTRYk8wJarP1LU9UneP+drtQz0GqEJgbBs6Rvy1BisrBhlzgDW5KYjyXFKVMfWImUSl1atyzjRoMdCbW/sWQB1qicgAhWvRGNHVhjzPKLyp+nic2Ikeq9mth5SM4ts7XMhvbMIG2dIBTBHwTl4+hfjO1VDg7IJ/J+mwNFygXwECGZVM6EKdWfsuJIy36cGQluyN3fsldYkpaMauPIk4fCDJ9RlxKpbxSLEk1pUoPaG9XtMxPKTeK1mbDyrerQrHWHfF2bHE3HatWCeVXtB2+S1SLbmKxXLZyaWTPXXJ7Vy2Ee8rqMR4QoQFyEsm3ypepFAh8OkqmhDt55NU3E9EIlas4wTv0RdoDQD3tT+Cmjx4c2XxiCkKoXyn0DV79aPvgZ4TWPcC6MLASGgZ4+QsykChXAj5gpWx0z5G2tq8e5gk+QzKY1zfd4suyZaD15tAAReoXzmI7fjluug11uWeD9KLBeZ2X9XmlCgQ2be93QgK6GFF3QxIXHXjyxos0GwE7Q8xE0keALjSEx1Rj9h+/++4HmS7dopE80uYrGrqHm04k34k+ApuhuPIx01GeZZmvZr5yu1kVtTe/eQ+j683OmeTq3EFT8YV+4bdatrMkGH3xQtoN5Y+27h6NFJcWrGtus+1TOnzLVUdGkqR03ydokkymMu2FlsdaLerk+mFp2cOKKuVDAFjaCu0iHW9YIrkeL7SGWBtAXyNiT+qPf+ayamv+Q/aCIWxrvAYmdZ4JM23Ak7ooGaFuWzxxKGNf7qiH3xp/mC0axZczRXrS+b3FYQljDaB7Gzbz44Ai2VDYRkJQcv8WeFIaao7y+p3TYS3OHFPGA8yXYl/wKBrGALbEOWOO25kdmNRnIdYIH4eBgmK0Pe1SB91JjDMc9oF7/zE1QCLV2Y6TCCIsZ7RTAJ+4OqPMvVsF0CkYsUCQt5tt6m2gBk1oJFpYv4EwABiBOrSQAAcYfX87HEZ/sCAAAAAARZWg==')))
+          for n,v in d.items():
+           p=s/n;assert not Path(n).is_absolute() and '..' not in Path(n).parts
+           if v['old'] is None:
+            assert not p.exists();b=v['text'].encode()
+           else:
+            assert sha(p.read_bytes())==v['old']==m[n]
+            lines=p.read_text().splitlines(keepends=True)
+            for i,j,t in reversed(v['edits']):lines[i:j]=[t]
+            b=''.join(lines).encode()
+           assert sha(b)==v['new'];p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b);m[n]=v['new']
+          (s/'source_manifest.json').write_text(json.dumps(m,ensure_ascii=False,sort_keys=True,indent=2)+'\n')
+          fs=disk();assert len(fs)==631 and set(fs)==set(m)|{'source_manifest.json'}
+          assert all(sha(fs[n].read_bytes())==h for n,h in m.items())
+          assert tree(fs)=='632146e311b937376e2a65b7722d3ccc2bdcae3193ba1f791466ff092c94385c'
+          for name in ['R837FrameHPRecognition.swift','R847RGBBox.swift','R845HUDFormSampler.swift','R836NumericHUDOCR.swift']:
+           assert (s/'app/ios/ChampionsOnDevice'/name).read_bytes()==(s/'R720_PORTABLE_TESTS/Sources/R719Core'/name).read_bytes()
+          Path('R834Proof/SOURCE_TREE_SHA256.txt').write_text(tree(fs)+'\n')
+          print('R848_SOURCE_631_VERIFIED',tree(fs))
+          PY
+      - name: Full 659 Swift regressions and real transport readback
+        if: matrix.lane == 'real-apple-vision'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(8).fetch("run").gsub("652 tests","659 tests")' pinned-r845/.github/workflows/r845.yml > "$RUNNER_TEMP/r848_swift.sh"
+          bash "$RUNNER_TEMP/r848_swift.sh"
+      - name: iPhoneOS build verified version 848 NO IPA
+        if: matrix.lane == 'iphoneos-compile'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 pinned-r793/source/tools/generate_xcode_project.py
+          xcodebuild -project pinned-r793/source/app/ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r848_device" build > R834Proof/iPhoneOS.log 2>&1 || { grep -E 'error:|BUILD FAILED' R834Proof/iPhoneOS.log; exit 1; }
+          grep -F 'BUILD SUCCEEDED' R834Proof/iPhoneOS.log
+          python3 - <<'PY'
+          import plistlib,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'r848_device/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app/Info.plist'
+          d=plistlib.loads(p.read_bytes());assert d['CFBundleVersion']=='848' and d['CFBundleShortVersionString']=='0.8.48'
+          print('R848_BUILT_IDENTITY_VERIFIED',d['CFBundleVersion'],d['CFBundleShortVersionString'])
+          PY
+      - name: Record verified scope without paid artifact storage
+        if: always()
+        shell: bash
+        run: |
+          if [ -f R834Proof/SOURCE_TREE_SHA256.txt ]; then cat R834Proof/SOURCE_TREE_SHA256.txt; fi
+          echo 'NO IPA. Actual device continuity, own Mega, broad form coverage and LCD latency remain unverified.' >> "$GITHUB_STEP_SUMMARY"
