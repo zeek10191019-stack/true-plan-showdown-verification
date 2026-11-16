@@ -1,0 +1,156 @@
+name: R847 D107 Deterministic RGB BOX portrait and evidence share preflight NO IPA
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/r847.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            lane: real-apple-vision
+          - runner: xcode-27
+            lane: iphoneos-compile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4cc925234f9101a8875744e75049f06e96ce4d90
+          path: pinned-r823
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r823.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          path: pinned-r821
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r821.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+          path: pinned-r819
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r819.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          path: pinned-r793
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r793.yml
+            .github/workflows/d30.b64
+      - uses: actions/checkout@v4
+        with:
+          ref: b783a785f97d0b74c9a1d48780dcee9626aef12c
+          path: pinned-r833
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r833.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 73b62dff5e71b7889e90b7be1e1ba311e6205ec2
+          path: pinned-r843
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r843.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 2529b32878004b846bcbfc7c3a62aa73df6302d4
+          path: pinned-r844
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r844.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: d09e35c616f7d8056b967d51a6936f13b1d11ef7
+          path: pinned-r845
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r845.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: ee9255ad4179d01dadc595a5b5d380125f427851
+          path: pinned-r846
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r846.yml
+      - name: Restore SHA-verified R846 and apply deterministic BOX delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(8).fetch("run")' pinned-r846/.github/workflows/r846.yml > "$RUNNER_TEMP/restore_r846.sh"
+          bash "$RUNNER_TEMP/restore_r846.sh"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,hashlib,base64,lzma
+          s=Path('pinned-r793/source');sha=lambda b:hashlib.sha256(b).hexdigest()
+          def disk():return {str(p.relative_to(s)):p for p in s.rglob('*') if p.is_file() and not {'.build','.swiftpm','__pycache__'}.intersection(p.parts)}
+          def tree(fs):return sha(''.join(n+'\t'+sha(fs[n].read_bytes())+'\n' for n in sorted(fs)).encode())
+          fs=disk();assert len(fs)==628 and tree(fs)=='224a6de1a33df482c4a96d516dfe55cbbe0b784a299b8fc644e9a65c0b8e0402'
+          m=json.loads((s/'source_manifest.json').read_text());assert all(sha(fs[n].read_bytes())==h for n,h in m.items())
+          d=json.loads(lzma.decompress(base64.b64decode('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')))
+          for n,v in d.items():
+           p=s/n;assert not Path(n).is_absolute() and '..' not in Path(n).parts
+           if v['old'] is None:
+            assert not p.exists();b=v['text'].encode()
+           else:
+            assert sha(p.read_bytes())==v['old']==m[n]
+            lines=p.read_text().splitlines(keepends=True)
+            for i,j,t in reversed(v['edits']):lines[i:j]=[t]
+            b=''.join(lines).encode()
+           assert sha(b)==v['new'];p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b);m[n]=v['new']
+          (s/'source_manifest.json').write_text(json.dumps(m,ensure_ascii=False,sort_keys=True,indent=2)+'\n')
+          fs=disk();assert len(fs)==631 and set(fs)==set(m)|{'source_manifest.json'}
+          assert all(sha(fs[n].read_bytes())==h for n,h in m.items())
+          assert tree(fs)=='401d7bb674a3c9d36da1c90dcb1f065d2b13711f42f8c4bf02d63bb6cc19a1b7'
+          for name in ['R847RGBBox.swift','R845HUDFormSampler.swift','R836NumericHUDOCR.swift']:
+           assert (s/'app/ios/ChampionsOnDevice'/name).read_bytes()==(s/'R720_PORTABLE_TESTS/Sources/R719Core'/name).read_bytes()
+          Path('R834Proof/SOURCE_TREE_SHA256.txt').write_text(tree(fs)+'\n')
+          print('R847_SOURCE_631_VERIFIED',tree(fs))
+          PY
+      - name: Full 655 Swift regressions and real transport readback
+        if: matrix.lane == 'real-apple-vision'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(8).fetch("run").gsub("652 tests","655 tests")' pinned-r845/.github/workflows/r845.yml > "$RUNNER_TEMP/r847_swift.sh"
+          bash "$RUNNER_TEMP/r847_swift.sh"
+      - name: iPhoneOS build verified version 847 NO IPA
+        if: matrix.lane == 'iphoneos-compile'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 pinned-r793/source/tools/generate_xcode_project.py
+          xcodebuild -project pinned-r793/source/app/ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r847_device" build > R834Proof/iPhoneOS.log 2>&1 || { grep -E 'error:|BUILD FAILED' R834Proof/iPhoneOS.log; exit 1; }
+          grep -F 'BUILD SUCCEEDED' R834Proof/iPhoneOS.log
+          python3 - <<'PY'
+          import plistlib,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'r847_device/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app/Info.plist'
+          d=plistlib.loads(p.read_bytes());assert d['CFBundleVersion']=='847' and d['CFBundleShortVersionString']=='0.8.47'
+          print('R847_BUILT_IDENTITY_VERIFIED',d['CFBundleVersion'],d['CFBundleShortVersionString'])
+          PY
+      - name: Record verified scope without paid artifact storage
+        if: always()
+        shell: bash
+        run: |
+          if [ -f R834Proof/SOURCE_TREE_SHA256.txt ]; then cat R834Proof/SOURCE_TREE_SHA256.txt; fi
+          echo 'NO IPA. Actual device continuity, own Mega, broad form coverage and LCD latency remain unverified.' >> "$GITHUB_STEP_SUMMARY"
