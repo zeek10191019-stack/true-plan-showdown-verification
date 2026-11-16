@@ -1,0 +1,149 @@
+name: R846 D106 Original RGB component form sampling and complete preflight NO IPA
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/r846.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            lane: real-apple-vision
+          - runner: xcode-27
+            lane: iphoneos-compile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4cc925234f9101a8875744e75049f06e96ce4d90
+          path: pinned-r823
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r823.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          path: pinned-r821
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r821.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+          path: pinned-r819
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r819.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          path: pinned-r793
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r793.yml
+            .github/workflows/d30.b64
+      - uses: actions/checkout@v4
+        with:
+          ref: b783a785f97d0b74c9a1d48780dcee9626aef12c
+          path: pinned-r833
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r833.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 73b62dff5e71b7889e90b7be1e1ba311e6205ec2
+          path: pinned-r843
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r843.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 2529b32878004b846bcbfc7c3a62aa73df6302d4
+          path: pinned-r844
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r844.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: d09e35c616f7d8056b967d51a6936f13b1d11ef7
+          path: pinned-r845
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r845.yml
+      - name: Restore exact R845 and fix original RGB sampling
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(7).fetch("run")' pinned-r845/.github/workflows/r845.yml > "$RUNNER_TEMP/restore_r845.sh"
+          bash "$RUNNER_TEMP/restore_r845.sh"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,hashlib
+          s=Path('pinned-r793/source');sha=lambda b:hashlib.sha256(b).hexdigest()
+          def disk():return {str(p.relative_to(s)):p for p in s.rglob('*') if p.is_file() and not {'.build','.swiftpm','__pycache__'}.intersection(p.parts)}
+          def tree(files):return sha(''.join(n+'\t'+sha(files[n].read_bytes())+'\n' for n in sorted(files)).encode())
+          fs=disk();assert len(fs)==628 and tree(fs)=='1c588e609b748819238ff32e1d9c513eff4b236f60130e84137aac51c9abb9b8'
+          for folder in [s/'app/ios/ChampionsOnDevice',s/'R720_PORTABLE_TESTS/Sources/R719Core']:
+           p=folder/'R845HUDFormSampler.swift';t=p.read_text();old='''                guard let c=CGContext(data:data.baseAddress,width:8,height:8,
+                              bitsPerComponent:8,bytesPerRow:32,space:CGColorSpaceCreateDeviceRGB(),''';assert old in t
+           t=t.replace(old,'''                // Reference descriptors retain original PNG component values.
+                          // Converting calibrated PNG gamma to DeviceRGB changes them.
+                          guard let colourSpace=crop.colorSpace,colourSpace.model == .rgb,
+                                let c=CGContext(data:data.baseAddress,width:8,height:8,
+                              bitsPerComponent:8,bytesPerRow:32,space:colourSpace,''')
+           needle='            result["source_display_roi"]=';assert needle in t
+           t=t.replace(needle,'''            result["sample_rgb_base64"]=Data(rgb).base64EncodedString()
+                      result["sampling_colour_space"]="ORIGINAL_SOURCE_RGB_COMPONENTS"
+          '''+needle);p.write_text(t)
+          p=s/'app/ios/ChampionsOnDevice/Info.plist';p.write_text(p.read_text().replace('0.8.45','0.8.46').replace('<string>845</string>','<string>846</string>'))
+          p=s/'tests/R845_PRE_IPA_SCOPE.md';p.write_text(p.read_text()+'\nR846: preserve the original calibrated PNG RGB component space during icon sampling. DeviceRGB conversion is not comparable to original-component references. RGB samples are journaled for independent readback; distance and ambiguity thresholds stay unchanged.\n')
+          fs=disk();m={n:sha(p.read_bytes()) for n,p in fs.items() if n!='source_manifest.json'}
+          (s/'source_manifest.json').write_text(json.dumps(m,ensure_ascii=False,sort_keys=True,indent=2)+'\n')
+          assert len(fs)==628 and tree(fs)=='224a6de1a33df482c4a96d516dfe55cbbe0b784a299b8fc644e9a65c0b8e0402'
+          assert (s/'app/ios/ChampionsOnDevice/R845HUDFormSampler.swift').read_bytes()==(s/'R720_PORTABLE_TESTS/Sources/R719Core/R845HUDFormSampler.swift').read_bytes()
+          Path('R834Proof/SOURCE_TREE_SHA256.txt').write_text(tree(fs)+'\n')
+          print('R846_SOURCE_628_VERIFIED',tree(fs))
+          PY
+      - name: Full 652 Swift regressions and real streaming transport
+        if: matrix.lane == 'real-apple-vision'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(8).fetch("run")' pinned-r845/.github/workflows/r845.yml > "$RUNNER_TEMP/r846_swift.sh"
+          bash "$RUNNER_TEMP/r846_swift.sh"
+      - name: iPhoneOS build verified version 846 NO IPA
+        if: matrix.lane == 'iphoneos-compile'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 pinned-r793/source/tools/generate_xcode_project.py
+          xcodebuild -project pinned-r793/source/app/ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r846_device" build > R834Proof/iPhoneOS.log 2>&1 || { grep -E 'error:|BUILD FAILED' R834Proof/iPhoneOS.log; exit 1; }
+          grep -F 'BUILD SUCCEEDED' R834Proof/iPhoneOS.log
+          python3 - <<'PY'
+          import plistlib,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'r846_device/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app/Info.plist'
+          d=plistlib.loads(p.read_bytes());assert d['CFBundleVersion']=='846' and d['CFBundleShortVersionString']=='0.8.46'
+          print('R846_BUILT_IDENTITY_VERIFIED',d['CFBundleVersion'],d['CFBundleShortVersionString'])
+          PY
+      - name: Record verified scope without paid artifact storage
+        if: always()
+        shell: bash
+        run: |
+          if [ -f R834Proof/SOURCE_TREE_SHA256.txt ]; then cat R834Proof/SOURCE_TREE_SHA256.txt; fi
+          echo 'NO IPA. Actual device continuity, own Mega, broad form coverage and LCD latency remain unverified.' >> "$GITHUB_STEP_SUMMARY"
