@@ -1,0 +1,254 @@
+name: R850 D110 Package exact passing R848 device test IPA
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/r850.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4cc925234f9101a8875744e75049f06e96ce4d90
+          path: pinned-r823
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r823.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          path: pinned-r821
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r821.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+          path: pinned-r819
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r819.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          path: pinned-r793
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r793.yml
+            .github/workflows/d30.b64
+      - uses: actions/checkout@v4
+        with:
+          ref: b783a785f97d0b74c9a1d48780dcee9626aef12c
+          path: pinned-r833
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r833.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 73b62dff5e71b7889e90b7be1e1ba311e6205ec2
+          path: pinned-r843
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r843.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 2529b32878004b846bcbfc7c3a62aa73df6302d4
+          path: pinned-r844
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r844.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: d09e35c616f7d8056b967d51a6936f13b1d11ef7
+          path: pinned-r845
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r845.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: ee9255ad4179d01dadc595a5b5d380125f427851
+          path: pinned-r846
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r846.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: e8e28eb774bd790f1b08c7ff7e9d5defa837f469
+          path: pinned-r847
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r847.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: b2e09fa3a86ba9488ea514382bd10cc0b98d8c92
+          path: pinned-r848
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r848.yml
+      - name: Verify preflight and source build read back IPA then publish release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p R848Delivery
+          # Verify the already completed preflight instead of trusting a branch label.
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/43802424265" > R848Delivery/preflight_run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/43802424265/jobs" > R848Delivery/preflight_jobs.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('R848Delivery/preflight_run.json').read_text());j=json.loads(Path('R848Delivery/preflight_jobs.json').read_text())['jobs']
+          assert r['head_sha']=='b2e09fa3a86ba9488ea514382bd10cc0b98d8c92' and r['path']=='.github/workflows/r848.yml'
+          assert r['status']=='completed' and r['conclusion']=='success'
+          assert {(x['id'],x['conclusion']) for x in j}=={(133085537867,'success'),(133085538116,'success')}
+          print('R850_PREFLIGHT_RUN_AND_BOTH_JOBS_VERIFIED',r['html_url'])
+          PY
+          python3 - <<'PY'
+          from pathlib import Path
+          import urllib.request,os,re
+          class LogRedirect(urllib.request.HTTPRedirectHandler):
+           def redirect_request(self,req,fp,code,msg,headers,newurl):
+            if not newurl.startswith('https://'):raise ValueError('non-TLS log redirect')
+            follow=super().redirect_request(req,fp,code,msg,headers,newurl)
+            if follow is not None:follow.remove_header('Authorization')
+            return follow
+          opener=urllib.request.build_opener(LogRedirect())
+          for job,label in [(133085537867,'mac'),(133085538116,'iphoneos')]:
+           req=urllib.request.Request('https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/actions/jobs/'+str(job)+'/logs',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+           with opener.open(req,timeout=60) as response:data=response.read().decode('utf-8-sig')
+           data=re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]','',data)
+           data=''.join(c for c in data if c in '\r\n\t' or ord(c)>=32)
+           Path('R848Delivery/preflight_'+label+'.log').write_text(data)
+           print('PREFLIGHT_LOG_SAVED_WITH_CONTROL_CHARACTERS_REMOVED',job,len(data))
+          PY
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,json
+          mac=Path('R848Delivery/preflight_mac.log').read_text();native=Path('R848Delivery/preflight_iphoneos.log').read_text()
+          assert 'Executed 659 tests, with 0 failures' in mac
+          assert 'R845_REAL_299MB_SPLIT_READBACK_PASS source=299000137 parts=[299000539, 678]' in mac
+          assert 'R689_STREAMING_ZIP_Smoke_PASS' in mac and 'R845_79_ROUTE_SCOPE 22 0' in mac
+          assert 'R845_TEN_PARTS_READBACK_ELEVEN_REJECT_CORRUPTION_HOLD_SOURCE_PRESERVED_PASS' in mac
+          assert 'R848_BUILT_IDENTITY_VERIFIED 848 0.8.48' in native
+          source='R848_SOURCE_631_VERIFIED 632146e311b937376e2a65b7722d3ccc2bdcae3193ba1f791466ff092c94385c'
+          assert source in mac and source in native
+          ms=[int(x) for x in re.findall(r'R839_ORIGINAL_PNG_SOURCE_FSYNC_PIXEL_OCR_MAIN_PUBLICATION_MS ([0-9]+)',mac)]
+          assert len(ms)==1 and 0<ms[0]<1000
+          Path('R848Delivery/preflight_metrics.json').write_text(json.dumps({'swift_tests':659,'failures':0,'mac_source_to_main_ms':ms[0],'scope':'MAC_MAIN_ACTOR_NOT_IPHONE_LCD'},indent=2)+'\n')
+          print('R850_PREFLIGHT_LOGS_VERIFIED',ms[0])
+          PY
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(10).fetch("run")' pinned-r848/.github/workflows/r848.yml > "$RUNNER_TEMP/restore_r848.sh"
+          bash "$RUNNER_TEMP/restore_r848.sh"
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,hashlib
+          s=Path('pinned-r793/source');sha=lambda b:hashlib.sha256(b).hexdigest()
+          fs={str(p.relative_to(s)):p for p in s.rglob('*') if p.is_file() and not {'.build','.swiftpm','__pycache__'}.intersection(p.parts)}
+          tree=sha(''.join(n+'\t'+sha(fs[n].read_bytes())+'\n' for n in sorted(fs)).encode());assert len(fs)==631 and tree=='632146e311b937376e2a65b7722d3ccc2bdcae3193ba1f791466ff092c94385c'
+          m=json.loads((s/'source_manifest.json').read_text());assert set(fs)==set(m)|{'source_manifest.json'} and all(sha(fs[n].read_bytes())==h for n,h in m.items())
+          Path('R848Delivery/SOURCE_TREE_SHA256.txt').write_text(tree+'\n');Path('R848Delivery/source_manifest.json').write_bytes((s/'source_manifest.json').read_bytes())
+          print('R850_EXACT_PASSING_R848_SOURCE_VERIFIED',len(fs),tree)
+          PY
+          python3 pinned-r793/source/tools/generate_xcode_project.py
+          xcodebuild -project pinned-r793/source/app/ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r848_device_test" build > R848Delivery/iphoneos_package.log 2>&1 || { grep -E 'error:|BUILD FAILED' R848Delivery/iphoneos_package.log; exit 1; }
+          grep -F 'BUILD SUCCEEDED' R848Delivery/iphoneos_package.log
+          R848_APP="$RUNNER_TEMP/r848_device_test/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app"
+          export R848_APP
+          lipo -archs "$R848_APP/ChampionsOnDeviceResearch" > R848Delivery/architectures.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,hashlib,plistlib,os
+          s=Path('pinned-r793/source');m=json.loads((s/'source_manifest.json').read_text());sha=lambda b:hashlib.sha256(b).hexdigest()
+          # The project file is derived by the exact verified generator. All other verified
+          # source inputs must remain byte-identical through the native build.
+          derived='app/ios/ChampionsOnDeviceResearch.xcodeproj/project.pbxproj'
+          assert all(sha((s/n).read_bytes())==h for n,h in m.items() if n!=derived)
+          app=Path(os.environ['R848_APP']);d=plistlib.loads((app/'Info.plist').read_bytes())
+          assert d['CFBundleVersion']=='848' and d['CFBundleShortVersionString']=='0.8.48'
+          assert d['CFBundleIdentifier']=='com.zeek10191019.championsresearch' and d['MinimumOSVersion']=='27.0'
+          assert Path('R848Delivery/architectures.txt').read_text().strip()=='arm64'
+          assert (app/'ChampionsOnDeviceResearch').stat().st_size>100000
+          assert (app/'ChampionsOnDeviceResearch').stat().st_mode & 0o111
+          assert list(app.glob('*.xcprivacy'))
+          Path('R848Delivery/generated_project_sha256.txt').write_text(sha((s/derived).read_bytes())+'\n')
+          print('R850_BUILT_APP_IDENTITY_INPUTS_ARM64_PRIVACY_VERIFIED',d['CFBundleVersion'],d['CFBundleIdentifier'])
+          PY
+          mkdir -p "$RUNNER_TEMP/r848_payload/Payload"
+          ditto "$R848_APP" "$RUNNER_TEMP/r848_payload/Payload/ChampionsOnDeviceResearch.app"
+          ditto -c -k --keepParent "$RUNNER_TEMP/r848_payload/Payload" R848Delivery/R848_Unsigned_DeviceTest.ipa
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,zipfile,hashlib,plistlib,os,datetime,base64,lzma
+          out=Path('R848Delivery');ipa=out/'R848_Unsigned_DeviceTest.ipa';sha=lambda b:hashlib.sha256(b).hexdigest();app=Path(os.environ['R848_APP'])
+          assert 100000<ipa.stat().st_size<300000000
+          with zipfile.ZipFile(ipa) as z:
+           assert z.testzip() is None
+           prefix='Payload/ChampionsOnDeviceResearch.app/'
+           assert all(not n.startswith('/') and '..' not in Path(n).parts for n in z.namelist())
+           info=plistlib.loads(z.read(prefix+'Info.plist'));assert info['CFBundleVersion']=='848'
+           assert sha(z.read(prefix+'ChampionsOnDeviceResearch'))==sha((app/'ChampionsOnDeviceResearch').read_bytes())
+          metrics=json.loads((out/'preflight_metrics.json').read_text())
+          receipt={'schema':'trueplan.r850.test-ipa.v1','created_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'revision':'R848','diagnostic':'D108','source_commit':'b2e09fa3a86ba9488ea514382bd10cc0b98d8c92','source_files':631,'source_tree_sha256':'632146e311b937376e2a65b7722d3ccc2bdcae3193ba1f791466ff092c94385c','preflight_ci':'https://github.com/zeek10191019-stack/true-plan-showdown-verification/actions/runs/43802424265','packaging_ci':os.environ['GITHUB_SERVER_URL']+'/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],'packaging_commit':os.environ['GITHUB_SHA'],'swift':metrics,'iphoneos_build':'PASS','build_configuration':'Debug arm64 CODE_SIGNING_ALLOWED=NO','ipa_name':ipa.name,'ipa_bytes':ipa.stat().st_size,'ipa_sha256':sha(ipa.read_bytes()),'zip_crc_and_executable_readback':'PASS','app_version':'0.8.48','app_build':'848','real_299mb_split_readback':'PASS','ten_part_scaled_readback':'PASS','eleven_part_and_corrupt_part_hold':'PASS','physical_iphone_test':'PENDING','whole_79_field_certified':False,'no_inventoried_live_decoder_count':22,'current_battle_turn':'UNKNOWN_WITHOUT_EXPLICIT_PROOF','visual_form_scope':'TYRANITAR_BASE_MEGA_LIMITED_ESTIMATED','own_real_mega_positive_tested':False,'movie_to_png_unique_alignment_certified':False,'actual_lcd_under_1000ms_certified':False}
+          (out/'VERIFICATION_R848.json').write_text(json.dumps(receipt,ensure_ascii=False,sort_keys=True,indent=2)+'\n')
+          (out/'SHA256SUMS.txt').write_text(receipt['ipa_sha256']+'  '+ipa.name+'\n')
+          (out/'DEVICE_TEST_R848.md').write_bytes(lzma.decompress(base64.b64decode('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')))
+          (out/'SCOPE_R848.md').write_bytes(Path('pinned-r793/source/tests/R845_PRE_IPA_SCOPE.md').read_bytes())
+          print('R850_IPA_ZIP_CRC_SHA_ARM64_READBACK_PASS',json.dumps(receipt,ensure_ascii=False))
+          PY
+          cat > R848Delivery/RELEASE_NOTES.md <<'EOF'
+          R848 / D108の実機テスト版（0.8.48、build848、未署名）。既存のiLoaderで導入します。
+          
+          事前検証: Swift 659件・失敗0、iPhoneOS arm64ビルド、実約299MBの証拠分割と読戻しが合格。原本PNGの保存からメイン処理への反映はMacで364ms。
+          
+          IPAは検証済みコミット b2e09fa3a86ba9488ea514382bd10cc0b98d8c92 の631ファイルから作成し、ZIP CRC・実行ファイル・SHA-256を読戻し確認しています。詳細と取得ファイルのSHAは VERIFICATION_R848.json / SHA256SUMS.txt、導入・選出からの収集・停止・出力手順は DEVICE_TEST_R848.md を確認してください。
+          
+          79項目の実機認証は未完了です。22項目は棚卸し上の本番デコーダー未接続、現在ターンは未証明なら保留、姿の新規接続はバンギラス通常・メガの限定的な推定です。実機での1秒未満・48秒以降の連続取得・自分メガ・向きと容量をこれから検証します。
+          
+          [事前検証CI](https://github.com/zeek10191019-stack/true-plan-showdown-verification/actions/runs/43802424265)
+          EOF
+          # Create a draft first; publish only after a fresh asset download matches the IPA.
+          gh release create r848-device-test R848Delivery/R848_Unsigned_DeviceTest.ipa R848Delivery/VERIFICATION_R848.json R848Delivery/SHA256SUMS.txt R848Delivery/DEVICE_TEST_R848.md R848Delivery/SCOPE_R848.md R848Delivery/source_manifest.json --repo "$GITHUB_REPOSITORY" --target b2e09fa3a86ba9488ea514382bd10cc0b98d8c92 --title 'R848 iPhone 16 Plus device test 0.8.48' --draft --prerelease --notes-file R848Delivery/RELEASE_NOTES.md
+          mkdir -p "$RUNNER_TEMP/r848_release_readback"
+          gh release download r848-device-test --repo "$GITHUB_REPOSITORY" --pattern R848_Unsigned_DeviceTest.ipa --dir "$RUNNER_TEMP/r848_release_readback"
+          R848_READBACK="$RUNNER_TEMP/r848_release_readback/R848_Unsigned_DeviceTest.ipa"
+          export R848_READBACK
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,zipfile
+          r=json.loads(Path('R848Delivery/VERIFICATION_R848.json').read_text());p=Path(os.environ['R848_READBACK'])
+          assert p.stat().st_size==r['ipa_bytes'] and hashlib.sha256(p.read_bytes()).hexdigest()==r['ipa_sha256']
+          with zipfile.ZipFile(p) as z:assert z.testzip() is None
+          print('R850_RELEASE_IPA_FRESH_DOWNLOAD_SHA_CRC_PASS',p.stat().st_size,r['ipa_sha256'])
+          PY
+          gh release edit r848-device-test --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/r848-device-test" > R848Delivery/published_release.json
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          r=json.loads(Path('R848Delivery/published_release.json').read_text());receipt=json.loads(Path('R848Delivery/VERIFICATION_R848.json').read_text())
+          assert r['draft'] is False and r['prerelease'] is True
+          assert r['target_commitish']=='b2e09fa3a86ba9488ea514382bd10cc0b98d8c92'
+          a=next(x for x in r['assets'] if x['name']=='R848_Unsigned_DeviceTest.ipa');assert a['state']=='uploaded' and a['size']==receipt['ipa_bytes']
+          assert set(x['name'] for x in r['assets'])=={'R848_Unsigned_DeviceTest.ipa','VERIFICATION_R848.json','SHA256SUMS.txt','DEVICE_TEST_R848.md','SCOPE_R848.md','source_manifest.json'}
+          if a.get('digest'):assert a['digest']=='sha256:'+receipt['ipa_sha256']
+          print('R850_PUBLISHED_RELEASE_VERIFIED',r['html_url']);print('R850_IPA_DOWNLOAD',a['browser_download_url'])
+          PY
