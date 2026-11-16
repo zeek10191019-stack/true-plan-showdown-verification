@@ -1,0 +1,224 @@
+name: R858 D118 Single numeric OCR and conflict preserving fallback full preflight NO IPA
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/r858.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            lane: real-apple-vision
+          - runner: xcode-27
+            lane: iphoneos-compile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4cc925234f9101a8875744e75049f06e96ce4d90
+          path: pinned-r823
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r823.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 641a9ee8701484fabaf9344db5a0eaab31c422c3
+          path: pinned-r821
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r821.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 46b607b88ddb5569fff0fc042dfdb5f0fb6e06f6
+          path: pinned-r819
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r819.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 37b3e26851c71fcabd65da3299356c1e38c53869
+          path: pinned-r793
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r793.yml
+            .github/workflows/d30.b64
+      - uses: actions/checkout@v4
+        with:
+          ref: b783a785f97d0b74c9a1d48780dcee9626aef12c
+          path: pinned-r833
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r833.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 73b62dff5e71b7889e90b7be1e1ba311e6205ec2
+          path: pinned-r843
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r843.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: 2529b32878004b846bcbfc7c3a62aa73df6302d4
+          path: pinned-r844
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r844.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: d09e35c616f7d8056b967d51a6936f13b1d11ef7
+          path: pinned-r845
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r845.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: ee9255ad4179d01dadc595a5b5d380125f427851
+          path: pinned-r846
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r846.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: e8e28eb774bd790f1b08c7ff7e9d5defa837f469
+          path: pinned-r847
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r847.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: b2e09fa3a86ba9488ea514382bd10cc0b98d8c92
+          path: pinned-r848
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            .github/workflows/r848.yml
+      - uses: actions/checkout@v4
+        with:
+          ref: a941556604317c96eeaf23d0fd727c53593db02e
+          path: pinned-r852
+          sparse-checkout: .github/workflows/r852.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: d7c16e7934c81806376cc2bf3caf2304a70e5adc
+          path: pinned-r853
+          sparse-checkout: .github/workflows/r853.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 3a748839f0d87ddaef4a0aa10db431e623fd397e
+          path: pinned-r854
+          sparse-checkout: .github/workflows/r854.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: d86b8efc6901897e02c5520c1afd690b6297cddf
+          path: pinned-r855
+          sparse-checkout: .github/workflows/r855.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 8a56d639716855a44624de702b2be58d13240944
+          path: pinned-r857
+          sparse-checkout: .github/workflows/r857.yml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Restore exact R857 and apply single OCR with conflict preserving fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(15).fetch("run")' pinned-r857/.github/workflows/r857.yml > "$RUNNER_TEMP/restore_r857.sh"
+          bash "$RUNNER_TEMP/restore_r857.sh"
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          import json,hashlib,base64,lzma
+          s=Path('pinned-r793/source');sha=lambda b:hashlib.sha256(b).hexdigest()
+          def disk():return {str(p.relative_to(s)):p for p in s.rglob('*') if p.is_file() and not {'.build','.swiftpm','__pycache__'}.intersection(p.parts)}
+          def tree(fs):return sha(''.join(n+'\t'+sha(fs[n].read_bytes())+'\n' for n in sorted(fs)).encode())
+          fs=disk();assert len(fs)==652 and tree(fs)=='c7926fbdc9689970ca054cc54f689612367d1c06fe50b4d122da43f9d0abd1ef'
+          m=json.loads((s/'source_manifest.json').read_text());assert all(sha(fs[n].read_bytes())==h for n,h in m.items())
+          d=json.loads(lzma.decompress(base64.b64decode('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')))
+          for n,v in sorted(d.items(),key=lambda item:'copy' in item[1]):
+           p=s/n;assert not Path(n).is_absolute() and '..' not in Path(n).parts
+           if v['old'] is None:
+            assert not p.exists()
+            if 'copy' in v:
+             original=s/v['copy'];assert not Path(v['copy']).is_absolute() and '..' not in Path(v['copy']).parts
+             assert sha(original.read_bytes())==v['source_sha']
+             b=v['prefix'].encode()+original.read_bytes()+v['suffix'].encode()
+            else:b=v['text'].encode()
+           else:
+            assert sha(p.read_bytes())==v['old']==m[n]
+            lines=p.read_text().splitlines(keepends=True)
+            for i,j,t in reversed(v['edits']):lines[i:j]=[t]
+            b=''.join(lines).encode()
+           assert sha(b)==v['new'];p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(b);m[n]=v['new']
+          (s/'source_manifest.json').write_text(json.dumps(m,ensure_ascii=False,sort_keys=True,indent=2)+'\n')
+          fs=disk();assert len(fs)==655 and set(fs)==set(m)|{'source_manifest.json'}
+          assert all(sha(fs[n].read_bytes())==h for n,h in m.items())
+          assert tree(fs)=='b7bb39464952dd5ff39cda2677e996a179bb92ee50e287b539984f1e01a52961'
+          Path('R834Proof/SOURCE_TREE_SHA256.txt').write_text(tree(fs)+'\n')
+          print('R858_SOURCE_655_VERIFIED',tree(fs))
+          PYCODE
+          python3 pinned-r793/source/tools/r852_preflight_wiring.py
+      - name: Full 680 Swift regressions with source buffer latency and fallback preservation
+        if: matrix.lane == 'real-apple-vision'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(8).fetch("run").gsub("652 tests","680 tests")' pinned-r845/.github/workflows/r845.yml > "$RUNNER_TEMP/r858_swift.sh"
+          bash "$RUNNER_TEMP/r858_swift.sh"
+          
+          grep -F "R852_CVPIXELBUFFER_PNG_FSYNC_PIXEL_OCR_STATE_MAIN_MS" R834Proof/Swift.log
+          grep -F "R852_31_RETAINED_FRAMES_RELAUNCH_ZIP_READBACK_NO_OCR_PASS" R834Proof/Swift.log
+          
+          grep -F "R854_LOSSLESS_PNG_REUSED_IMAGE_EXACT_PIXEL_READBACK_PASS" R834Proof/Swift.log
+          grep -F "R854_CAPTURE_STAGE" R834Proof/Swift.log
+          
+          grep -F "R855_FAST_PNG_ICC_ALPHA_STRIDE_IMAGEIO_READBACK_PASS" R834Proof/Swift.log
+          
+          grep -F "R857_EXPLICIT_SRGB_PREVIOUS_PNG_ALL_PIXELS_EXACT_PASS" R834Proof/Swift.log
+          
+          grep -F "R858_ORIGINAL_SPLIT_RETAINED_REAL_HP_PASS" R834Proof/Swift.log
+          grep -F "R858_FULL_PIPELINE_STAGES" R834Proof/Swift.log
+      - name: iPhoneOS production build version 858 NO IPA
+        if: matrix.lane == 'iphoneos-compile'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 pinned-r793/source/tools/generate_xcode_project.py
+          xcodebuild -project pinned-r793/source/app/ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r858_device" build > R834Proof/iPhoneOS.log 2>&1 || { grep -E 'error:|BUILD FAILED' R834Proof/iPhoneOS.log; exit 1; }
+          grep -F 'BUILD SUCCEEDED' R834Proof/iPhoneOS.log
+          python3 - <<'PY'
+          import plistlib,os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'r858_device/Build/Products/Debug-iphoneos/ChampionsOnDeviceResearch.app/Info.plist'
+          d=plistlib.loads(p.read_bytes());assert d['CFBundleVersion']=='858' and d['CFBundleShortVersionString']=='0.8.58'
+          print('R858_BUILT_IDENTITY_VERIFIED',d['CFBundleVersion'],d['CFBundleShortVersionString'])
+          PY
+      - name: Scope and source receipt
+        if: always()
+        shell: bash
+        run: |
+          if [ -f R834Proof/SOURCE_TREE_SHA256.txt ]; then cat R834Proof/SOURCE_TREE_SHA256.txt; fi
+          echo 'NO IPA until both lanes pass. Actual iPhone continuity and LCD latency remain unverified.' >> "$GITHUB_STEP_SUMMARY"
