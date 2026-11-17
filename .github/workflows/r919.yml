@@ -372,7 +372,42 @@ jobs:
                          let archive=unifiedEvidenceURL else{return []}
                    let current=r918VerifiedShareURLs(for:archive)
                    if !current.isEmpty {return current}
-          @@ -637,12 +645,7 @@
+          @@ -575,14 +583,19 @@
+           
+               private func invalidateEvidenceExport() {
+                   precondition(Thread.isMainThread)
+          -        evidenceWork?.cancel()
+          -        evidenceWork = nil
+          -        battleEvidenceBusy = false
+          +        if evidenceExportGate.pending != nil || pendingUnifiedExport != nil {
+          +            evidenceWork?.cancel()
+          +            evidenceWork = nil
+          +            battleEvidenceBusy = false
+          +        }
+          +        pendingUnifiedExport = nil
+                   evidenceExportGate.invalidate()
+          -        // Previously published files must remain readable by an open share extension.
+          +        // Selection changes retire selected-frame work. The verified session
+          +        // archive and its transport remain independent of the selected frame.
+                   battleEvidenceURL = nil
+          -        unifiedEvidenceURL = nil
+          -        battleEvidenceStatus = "表示の証跡候補は失効（作成済みファイルは端末内に保持）"
+          +        if !battleEvidenceBusy && unifiedEvidenceURL == nil {
+          +            battleEvidenceStatus = "表示の証跡候補は失効（作成済みファイルは端末内に保持）"
+          +        }
+               }
+           
+               func reportUnifiedShareOutcome(completed: Bool, failed: Bool) {
+          @@ -596,8 +609,6 @@
+               private func invalidateBattleCandidateForPreviewChange() {
+                   precondition(Thread.isMainThread)
+                   selectedReadWork?.cancel(); selectedReadWork = nil; battleReadBusy = false
+          -        pendingUnifiedExport = nil
+          -        battleEvidenceBusy = false
+                   invalidateEvidenceExport()
+                   battleWireRevision &+= 1
+                   battleWireJSON = ""
+          @@ -637,12 +648,7 @@
                    }
                }
            
@@ -386,7 +421,7 @@ jobs:
                    r844LateExportWork?.cancel();r844LateExportWork=nil
                    r844LateExportFence=R844LateExportFence()
                    r918ExportRetryNeeded=false
-          @@ -652,6 +655,14 @@
+          @@ -652,6 +658,14 @@
                    r714SplitStatus="分割ZIPは未作成。原本は端末内保持"
                    unifiedEvidenceURL=nil
                    r710CanExport=false
@@ -401,7 +436,7 @@ jobs:
                    r710Timer?.invalidate()
                    let saveTimer=Timer(timeInterval:1,repeats:true) { [weak self] _ in self?.refreshR710() }
                    r710Timer=saveTimer;RunLoop.main.add(saveTimer,forMode:.common)
-          @@ -832,6 +843,7 @@
+          @@ -832,6 +846,7 @@
                                try? await newStream.stopCapture()
                                return
                            }
@@ -409,7 +444,7 @@ jobs:
                            self.startR764Watchdog(token:monitorToken)
                            self.requestingPermission = false
                            self.running = true
-          @@ -1122,7 +1134,7 @@
+          @@ -1122,7 +1137,7 @@
                                        token:token,onWritten:{ [weak self] in
                                            DispatchQueue.main.async { [weak self] in
                                                self?.r837PublishQuick(line,token:token,epoch:quickEpoch,
@@ -418,6 +453,14 @@ jobs:
                                            }
                                        })
                                    if !queued {
+          @@ -2479,7 +2494,6 @@
+           
+                   precondition(Thread.isMainThread)
+                   manualOCRGate.invalidate()
+          -        pendingUnifiedExport = nil
+                   manualOCRStatus = "手動OCR未実行・正答率未認証"
+                   manualOCRLines = [String](repeating:"—",count:4)
+                   manualOCRThumbnails = []
           --- a/app/ios/ChampionsOnDevice/ChampionsOnDeviceApp.swift
           +++ b/app/ios/ChampionsOnDevice/ChampionsOnDeviceApp.swift
           @@ -30,8 +30,8 @@
@@ -447,7 +490,7 @@ jobs:
            	<key>UIBackgroundModes</key>
           --- a/tools/tests/test_r789_capture_start_scope.py
           +++ b/tools/tests/test_r789_capture_start_scope.py
-          @@ -76,6 +76,24 @@
+          @@ -76,6 +76,36 @@
                    self.assertIn('R917_RUNNING_SOURCE_SELECTION_CANCELLED', selection_cancel)
                    self.assertNotIn('finishContinuousCollection(', selection_cancel)
            
@@ -468,6 +511,18 @@ jobs:
           +        split = split.split('@Published var latencyStatus', 1)[0]
           +        self.assertLess(split.index('guard r918VerifiedShareURLs(for:fullArchive).isEmpty'),
           +                        split.index('r714PartURLs=[]'))
+          +
+          +    def test_preview_invalidation_only_cancels_selected_frame_export(self):
+          +        invalidation = self.source.split('private func invalidateEvidenceExport()', 1)[1]
+          +        invalidation = invalidation.split('func reportUnifiedShareOutcome', 1)[0]
+          +        self.assertNotRegex(invalidation, r'(unifiedEvidenceURL|r714PartURLs)\s*=' + r'(?!=)')
+          +        self.assertLess(invalidation.index('if evidenceExportGate.pending != nil || pendingUnifiedExport != nil'),
+          +                        invalidation.index('evidenceWork?.cancel()'))
+          +        self.assertIn('evidenceExportGate.invalidate()', invalidation)
+          +        candidate = self.source.split('private func invalidateBattleCandidateForPreviewChange()', 1)[1]
+          +        candidate = candidate.split('func setResearchVoiceEnabled', 1)[0]
+          +        self.assertIn('invalidateEvidenceExport()', candidate)
+          +        self.assertNotIn('battleEvidenceBusy = false', candidate)
           +
            
            if __name__ == '__main__':
@@ -507,7 +562,7 @@ jobs:
           files={p.relative_to(root).as_posix():sha(p.read_bytes()) for p in root.rglob('*')
                  if p.is_file() and not set(p.parts)&{'.build','.swiftpm','__pycache__'}}
           digest=sha(''.join(f'{name}\t{files[name]}\n' for name in sorted(files)).encode())
-          assert len(files)==679 and digest=='a9043c58cff41174bf624eea1dd8e32e3f65926443a40d60db180abca5b3f66e',digest
+          assert len(files)==679 and digest=='ba6e62522f697979163f255ae1505b38fefcbc9df272165f96936a3673ddc917',digest
           assert set(files)==set(manifest)|{'source_manifest.json'}
           assert all(files[name]==expected for name,expected in manifest.items())
           Path('R834Proof/SOURCE_TREE_SHA256.txt').write_text(digest+'\n')
@@ -528,7 +583,7 @@ jobs:
         run: |
           set -euo pipefail
           for step in 42 43 44; do
-            ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(ARGV[1].to_i).fetch("run").gsub("R918", "R919").gsub(ARGV[2], ARGV[3])' pinned-r918/.github/workflows/r918_inspection_pixels.yml "$step" '9d741abc9b4f32ebd5df90086c73b1a1387ef2106b4bf5fc6326b8cad6fcfcc2' 'a9043c58cff41174bf624eea1dd8e32e3f65926443a40d60db180abca5b3f66e' > "$RUNNER_TEMP/r919-replay.sh"
+            ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(ARGV[1].to_i).fetch("run").gsub("R918", "R919").gsub(ARGV[2], ARGV[3])' pinned-r918/.github/workflows/r918_inspection_pixels.yml "$step" '9d741abc9b4f32ebd5df90086c73b1a1387ef2106b4bf5fc6326b8cad6fcfcc2' 'ba6e62522f697979163f255ae1505b38fefcbc9df272165f96936a3673ddc917' > "$RUNNER_TEMP/r919-replay.sh"
             bash "$RUNNER_TEMP/r919-replay.sh"
           done
       - name: Build the iPhoneOS arm64 production target
