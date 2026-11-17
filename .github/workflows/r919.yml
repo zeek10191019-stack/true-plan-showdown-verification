@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: r919-preflight
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   preflight:
     if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false && github.ref == 'refs/heads/r905-preflight'
@@ -317,7 +317,15 @@ jobs:
           patch -s -t -p1 -F 0 -d pinned-r793/source <<'R919_PATCH'
           --- a/app/ios/ChampionsOnDevice/CaptureCoordinator.swift
           +++ b/app/ios/ChampionsOnDevice/CaptureCoordinator.swift
-          @@ -157,6 +157,8 @@
+          @@ -138,6 +138,7 @@
+               @Published private(set) var r918ExportRetryNeeded = false
+               @Published private(set) var battleEvidenceURL: URL?
+               @Published private(set) var unifiedEvidenceURL: URL? // R535: one-tap, user-initiated share
+          +    private var unifiedEvidenceSession = ""
+               @Published private(set) var battleEvidenceStatus = "実画像証跡は未作成（共有は手動のみ）"
+               @Published private(set) var r714PartURLs = [URL]()
+               @Published private(set) var r714IndexURL:URL?
+          @@ -157,6 +158,8 @@
                        r714SplitStatus="③の完全ZIPは300MB未満です。分割不要、そのまま添付できます"
                        return
                    }
@@ -326,7 +334,7 @@ jobs:
                    battleEvidenceBusy=true
                    r918SplitRetryNeeded=false
                    r714PartURLs=[];r714IndexURL=nil;r915SplitSource=nil
-          @@ -327,7 +329,7 @@
+          @@ -327,7 +330,7 @@
                    r837QuickPublication.removeAll();r837QuickStatus="QUICK：読取待ち"
                }
                private func r837PublishQuick(_ line:String,token:String,epoch:Int64,
@@ -335,7 +343,7 @@ jobs:
                    precondition(Thread.isMainThread)
                    let current=sampleQueue.sync {(active,r760RecorderToken,generation)}
                    let now=Int64(ProcessInfo.processInfo.systemUptime*1000)
-          @@ -341,6 +343,7 @@
+          @@ -341,6 +344,7 @@
                    r837QuickPublicationID &+= 1
                    r837QuickPublication=["kind":"R837_QUICK_MAIN_PUBLICATION",
                        "source_session_token":token,"epoch":epoch,"frame_id":frame,
@@ -343,7 +351,7 @@ jobs:
                        "observed_uptime_ms":observedMs,"published_uptime_ms":now,
                        "capture_to_publication_ms":now-observedMs,"decision":decision,
                        "ui_foreground":UIApplication.shared.applicationState == .active,
-          @@ -348,10 +351,13 @@
+          @@ -348,10 +352,13 @@
                    let row=r837QuickPublication,recorder=r710Recorder
                    DispatchQueue.global(qos:.utility).async {_=recorder.appendOCRFromWorker(row,token:token)}
                }
@@ -361,7 +369,29 @@ jobs:
                    let now=Int64(ProcessInfo.processInfo.systemUptime*1000)
                    var row=r837QuickPublication
                    row["kind"]="R837_QUICK_SWIFTUI_VIEW_UPDATE"
-          @@ -437,7 +443,9 @@
+          @@ -416,14 +423,17 @@
+                       finishContinuousCollection()
+                   } else {startPicker()}
+               }
+          -    var r847SingleEvidenceShareURL:URL? {
+          -        guard !running,!battleEvidenceBusy,!r761AutoExportPending,r714PartURLs.isEmpty,
+          -              let url=unifiedEvidenceURL,
+          +    func boundedEvidenceAttachment(_ url:URL?) -> URL? {
+          +        guard let url,
+                         let bytes=try? url.resourceValues(forKeys:[.fileSizeKey]).fileSize,
+                         R729EvidenceTransportPolicy.fitsSingleAttachment(bytes) else{return nil}
+                   return url
+               }
+          -    var r915ShareSession:String { r710Recorder.sessionToken }
+          +    var r847SingleEvidenceShareURL:URL? {
+          +        guard !running,!r761AutoExportPending else{return nil}
+          +        return boundedEvidenceAttachment(unifiedEvidenceURL)
+          +    }
+          +    var r915ShareSession:String { unifiedEvidenceSession }
+               private func r918VerifiedShareURLs(for archive:URL)->[URL] {
+                   func bytes(_ url:URL)->Int? {try? url.resourceValues(forKeys:[.fileSizeKey]).fileSize}
+                   return R729EvidenceTransportPolicy.shareURLs(archive:archive,archiveBytes:bytes(archive),
+          @@ -437,14 +447,14 @@
                }
            
                var r915ReadyEvidenceShareURLs:[URL] {
@@ -372,7 +402,16 @@ jobs:
                          let archive=unifiedEvidenceURL else{return []}
                    let current=r918VerifiedShareURLs(for:archive)
                    if !current.isEmpty {return current}
-          @@ -575,14 +583,19 @@
+          -        return previousVerifiedShareURLs.allSatisfy { url in
+          -            guard let size=try? url.resourceValues(forKeys:[.fileSizeKey]).fileSize else{return false}
+          -            return R729EvidenceTransportPolicy.fitsSingleAttachment(size)
+          -        } ? previousVerifiedShareURLs : []
+          +        return previousVerifiedShareURLs.allSatisfy { boundedEvidenceAttachment($0) != nil }
+          +            ? previousVerifiedShareURLs : []
+               }
+           
+               func r761PrepareTransportIfNeeded() {
+          @@ -575,14 +585,19 @@
            
                private func invalidateEvidenceExport() {
                    precondition(Thread.isMainThread)
@@ -398,7 +437,7 @@ jobs:
                }
            
                func reportUnifiedShareOutcome(completed: Bool, failed: Bool) {
-          @@ -596,8 +609,6 @@
+          @@ -596,8 +611,6 @@
                private func invalidateBattleCandidateForPreviewChange() {
                    precondition(Thread.isMainThread)
                    selectedReadWork?.cancel(); selectedReadWork = nil; battleReadBusy = false
@@ -407,7 +446,7 @@ jobs:
                    invalidateEvidenceExport()
                    battleWireRevision &+= 1
                    battleWireJSON = ""
-          @@ -637,12 +648,7 @@
+          @@ -637,12 +650,7 @@
                    }
                }
            
@@ -421,8 +460,11 @@ jobs:
                    r844LateExportWork?.cancel();r844LateExportWork=nil
                    r844LateExportFence=R844LateExportFence()
                    r918ExportRetryNeeded=false
-          @@ -652,6 +658,14 @@
+          @@ -650,8 +658,17 @@
+                   previousVerifiedShareURLs=[]
+                   r714PartURLs=[];r714IndexURL=nil;r915SplitSource=nil
                    r714SplitStatus="分割ZIPは未作成。原本は端末内保持"
+          +        unifiedEvidenceSession=""
                    unifiedEvidenceURL=nil
                    r710CanExport=false
           +    }
@@ -436,7 +478,7 @@ jobs:
                    r710Timer?.invalidate()
                    let saveTimer=Timer(timeInterval:1,repeats:true) { [weak self] _ in self?.refreshR710() }
                    r710Timer=saveTimer;RunLoop.main.add(saveTimer,forMode:.common)
-          @@ -832,6 +846,7 @@
+          @@ -832,6 +849,7 @@
                                try? await newStream.stopCapture()
                                return
                            }
@@ -444,7 +486,7 @@ jobs:
                            self.startR764Watchdog(token:monitorToken)
                            self.requestingPermission = false
                            self.running = true
-          @@ -1122,7 +1137,7 @@
+          @@ -1122,7 +1140,7 @@
                                        token:token,onWritten:{ [weak self] in
                                            DispatchQueue.main.async { [weak self] in
                                                self?.r837PublishQuick(line,token:token,epoch:quickEpoch,
@@ -453,7 +495,7 @@ jobs:
                                            }
                                        })
                                    if !queued {
-          @@ -2479,7 +2494,6 @@
+          @@ -2479,7 +2497,6 @@
            
                    precondition(Thread.isMainThread)
                    manualOCRGate.invalidate()
@@ -461,6 +503,14 @@ jobs:
                    manualOCRStatus = "手動OCR未実行・正答率未認証"
                    manualOCRLines = [String](repeating:"—",count:4)
                    manualOCRThumbnails = []
+          @@ -3828,6 +3845,7 @@
+                   let verified=r915ReadyEvidenceShareURLs
+                   if !verified.isEmpty {previousVerifiedShareURLs=verified}
+                   r714PartURLs=[];r714IndexURL=nil;r915SplitSource=nil
+          +        unifiedEvidenceSession=r710Recorder.sessionToken
+                   unifiedEvidenceURL=url
+                   r761PrepareTransportIfNeeded()
+               }
           --- a/app/ios/ChampionsOnDevice/ChampionsOnDeviceApp.swift
           +++ b/app/ios/ChampionsOnDevice/ChampionsOnDeviceApp.swift
           @@ -30,8 +30,8 @@
@@ -474,6 +524,47 @@ jobs:
                                            }
                                        Text(capture.r713LiveSummary).font(.caption).textSelection(.enabled)
                                        Text(capture.r714FieldSummary).font(.caption).textSelection(.enabled)
+          @@ -78,13 +78,13 @@
+                                       .disabled(capture.running || capture.requestingPermission || capture.battleEvidenceBusy || capture.battleReadBusy || !capture.r710CanExport)
+                                   Button("ZIPを300MB未満へ分割") {capture.prepareR714ChatSizedParts()}
+                                       .disabled(capture.running || capture.battleEvidenceBusy || capture.unifiedEvidenceURL == nil)
+          -                        if let url=capture.unifiedEvidenceURL {
+          +                        if let url=capture.r847SingleEvidenceShareURL {
+                                       ShareLink(item:url) {Text("原本の完全ZIPを共有")}
+                                   }
+          -                        if let index=capture.r714IndexURL {
+          +                        if let index=capture.boundedEvidenceAttachment(capture.r714IndexURL) {
+                                       ShareLink(item:index) {Text("分割ファイルの索引JSONを個別共有")}
+                                   }
+          -                        ForEach(capture.r714PartURLs,id:\.self) { url in
+          +                        ForEach(capture.r714PartURLs.compactMap {capture.boundedEvidenceAttachment($0)},id:\.self) { url in
+                                       ShareLink(item:url) {Text(url.lastPathComponent+" を個別共有")}
+                                   }
+                                   Button("診断結果をコピー") {capture.copyR713LiveSummary()}
+          @@ -104,12 +104,12 @@
+                                   }
+                                   Button("一括検証：画面・HP・技・PP・メガ文字・証拠JSON") {offlinePNG.inspectAll()}
+                                       .disabled(offlinePNG.image == nil || offlinePNG.busy)
+          -                        if let report=offlinePNG.evidenceURL {
+          +                        if let report=capture.boundedEvidenceAttachment(offlinePNG.evidenceURL) {
+                                       ShareLink(item:report) {
+                                           Text("一括証拠JSONを共有（明示操作のみ・PNG原本なし）")
+                                       }
+                                   }
+          -                        if let paired=offlinePNG.pairedEvidenceURL {
+          +                        if let paired=capture.boundedEvidenceAttachment(offlinePNG.pairedEvidenceURL) {
+                                       ShareLink(item:paired) {
+                                           Text("R578｜元PNG・全OCR・メガ文字証拠をZIP一括共有")
+                                       }
+          @@ -497,7 +497,7 @@
+                                   Button("実画像と候補を1ファイルに整理") { capture.prepareSelectedEvidenceFile() }
+                                       .disabled(capture.rawTimelineCount == 0 || capture.battleEvidenceBusy)
+                                   Text(capture.battleEvidenceStatus).font(.footnote)
+          -                        if let exportFile = capture.battleEvidenceURL {
+          +                        if let exportFile = capture.boundedEvidenceAttachment(capture.battleEvidenceURL) {
+                                       ShareLink(item: exportFile) {
+                                           Text("検証証跡JSONを共有（手動のみ）")
+                                       }
           --- a/app/ios/ChampionsOnDevice/Info.plist
           +++ b/app/ios/ChampionsOnDevice/Info.plist
           @@ -13,9 +13,9 @@
@@ -490,7 +581,7 @@ jobs:
            	<key>UIBackgroundModes</key>
           --- a/tools/tests/test_r789_capture_start_scope.py
           +++ b/tools/tests/test_r789_capture_start_scope.py
-          @@ -76,6 +76,36 @@
+          @@ -76,6 +76,49 @@
                    self.assertIn('R917_RUNNING_SOURCE_SELECTION_CANCELLED', selection_cancel)
                    self.assertNotIn('finishContinuousCollection(', selection_cancel)
            
@@ -506,7 +597,7 @@ jobs:
           +        share = share.split('func r761PrepareTransportIfNeeded()', 1)[0]
           +        self.assertNotIn('battleEvidenceBusy', share)
           +        self.assertIn('let current=r918VerifiedShareURLs(for:archive)', share)
-          +        self.assertIn('R729EvidenceTransportPolicy.fitsSingleAttachment(size)', share)
+          +        self.assertIn('boundedEvidenceAttachment($0) != nil', share)
           +        split = self.source.split('func prepareR714ChatSizedParts()', 1)[1]
           +        split = split.split('@Published var latencyStatus', 1)[0]
           +        self.assertLess(split.index('guard r918VerifiedShareURLs(for:fullArchive).isEmpty'),
@@ -515,7 +606,7 @@ jobs:
           +    def test_preview_invalidation_only_cancels_selected_frame_export(self):
           +        invalidation = self.source.split('private func invalidateEvidenceExport()', 1)[1]
           +        invalidation = invalidation.split('func reportUnifiedShareOutcome', 1)[0]
-          +        self.assertNotRegex(invalidation, r'(unifiedEvidenceURL|r714PartURLs)\s*=' + r'(?!=)')
+          +        self.assertNotRegex(invalidation, r'(unifiedEvidenceURL|r714PartURLs)\s*=(?!=)')
           +        self.assertLess(invalidation.index('if evidenceExportGate.pending != nil || pendingUnifiedExport != nil'),
           +                        invalidation.index('evidenceWork?.cancel()'))
           +        self.assertIn('evidenceExportGate.invalidate()', invalidation)
@@ -523,6 +614,19 @@ jobs:
           +        candidate = candidate.split('func setResearchVoiceEnabled', 1)[0]
           +        self.assertIn('invalidateEvidenceExport()', candidate)
           +        self.assertNotIn('battleEvidenceBusy = false', candidate)
+          +
+          +    def test_every_manual_attachment_is_bounded_and_auto_share_uses_archive_session(self):
+          +        view = (ROOT / 'app/ios/ChampionsOnDevice/ChampionsOnDeviceApp.swift').read_text()
+          +        self.assertIn('if let url=capture.r847SingleEvidenceShareURL', view)
+          +        for name in ('capture.r714IndexURL', 'offlinePNG.evidenceURL',
+          +                     'offlinePNG.pairedEvidenceURL', 'capture.battleEvidenceURL', '$0'):
+          +            self.assertIn(f'capture.boundedEvidenceAttachment({name})', view)
+          +        attachment = self.source.split('func boundedEvidenceAttachment(', 1)[1].split('var r847SingleEvidenceShareURL', 1)[0]
+          +        self.assertIn('R729EvidenceTransportPolicy.fitsSingleAttachment(bytes)', attachment)
+          +        self.assertIn('var r915ShareSession:String { unifiedEvidenceSession }', self.source)
+          +        publish = self.source.split('private func r918PublishUnifiedArchive(', 1)[1]
+          +        self.assertLess(publish.index('unifiedEvidenceSession=r710Recorder.sessionToken'),
+          +                        publish.index('unifiedEvidenceURL=url'))
           +
            
            if __name__ == '__main__':
@@ -562,7 +666,7 @@ jobs:
           files={p.relative_to(root).as_posix():sha(p.read_bytes()) for p in root.rglob('*')
                  if p.is_file() and not set(p.parts)&{'.build','.swiftpm','__pycache__'}}
           digest=sha(''.join(f'{name}\t{files[name]}\n' for name in sorted(files)).encode())
-          assert len(files)==679 and digest=='ba6e62522f697979163f255ae1505b38fefcbc9df272165f96936a3673ddc917',digest
+          assert len(files)==679 and digest=='aa14b3d45738fc31a1b2836cf46f9602ae19466870c2b9a71b2e833d49050237',digest
           assert set(files)==set(manifest)|{'source_manifest.json'}
           assert all(files[name]==expected for name,expected in manifest.items())
           Path('R834Proof/SOURCE_TREE_SHA256.txt').write_text(digest+'\n')
@@ -583,7 +687,7 @@ jobs:
         run: |
           set -euo pipefail
           for step in 42 43 44; do
-            ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(ARGV[1].to_i).fetch("run").gsub("R918", "R919").gsub(ARGV[2], ARGV[3])' pinned-r918/.github/workflows/r918_inspection_pixels.yml "$step" '9d741abc9b4f32ebd5df90086c73b1a1387ef2106b4bf5fc6326b8cad6fcfcc2' 'ba6e62522f697979163f255ae1505b38fefcbc9df272165f96936a3673ddc917' > "$RUNNER_TEMP/r919-replay.sh"
+            ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).fetch("jobs").fetch("verify").fetch("steps").fetch(ARGV[1].to_i).fetch("run").gsub("R918", "R919").gsub(ARGV[2], ARGV[3])' pinned-r918/.github/workflows/r918_inspection_pixels.yml "$step" '9d741abc9b4f32ebd5df90086c73b1a1387ef2106b4bf5fc6326b8cad6fcfcc2' 'aa14b3d45738fc31a1b2836cf46f9602ae19466870c2b9a71b2e833d49050237' > "$RUNNER_TEMP/r919-replay.sh"
             bash "$RUNNER_TEMP/r919-replay.sh"
           done
       - name: Build the iPhoneOS arm64 production target
