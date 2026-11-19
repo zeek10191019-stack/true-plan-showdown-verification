@@ -10,7 +10,7 @@ permissions:
   contents: read
 concurrency:
   group: r940-save-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   verify:
     name: R940 ${{ matrix.suite }}
@@ -381,7 +381,20 @@ jobs:
       shell: bash
       run: |-
         set -euo pipefail
-        command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 brew install ffmpeg
+        tool_dir="$RUNNER_TEMP/r940-video-tools"
+        mkdir -p "$tool_dir"
+        fetch_media_tool() {
+          local name="$1" sha="$2" target="$tool_dir/$1"
+          curl --fail --silent --show-error --location --retry 2 --connect-timeout 10 --max-time 90 \
+            "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/$name-darwin-arm64.gz" -o "$target.gz"
+          printf '%s  %s\n' "$sha" "$target.gz" | shasum -a 256 -c -
+          gzip -dc "$target.gz" > "$target"
+          chmod u+x "$target"
+          "$target" -version | sed -n '1p'
+        }
+        fetch_media_tool ffmpeg 8923876afa8db5585022d7860ec7e589af192f441c56793971276d450ed3bbfa
+        fetch_media_tool ffprobe d986a8ec7b030899fe66a8a288ed809a3543338705a3ce178cfb85869c5d80be
+        export PATH="$tool_dir:$PATH"
         python3 -u r937-tests/simulator.py
   publish:
     needs:
