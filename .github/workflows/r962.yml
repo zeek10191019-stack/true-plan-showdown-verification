@@ -1,0 +1,644 @@
+name: R962 retain literal command move rows and partial reads
+on:
+  push:
+    branches: [r938-export-recovery]
+    paths: [.github/workflows/r962.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Verify OCR and build the iPhone app
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r962.yml
+      - name: Restore R961 and verify R962 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show 98671a4449a7686f47afeb8c1088d10c111f0300:.github/workflows/r961.yml > "$RUNNER_TEMP/r961.yml"
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0], aliases: true).fetch("jobs").fetch("verify").fetch("steps").fetch(1).fetch("run")' "$RUNNER_TEMP/r961.yml" > "$RUNNER_TEMP/r961-restore.sh"
+          bash "$RUNNER_TEMP/r961-restore.sh"
+          python3 - <<'PATCH'
+          from pathlib import Path
+          import base64,lzma
+          payload="""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"""
+          raw=base64.b64decode(''.join(payload.split()),validate=True)
+          Path('R834Proof/r962.patch').write_bytes(lzma.decompress(raw))
+          PATCH
+          patch -s -t -p1 -F 0 -d pinned-r793/source -i "$PWD/R834Proof/r962.patch"
+          python3 pinned-r793/source/tools/generate_xcode_project.py
+          python3 - <<'VERIFY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('pinned-r793/source')
+          ignore={'.build','.swiftpm','__pycache__'}
+          files={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                 for p in root.rglob('*') if p.is_file() and not set(p.relative_to(root).parts)&ignore}
+          assert {k:v for k,v in files.items() if k!='source_manifest.json'}==json.loads((root/'source_manifest.json').read_text())
+          digest=hashlib.sha256(''.join(k+'\t'+files[k]+'\n' for k in sorted(files)).encode()).hexdigest()
+          assert len(files)==703 and digest=='fc9f47aa10835027f07360e4fc4d562c5df81a0b30ba51549b548926d0c76e8d',(len(files),digest)
+          print('R962_SOURCE_VERIFIED',len(files),digest)
+          VERIFY
+      - name: Test retained-log projection and storage regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd pinned-r793/source
+          python3 tools/r745_read_path_gate.py
+          python3 tools/r852_preflight_wiring.py
+          node tools/tests/test_r920_pc_display.mjs
+          python3 -m unittest discover -s tools/tests -p test_r875_native_capture_audit.py
+          source_package="$PWD/R720_PORTABLE_TESTS"
+          focused="$RUNNER_TEMP/r962-test/R720_PORTABLE_TESTS"
+          mkdir -p "$focused/Tests/R719CoreTests" "$RUNNER_TEMP/r962-test/tests"
+          cp "$source_package/Package.swift" "$focused/"
+          cp -R "$source_package/Sources" "$focused/"
+          cp -R tests/fixtures "$RUNNER_TEMP/r962-test/tests/"
+          for name in R837FrameHPRecognitionTests R893BattleStatusPanelTests R946OCRDiagnosticsTests R946StoredCapturesTests R726LiveOCRClosureTests R761RealImageRegressionTests R769SplitHUDValueFusionTests R771MovePanelSlotGateTests R734RecordingFinishTests R729EvidenceTransportPolicyTests R742QuickSourcePackAuditTests R761AggregatePNGBudgetTests R861OCRJournalCommitTests; do
+            cp "$source_package/Tests/R719CoreTests/$name.swift" "$focused/Tests/R719CoreTests/"
+          done
+          swift test --jobs 4 --package-path "$focused" --skip 'R761MacRealVisionTests|testPhoneStatusFromActualSelectedScreenshotRegions' 2>&1 | tee "$RUNNER_TEMP/r962-swift.log"
+          grep -Eq 'Executed [1-9][0-9]+ tests, with 0 failures' "$RUNNER_TEMP/r962-swift.log"
+          grep -F 'testListsOldAndCurrentCapturesAndDeletesOnlyTheRequestedCapture' "$RUNNER_TEMP/r962-swift.log"
+          grep -F 'R947_RETAINED_MEGA_AND_ITEM_REACH_HISTORICAL_JOURNAL' "$RUNNER_TEMP/r962-swift.log"
+          projector="$RUNNER_TEMP/r809_projector"
+          swiftc -parse-as-library -o "$projector" tools/r809_replay_79_projector.swift   "$source_package"/Sources/R719Core/{R553OCRAlternatives,R716SpatialFieldProjection,R742ExtendedTextRoutes,R744SceneAnchorFusion,R762SingleFrameConflictFence,R769SplitHUDValueFusion,R771MovePanelSlotGate,R772MoveNameAlternativeReview,R773MoveLexiconReview,R781OCRConfidenceEvidence,R866ReferenceCatalog}.swift
+          R809_SWIFT_PROJECTOR="$projector" PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/tests -p 'test_*.py'
+
+          grep -F "testHeldItemKanaMarkNeedsSameCellLiteralSupport]' passed" "$RUNNER_TEMP/r962-swift.log"
+          grep -F "testSelectedMoveReadsRequireActualKanaCropForPromotion]' passed" "$RUNNER_TEMP/r962-swift.log"
+
+          grep -F "testLateOnlyJournalSeparatesTimeoutHoldReturnAndCompletion]' passed" "$RUNNER_TEMP/r962-swift.log"
+          grep -F "testReopensSealedOutputWithoutCaptureOriginalAndRejectsDamagedParts]' passed" "$RUNNER_TEMP/r962-swift.log"
+
+          grep -F "testCorruptCatalogAndNotesAreRecoverableWithoutChangingOriginals]' passed" "$RUNNER_TEMP/r962-swift.log"
+
+          grep -F "testSharesSealedSplitSetWithNoFullArchiveOrSplitAudit]' passed" "$RUNNER_TEMP/r962-swift.log"
+
+          grep -F "testSourceFrameCoverageSeparatesRecentAttemptsFromOlderCandidatePayloads]' passed" "$RUNNER_TEMP/r962-swift.log"
+
+          grep -F "testR954ReplaysRetainedAnimationAndTurnHeaderReceipts]' passed" "$RUNNER_TEMP/r962-swift.log"
+          grep -F "testR954StatusOnSelectedOpponentCardRequiresLiteralInItsOwnRegion]' passed" "$RUNNER_TEMP/r962-swift.log"
+
+          grep -F "testR955ReplaysSixOwnSelectionSlotsFromFrame435]' passed" "$RUNNER_TEMP/r962-swift.log"
+
+          grep -F "testR956OwnOnlyCardPublishesExactPairWithNoOpponentOrTurn]' passed" "$RUNNER_TEMP/r962-swift.log"
+
+          grep -F "testR957PCPaintReceiptWritesAndSyncsTheOriginalSourceFrame]' passed" "$RUNNER_TEMP/r962-swift.log"
+          grep -F "testR957PCAcknowledgementSurvivesNewerReadAndIsAttributedOnce]' passed" "$RUNNER_TEMP/r962-swift.log"
+
+          grep -F "testR962RetainsLiteralCommandMoveSlotsFromR961]' passed" "$RUNNER_TEMP/r962-swift.log"
+          grep -F "testR960ReplaysLiteralSendOutAndOpponentMoveFromR959]' passed" "$RUNNER_TEMP/r962-swift.log"
+      - name: Build the iPhone app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -project pinned-r793/source/app/ios/ChampionsOnDeviceResearch.xcodeproj -scheme ChampionsOnDeviceResearch -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r962_device" build > "$RUNNER_TEMP/native.log" 2>&1 || { grep -E -B2 -A2 'error:|BUILD FAILED' "$RUNNER_TEMP/native.log"; exit 1; }
+          grep -F 'BUILD SUCCEEDED' "$RUNNER_TEMP/native.log"
+          app="$RUNNER_TEMP/r962_device/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app"
+          test "$(lipo -archs "$app/ChampionsOnDeviceResearch")" = arm64
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")" = 962
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Info.plist")" = 0.9.62
+          echo R962_IPHONEOS_SOURCE_BUILDS
+      - name: Verify and package the unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$PWD/R962Delivery"
+          app="$RUNNER_TEMP/r962_device/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app"
+          mkdir -p "$out/Payload"
+          cp -R "$app" "$out/Payload/"
+          cp pinned-r793/source/tools/restore_capture.py "$out/restore_capture.py"
+          cd "$out"
+          zip -jq R962_PC_Capture_Tools.zip restore_capture.py "$GITHUB_WORKSPACE"/pinned-r793/source/tools/{verify_collection,r810_evidence_export_audit,r875_native_capture_audit}.py "$GITHUB_WORKSPACE"/pinned-r793/source/tools/R962_DEVICE_TEST.md
+          mkdir pc-check
+          unzip -q R962_PC_Capture_Tools.zip -d pc-check
+          PYTHONDONTWRITEBYTECODE=1 python3 pc-check/verify_collection.py --help
+          PYTHONDONTWRITEBYTECODE=1 python3 pc-check/restore_capture.py --help
+          rm -rf pc-check
+          zip -qry R962_Unsigned_DeviceTest.ipa Payload
+          python3 - <<'IPA'
+          import os,zipfile,hashlib,plistlib,subprocess,struct,json
+          from pathlib import Path
+          ipa=Path("R962_Unsigned_DeviceTest.ipa")
+          app=Path("Payload/ChampionsOnDeviceResearch.app")
+          with zipfile.ZipFile(ipa) as z:
+              assert z.testzip() is None
+              assert {i.filename for i in z.infolist() if not i.is_dir()}=={p.as_posix() for p in app.rglob('*') if p.is_file()}
+              assert all(z.read(str(p))==p.read_bytes() for p in app.rglob('*') if p.is_file())
+              info=plistlib.loads(z.read(str(app/'Info.plist')))
+          assert (info['CFBundleShortVersionString'],info['CFBundleVersion'],info['MinimumOSVersion'],info['DTPlatformName'])==('0.9.62','962','27.0','iphoneos')
+          assert info['CFBundleIdentifier']=='com.zeek10191019.championsresearch' and info['NSLocalNetworkUsageDescription'] and 'screen-capture' in info['UIBackgroundModes']
+          binaries=[app/info['CFBundleExecutable'],*app.glob('*.dylib')]
+          for binary in binaries:
+              data=binary.read_bytes();magic,cpu,sub,kind,ncmds,cmdbytes,*_=struct.unpack_from('<8I',data)
+              assert magic==0xfeedfacf and cpu==0x0100000c and kind in (2,6)
+              assert subprocess.check_output(['lipo','-archs',str(binary)],text=True).strip()=='arm64'
+              offset=32;platform=[]
+              for _ in range(ncmds):
+                  c,n=struct.unpack_from('<II',data,offset);assert n>=8 and offset+n<=len(data) and c!=29
+                  if c==50:platform.append(struct.unpack_from('<I',data,offset+8)[0])
+                  offset+=n
+              assert offset==32+cmdbytes and platform==[2]
+          sha=hashlib.sha256(ipa.read_bytes()).hexdigest()
+          doc=dict(version='0.9.62',build=962,ipa_bytes=ipa.stat().st_size,ipa_sha256=sha,source_tree_sha256='fc9f47aa10835027f07360e4fc4d562c5df81a0b30ba51549b548926d0c76e8d',source_commit=os.environ['GITHUB_SHA'],device_certified_fields=0,iphone16plus_save='UNKNOWN',ci_run=os.environ['GITHUB_RUN_ID'])
+          Path('VERIFICATION_R962.json').write_text(json.dumps(doc,indent=2)+'\n');print('R962_IPA_VERIFIED',json.dumps(doc))
+          IPA
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r962-ipa
+          path: R962Delivery/*
+          if-no-files-found: error
+          retention-days: 2
+  vision:
+    name: Run Apple Vision on retained phone images
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r962.yml
+      - name: Restore the same source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show 98671a4449a7686f47afeb8c1088d10c111f0300:.github/workflows/r961.yml > "$RUNNER_TEMP/r961.yml"
+          ruby -ryaml -e 'puts YAML.load_file(ARGV[0], aliases: true).fetch("jobs").fetch("verify").fetch("steps").fetch(1).fetch("run")' "$RUNNER_TEMP/r961.yml" > "$RUNNER_TEMP/r961-restore.sh"
+          bash "$RUNNER_TEMP/r961-restore.sh"
+          python3 - <<'PATCH'
+          from pathlib import Path
+          import base64,lzma
+          payload="""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"""
+          raw=base64.b64decode(''.join(payload.split()),validate=True)
+          Path('R834Proof/r962.patch').write_bytes(lzma.decompress(raw))
+          PATCH
+          patch -s -t -p1 -F 0 -d pinned-r793/source -i "$PWD/R834Proof/r962.patch"
+          python3 pinned-r793/source/tools/generate_xcode_project.py
+          python3 - <<'VERIFY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('pinned-r793/source')
+          ignore={'.build','.swiftpm','__pycache__'}
+          files={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                 for p in root.rglob('*') if p.is_file() and not set(p.relative_to(root).parts)&ignore}
+          assert {k:v for k,v in files.items() if k!='source_manifest.json'}==json.loads((root/'source_manifest.json').read_text())
+          digest=hashlib.sha256(''.join(k+'\t'+files[k]+'\n' for k in sorted(files)).encode()).hexdigest()
+          assert len(files)==703 and digest=='fc9f47aa10835027f07360e4fc4d562c5df81a0b30ba51549b548926d0c76e8d',(len(files),digest)
+          print('R962_SOURCE_VERIFIED',len(files),digest)
+          VERIFY
+      - name: Replay real status, inspection and animation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -d /Applications/Xcode_26.3.app/Contents/Developer ]]; then
+            export DEVELOPER_DIR=/Applications/Xcode_26.3.app/Contents/Developer
+          fi
+          xcodebuild -version
+          cd pinned-r793/source
+          source_package="$PWD/R720_PORTABLE_TESTS"
+          focused="$RUNNER_TEMP/r962-vision/R720_PORTABLE_TESTS"
+          mkdir -p "$focused/Tests/R719CoreTests" "$RUNNER_TEMP/r962-vision/tests"
+          cp "$source_package/Package.swift" "$focused/"
+          cp -R "$source_package/Sources" "$focused/"
+          cp -R tests/fixtures "$RUNNER_TEMP/r962-vision/tests/"
+          for name in R893BattleStatusPanelTests R883InspectionPanelTests R761RealImageRegressionTests R858NumericHUDOCRTests R855FastLosslessPNGTests; do
+            cp "$source_package/Tests/R719CoreTests/$name.swift" "$focused/Tests/R719CoreTests/"
+          done
+          swift test -c release --jobs 4 --package-path "$focused" --filter 'testPhoneStatusFromActualSelectedScreenshotRegions|testRetainedBuild715InspectionAndNonSelectedTransition|testSelectedMovePPStillRecordedWhenNameIsUnreadable|testUnknownSelectedSpeciesKeepsHPAndPPWithoutActiveIdentity|testSelectedCardKeepsExactItemWhenOtherFieldsAreUnread|testSelectedPPFractionNeedsDistinctMatchingContrastReadsAndExistingDigits|testAlternateLiteralRequiresExactSameSlotAndValidPP|testScaledAndRotatedInspectionKeepAllSelectedNumbersBoundToSource|testActualAppleVisionReadsOpponentSandStreamFromRetainedCapture|testActualAppleVisionKnockOffOwnItemHistoryNeedsMatchingOwnCard|testR955RetryTimeoutPreservesFrame3402FirstPassOnly|testR961PreservesConfirmedOwnPairsAndLimitsOptionalRetryOnR959Frames|testFallbackDoesNotSilentlyReplaceADifferentHPReading|R855FastLosslessPNGTests|testR956ActualSelectionAndDualHUDStayOutOfSingleCardRoute' 2>&1 | tee "$RUNNER_TEMP/r962-vision.log"
+
+
+          grep -F "testPhoneStatusFromActualSelectedScreenshotRegions]' passed" "$RUNNER_TEMP/r962-vision.log"
+          grep -F "testRetainedBuild715InspectionAndNonSelectedTransition]' passed" "$RUNNER_TEMP/r962-vision.log"
+          grep -F "testSelectedMovePPStillRecordedWhenNameIsUnreadable]' passed" "$RUNNER_TEMP/r962-vision.log"
+          grep -F "testUnknownSelectedSpeciesKeepsHPAndPPWithoutActiveIdentity]' passed" "$RUNNER_TEMP/r962-vision.log"
+          grep -F "testAlternateLiteralRequiresExactSameSlotAndValidPP]' passed" "$RUNNER_TEMP/r962-vision.log"
+          grep -F "testScaledAndRotatedInspectionKeepAllSelectedNumbersBoundToSource]' passed" "$RUNNER_TEMP/r962-vision.log"
+          grep -F "testActualAppleVisionReadsOpponentSandStreamFromRetainedCapture]' passed" "$RUNNER_TEMP/r962-vision.log"
+          grep -F "testActualAppleVisionKnockOffOwnItemHistoryNeedsMatchingOwnCard]' passed" "$RUNNER_TEMP/r962-vision.log"
+
+          grep -F "testSelectedCardKeepsExactItemWhenOtherFieldsAreUnread]' passed" "$RUNNER_TEMP/r962-vision.log"
+
+          grep -F "testSelectedPPFractionNeedsDistinctMatchingContrastReadsAndExistingDigits]' passed" "$RUNNER_TEMP/r962-vision.log"
+
+          grep -F "testR955RetryTimeoutPreservesFrame3402FirstPassOnly]' passed" "$RUNNER_TEMP/r962-vision.log"
+          grep -F 'R855_FAST_PNG_ICC_ALPHA_STRIDE_IMAGEIO_READBACK_PASS' "$RUNNER_TEMP/r962-vision.log"
+
+          grep -F "testR956ActualSelectionAndDualHUDStayOutOfSingleCardRoute]' passed" "$RUNNER_TEMP/r962-vision.log"
+
+          grep -F "testR961PreservesConfirmedOwnPairsAndLimitsOptionalRetryOnR959Frames]' passed" "$RUNNER_TEMP/r962-vision.log"
+  publish:
+    name: Publish and verify the tested IPA
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    needs: [verify, vision]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: r962-ipa
+          path: R962Delivery
+      - name: Publish and verify the download
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd R962Delivery
+          python3 - <<'VERIFY'
+          import hashlib,json,os
+          from pathlib import Path
+          p=Path('R962_Unsigned_DeviceTest.ipa')
+          r=json.loads(Path('VERIFICATION_R962.json').read_text())
+          assert r['source_commit']==os.environ['GITHUB_SHA'] and r['build']==962
+          assert r['ipa_bytes']==p.stat().st_size
+          assert r['ipa_sha256']==hashlib.sha256(p.read_bytes()).hexdigest()
+          VERIFY
+          tag=r962-final-device-test
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft > existing.json 2>/dev/null; then
+            test "$(jq -r .isDraft existing.json)" = true
+            gh release upload "$tag" R962_Unsigned_DeviceTest.ipa VERIFICATION_R962.json restore_capture.py R962_PC_Capture_Tools.zip --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" R962_Unsigned_DeviceTest.ipa VERIFICATION_R962.json restore_capture.py R962_PC_Capture_Tools.zip --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease --title 'R962 iPhone 実機テスト 0.9.62' --notes '行動選択画面の技名・縦並びPPを同一画像の証跡として保存。読取途中の技・PP・能力ランクは部分として記録。'
+          fi
+          mkdir readback
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*.ipa' --dir readback
+          cmp R962_Unsigned_DeviceTest.ipa readback/R962_Unsigned_DeviceTest.ipa
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$tag/R962_Unsigned_DeviceTest.ipa"
+          curl --fail -sSL --retry 4 --retry-all-errors "$url" -o readback/published.ipa
+          cmp R962_Unsigned_DeviceTest.ipa readback/published.ipa
+          echo "R962_PUBLIC_READBACK_VERIFIED $url"
+
+          curl --fail -sSL --retry 4 --retry-all-errors "${url%/*}/restore_capture.py" -o readback/restore_capture.py
+          cmp restore_capture.py readback/restore_capture.py
+
+          curl --fail -sSL --retry 4 --retry-all-errors "${url%/*}/R962_PC_Capture_Tools.zip" -o readback/R962_PC_Capture_Tools.zip
+          cmp R962_PC_Capture_Tools.zip readback/R962_PC_Capture_Tools.zip
