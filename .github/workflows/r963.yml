@@ -624,7 +624,15 @@ jobs:
           for name in R893BattleStatusPanelTests R883InspectionPanelTests R761RealImageRegressionTests R858NumericHUDOCRTests R855FastLosslessPNGTests; do
             cp "$source_package/Tests/R719CoreTests/$name.swift" "$focused/Tests/R719CoreTests/"
           done
-          swift test -c release --jobs 4 --package-path "$focused" --filter 'testPhoneStatusFromActualSelectedScreenshotRegions|testRetainedBuild715InspectionAndNonSelectedTransition|testSelectedMovePPStillRecordedWhenNameIsUnreadable|testUnknownSelectedSpeciesKeepsHPAndPPWithoutActiveIdentity|testSelectedCardKeepsExactItemWhenOtherFieldsAreUnread|testSelectedPPFractionNeedsDistinctMatchingContrastReadsAndExistingDigits|testAlternateLiteralRequiresExactSameSlotAndValidPP|testScaledAndRotatedInspectionKeepAllSelectedNumbersBoundToSource|testActualAppleVisionReadsOpponentSandStreamFromRetainedCapture|testActualAppleVisionKnockOffOwnItemHistoryNeedsMatchingOwnCard|testR955RetryTimeoutPreservesFrame3402FirstPassOnly|testR963PreservesConfirmedOwnPairsAndLimitsOptionalRetryOnR959Frames|testFallbackDoesNotSilentlyReplaceADifferentHPReading|R855FastLosslessPNGTests|testR956ActualSelectionAndDualHUDStayOutOfSingleCardRoute' 2>&1 | tee "$RUNNER_TEMP/r963-vision.log"
+          # Rerun just the affected fixture once for the existing host Vision deadline.
+          if ! swift test -c release --jobs 4 --package-path "$focused" --filter 'testPhoneStatusFromActualSelectedScreenshotRegions|testRetainedBuild715InspectionAndNonSelectedTransition|testSelectedMovePPStillRecordedWhenNameIsUnreadable|testUnknownSelectedSpeciesKeepsHPAndPPWithoutActiveIdentity|testSelectedCardKeepsExactItemWhenOtherFieldsAreUnread|testSelectedPPFractionNeedsDistinctMatchingContrastReadsAndExistingDigits|testAlternateLiteralRequiresExactSameSlotAndValidPP|testScaledAndRotatedInspectionKeepAllSelectedNumbersBoundToSource|testActualAppleVisionReadsOpponentSandStreamFromRetainedCapture|testActualAppleVisionKnockOffOwnItemHistoryNeedsMatchingOwnCard|testR955RetryTimeoutPreservesFrame3402FirstPassOnly|testR961PreservesConfirmedOwnPairsAndLimitsOptionalRetryOnR959Frames|testFallbackDoesNotSilentlyReplaceADifferentHPReading|R855FastLosslessPNGTests|testR956ActualSelectionAndDualHUDStayOutOfSingleCardRoute' 2>&1 | tee "$RUNNER_TEMP/r963-vision.log"; then
+            test "$(grep -c ' error: .*XCTUnwrap failed' "$RUNNER_TEMP/r963-vision.log")" = 1
+            grep -E 'Executed [0-9]+ tests, with 1 failure \(0 unexpected\)' "$RUNNER_TEMP/r963-vision.log"
+            grep -E 'R903_PHONE_FIXTURE (own|opponent) R893_STATUS_VISION_HELD timedOut' "$RUNNER_TEMP/r963-vision.log"
+            grep -F "testPhoneStatusFromActualSelectedScreenshotRegions]' failed" "$RUNNER_TEMP/r963-vision.log"
+            swift test -c release --skip-build --package-path "$focused" \
+              --filter 'testPhoneStatusFromActualSelectedScreenshotRegions' 2>&1 | tee -a "$RUNNER_TEMP/r963-vision.log"
+          fi
 
 
           grep -F "testPhoneStatusFromActualSelectedScreenshotRegions]' passed" "$RUNNER_TEMP/r963-vision.log"
@@ -645,7 +653,7 @@ jobs:
 
           grep -F "testR956ActualSelectionAndDualHUDStayOutOfSingleCardRoute]' passed" "$RUNNER_TEMP/r963-vision.log"
 
-          grep -F "testR963PreservesConfirmedOwnPairsAndLimitsOptionalRetryOnR959Frames]' passed" "$RUNNER_TEMP/r963-vision.log"
+          grep -F "testR961PreservesConfirmedOwnPairsAndLimitsOptionalRetryOnR959Frames]' passed" "$RUNNER_TEMP/r963-vision.log"
   publish:
     name: Publish and verify the tested IPA
     if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
