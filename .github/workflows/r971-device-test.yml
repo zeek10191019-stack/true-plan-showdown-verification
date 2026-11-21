@@ -1,0 +1,217 @@
+name: R971 Package verified unsigned iPhone device test
+on:
+  push:
+    branches: [r938-export-recovery]
+    paths: [.github/workflows/r971-device-test.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: r971-device-release
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r938-export-recovery'
+    runs-on: xcode-27
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r971-device-test.yml
+      - name: Require the successful R971 source and Apple Vision run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          source_commit=7b9aeb4f8d2947b02687854a1f2c95c4e18edd34
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/44943305231" > "$RUNNER_TEMP/r971-run.json"
+          jq -e --arg commit "$source_commit" '
+            .head_sha == $commit and .conclusion == "success" and
+            .path == ".github/workflows/r971.yml" and .head_branch == "r938-export-recovery"
+          ' "$RUNNER_TEMP/r971-run.json"
+          git show "$source_commit:.github/workflows/r971.yml" > "$RUNNER_TEMP/r971.yml"
+          echo '9bfd359ea515f136d07145dc8d909d76cb6666c58960acb7d3439a0573337166  r971.yml' |
+            (cd "$RUNNER_TEMP" && shasum -a 256 -c -)
+      - name: Restore the exact previously tested iPhone source and rebuild arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e '
+            steps = YAML.load_file(ARGV.fetch(0), aliases: true).fetch("jobs").fetch("verify").fetch("steps")
+            ARGV.drop(1).each { |name| puts steps.find { |step| step["name"] == name }.fetch("run") }
+          ' "$RUNNER_TEMP/r971.yml" 'Restore pinned R966 and apply R967 through R971 patches' 'Build arm64 without signing or packaging' > "$RUNNER_TEMP/rebuild-r971.sh"
+          bash "$RUNNER_TEMP/rebuild-r971.sh"
+      - name: Verify duplicate filenames and prepare PC capture tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          pc="$RUNNER_TEMP/r971-pc"
+          mkdir -p "$pc/tools/tests" R971Delivery
+          cp pinned-r793/source/tools/{restore_capture,verify_collection,r810_evidence_export_audit,r875_native_capture_audit}.py "$pc/tools/"
+          cp pinned-r793/source/tools/tests/test_r875_native_capture_audit.py "$pc/tools/tests/"
+          python3 - "$pc" <<'PAYLOAD'
+          import base64, hashlib, sys, zlib
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          entries = (
+              ("pc.patch", "ea5ce198a8e618fcadbc6e29e0cebb9fbc2de0d5dd19e605c3471b855dc30eea", """eNqlVsFyozgQvfsrdAMKkI0ndpKpcs1sTe11TnNzvJSMGlu1ssRKIo6n9uNXEuAAYyeZNQeMpO7XrafXLVNWlihNd8wgMjVS
+          cj1VoI1UkBekMrUCXJ3Q9urShAkKL2i5XMyL8hPGjxS22wVF2Wy2vLubpGn6Bu4kjuO3sL9+Ren8IblHsX/bIYUScVkQA3lF
+          lAlLySmoBAlygARp9tO+4aWCwgDN9Z5EnyfIPaxEB2KKPegQXkhhunn3KLDxBPLzzaw2cEAru4BB23Sg8cFuOpqkzoLWFWcu
+          jcaskIeKcQi9Y4xUEH75jL48hetZ+riJn6J/UfMVPeGfrAqiSXwLSNyh+GRLqVBFzB4xgbRUduMtK5gZUJSpMOrv1jJxjovL
+          mnPPS+gQsGMxQkTQM1luuu/d48stTeiv8jH2HJt3rh7uF7kghj2fjzUnNWWmr6kP2rdCy4qyfMwIxrN7Uizp7JLQPorYV99H
+          fZwkFw+PSfYJxf534WRZcKI1+u59vjUufziPHw41rAUzDhm74Tei4VdGrTsctvbw/S4TZLWwZQJoNDTUwEvsbJX585+a8LCz
+          wxaC5tuTDRNGCZKK7ZggfOReMqWNE5uUBk3tz1GvZ5t1QFSxd7t15x9sGoV3T1+k3h8fmdl707AZt3oNwnnU6nIAIM0eVF5I
+          e+Qr5Iq2B+CHnT+a94vj9+Oj+WsG8f/MIMyifm0NiLMce5dzRiMjD9XavIYcGR2VFDubhjsqohQ5vcINzvCS25qDCP1XNJ3O
+          N+ivFcou5XlUtvJboMZ8yMc7NGZnEm5EOh/HJRx08ZBzWZuq7mk0KJU8pFQeBZeEAk0tpwy0x32nNroLRVts01VyV2DjiNE6
+          sNfFfLEMNl35+PvjnRhjmKt16PrGMrtLHlC8zJaufdzeNhzvrg3b9h08g2LlySqOc3v5MSlw3k45ptzVSCGHsrSLK59jw8o5
+          wRH0aLM/VA1hi+cdOxqZKHhtkSk8swJyl+7KGTs6fQBXFDpnwsDOauDUJMWABpuLJVYLzsTfYXSlB3Xl5Y2v9pnOysUeCdZO
+          gbCGGnQuBT/9RlMb4Ij6sLXRWogbuprNteKk8E6DzK72sG53vRRGthcqYXy/fJcCoqHQ3+RpRPw1LobMj+44X420V9rd1IVi
+          rpTc2WVtrdebW+q8izH8W7h63XhyjrXqPjCpKhA0Sib/AR+VfzU="""),
+              ("R971_DEVICE_TEST.md", "e370905e73dca9b731a18c19b34cbccca10b65fa9ebb8e54320adc2e0167f7e4", """eNqFVEtPG1cU3s+vuHI36cKTQFARy4pQyVLUWpA+1I1NzNBMRbA1DFHpau6d2NjYTtwSHgEntqnxA8M4oS11bOL8mOM7nln1
+          L/TcGeOgNFV3d86c853vfOfxCZmfmZ4gavhBfFXhVslulpxmzW1sSxKY22C2wMwAbXtef1+mb8kzsnhkwKB2teg0Lnm777yu
+          CJdF7eFnUyOkrxbI5LR8iwx6x+7zPNA60OdgMCkU/hxd7eLJ8O05L7z/EZ4FmgWWsfeO+Nk+UGv03+zxV0948tjOZN1yCt19
+          csMWYrSAtvAXsBzQGtCnQMtAd4A+Fonc3PnwWQ+B7KIx/JOBuQPmKZiXYJaR+uDdC5EG0VN5nnxtF0U94Vmn0hhWuxjk0iTv
+          XaBtesYtJ4eHFtpG4pzksWisgaePXeOZMHZOge4B7Y9KlCZk4tIO3+wiAffFkV/YFZ89IdyWgQ721kugDX75F09fDLrVQe83
+          YL/yQguYgZra6Rp+jngiMMsitg8y6JyJygtY9v63avALFcmhfuYumE1gGHYx0vLJ8fDiYBwsTcqE06J9duTRrfnY3MoNuimR
+          uZ8EWkU/3z7oGE6t7gPxdIpnzoFVwfwdzE0wTWBtYG+QvkCnbzz9re9DYYHzdJf398ZZkay9e+ZlLPHyH7yQRu0+kgL70K2N
+          WjFmfBsZe2Ve9WtTdJC9wzTAGNAUQlwLE9ryJCawRLtZxWPcEjJ2tuzDDtC8x+MERwS75/k0vQk3UM8PpJamZBLe0HGWyW15
+          5mqMGyS6vPwwofwQJTfFM6HF7ytRIjJShoFijOv2aUXoYJWcSu49nhSNRnXlJ11K+KiasqbHNSUSW0zo65oiJzZIYFnV1vSb
+          89MTU5GF8N3QvUjoyztz38k/rsVXAyQw8gxquIryz2oicAX1SNHU5Y1ILL6yosR0Nb76/2DB4JLySI0pQR1pBO+vqytLRNyB
+          YBB5PVjUlCUSWFNi8dWl/0aIr+uJdZ0ExGmI3Jn7JjQ7F5mfW/j67j3fRVQsSf7wiNmg7Y+OkN/hD7oxfGt57RotlRdukeiN
+          iU9RbfaYRMnkjUnxxmHq7YudpyXPuy8aUM96FnwfAtvG+H8n9o6PWCK7Ls4N7gp/1Xf6uJK5MeB4XnGugGH4Sw8kIwKtkntw
+          KK5CIc8zeey3ndvk1sH1S+A0ujj6HnU8TL8IZx8QpzS7418nXD+ebNgGrkHbae4M+hXvJOavk5f+AZNaSd0="""),
+          )
+          for name, expected, data in entries:
+              content = zlib.decompress(base64.b64decode("".join(data.split()), validate=True))
+              assert hashlib.sha256(content).hexdigest() == expected
+              (root / name).write_bytes(content)
+          PAYLOAD
+          patch -s -p1 -F 0 -d "$pc" < "$pc/pc.patch"
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$pc/tools/tests" -p test_r875_native_capture_audit.py
+          cp "$pc/tools/restore_capture.py" R971Delivery/restore_capture.py
+          zip -jq R971Delivery/R971_PC_Capture_Tools.zip "$pc/tools/"*.py "$pc/R971_DEVICE_TEST.md"
+          unzip -tq R971Delivery/R971_PC_Capture_Tools.zip
+      - name: Package the unsigned IPA and inspect the exact embedded files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/r971-ipa/Payload"
+          cp -R "$RUNNER_TEMP/r971_device/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app" "$RUNNER_TEMP/r971-ipa/Payload/"
+          cd "$RUNNER_TEMP/r971-ipa"
+          zip -qry "$GITHUB_WORKSPACE/R971Delivery/R971_Unsigned_DeviceTest.ipa" Payload
+          python3 - <<'IPA'
+          import hashlib, json, os, plistlib, struct, subprocess, zipfile
+          from pathlib import Path
+
+          app = Path("Payload/ChampionsOnDeviceResearch.app")
+          out = Path(os.environ["GITHUB_WORKSPACE"]) / "R971Delivery"
+          ipa = out / "R971_Unsigned_DeviceTest.ipa"
+          with zipfile.ZipFile(ipa) as archive:
+              assert archive.testzip() is None
+              names = [entry.filename for entry in archive.infolist() if not entry.is_dir()]
+              expected = {path.as_posix(): path for path in app.rglob("*") if path.is_file()}
+              assert len(names) == len(set(names)) and set(names) == set(expected)
+              assert all(archive.read(name) == path.read_bytes() for name, path in expected.items())
+              info = plistlib.loads(archive.read((app / "Info.plist").as_posix()))
+          assert (info["CFBundleShortVersionString"], info["CFBundleVersion"],
+                  info["MinimumOSVersion"], info["DTPlatformName"]) == ("0.9.71", "971", "27.0", "iphoneos")
+          assert info["CFBundleIdentifier"] == "com.zeek10191019.championsresearch"
+          assert info["NSLocalNetworkUsageDescription"] and "screen-capture" in info["UIBackgroundModes"]
+          for binary in [app / info["CFBundleExecutable"], *app.glob("*.dylib")]:
+              data = binary.read_bytes()
+              magic, cpu, subtype, kind, commands, command_bytes, *_ = struct.unpack_from("<8I", data)
+              assert magic == 0xfeedfacf and cpu == 0x0100000c and kind in (2, 6)
+              assert subprocess.check_output(["lipo", "-archs", str(binary)], text=True).strip() == "arm64"
+              offset, platforms = 32, []
+              for _ in range(commands):
+                  cmd, size = struct.unpack_from("<II", data, offset)
+                  assert size >= 8 and offset + size <= len(data) and cmd != 29
+                  if cmd == 50:
+                      platforms.append(struct.unpack_from("<I", data, offset + 8)[0])
+                  offset += size
+              assert offset == 32 + command_bytes and platforms == [2]
+          assets = {
+              file.name: {"bytes": file.stat().st_size, "sha256": hashlib.sha256(file.read_bytes()).hexdigest()}
+              for file in (ipa, out / "R971_PC_Capture_Tools.zip", out / "restore_capture.py")
+          }
+          report = {
+              "build": 971, "version": "0.9.71", "signed": False, "assets": assets,
+              "source_tree_sha256": "8364d6f9c13445f1ddd9a41e0a8d076be7755f05620b9e1bc1c5fd2171aaedaf",
+              "source_workflow_commit": "7b9aeb4f8d2947b02687854a1f2c95c4e18edd34",
+              "passed_source_run": 44943305231, "packaging_run": int(os.environ["GITHUB_RUN_ID"]),
+              "packaging_commit": os.environ["GITHUB_SHA"],
+              "device_certified_fields": 0, "r971_physical_end_to_end_status": "UNVERIFIED",
+          }
+          (out / "VERIFICATION_R971.json").write_text(json.dumps(report, indent=2) + "\n")
+          print("R971_IPA_VERIFIED", json.dumps(report))
+          IPA
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r971-device-test
+          path: R971Delivery/*
+          if-no-files-found: error
+          retention-days: 2
+  publish:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r938-export-recovery'
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: r971-device-test
+          path: R971Delivery
+      - name: Publish a prerequisite-checked test release and verify all public downloads
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd R971Delivery
+          python3 - <<'VERIFY'
+          import hashlib, json, os
+          from pathlib import Path
+
+          report = json.loads(Path("VERIFICATION_R971.json").read_text())
+          assert report["build"] == 971 and report["signed"] is False
+          assert report["packaging_commit"] == os.environ["GITHUB_SHA"]
+          assert report["packaging_run"] == int(os.environ["GITHUB_RUN_ID"])
+          names = {"R971_Unsigned_DeviceTest.ipa", "R971_PC_Capture_Tools.zip", "restore_capture.py"}
+          assert set(report["assets"]) == names
+          for name, expected in report["assets"].items():
+              payload = Path(name).read_bytes()
+              assert len(payload) == expected["bytes"]
+              assert hashlib.sha256(payload).hexdigest() == expected["sha256"]
+          VERIFY
+          tag=r971-unsigned-device-test
+          assets=(R971_Unsigned_DeviceTest.ipa R971_PC_Capture_Tools.zip restore_capture.py VERIFICATION_R971.json)
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish > "$RUNNER_TEMP/release.json" 2>/dev/null; then
+            jq -e --arg commit "$GITHUB_SHA" '.isDraft and .targetCommitish == $commit' "$RUNNER_TEMP/release.json"
+            gh release upload "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
+              --title 'R971 iPhone実機試験 0.9.71' \
+              --notes '未署名IPA。回帰検証済みのR971。実機での録画保存・再共有、PC表示と79項目の認証は未完了。'
+          fi
+          mkdir draft-readback public-readback
+          for asset in "${assets[@]}"; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir draft-readback
+            cmp "$asset" "draft-readback/$asset"
+          done
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          for asset in "${assets[@]}"; do
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$tag/$asset"
+            curl --fail -sSL --retry 4 --retry-all-errors "$url" -o "public-readback/$asset"
+            cmp "$asset" "public-readback/$asset"
+            printf 'R971_PUBLIC_READBACK_VERIFIED %s\n' "$url"
+          done
