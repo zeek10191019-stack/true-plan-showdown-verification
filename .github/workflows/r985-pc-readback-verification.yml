@@ -10,14 +10,10 @@ concurrency:
   group: r985-pc-readback
   cancel-in-progress: true
 jobs:
-  readback:
-    name: Readback regression on ${{ matrix.os }}
+  readback_linux:
+    name: Readback regression on Ubuntu
     if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r975-device-regression'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, windows-2022]
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       PYTHONDONTWRITEBYTECODE: '1'
@@ -870,10 +866,21 @@ jobs:
           UNPACK
       - name: Reproduce six defects in R984 and run the full PC regression set
         shell: bash
-        run: |
+        run: &pc_regression |
           set -euo pipefail
           python - <<'REPLAY'
-          import re, subprocess, sys
+          import hashlib, re, subprocess, sys
+          from pathlib import Path
+          from zipfile import ZipFile
+          root = Path('r985-probe')
+          package = root / 'R985_PC_Readback_Tools.zip'
+          assert hashlib.sha256(package.read_bytes()).hexdigest() == '1349829a8f26eb75f279addbee17be013b194d851acdc58f951e0b5790d69831'
+          with ZipFile(package) as archive:
+              assert archive.testzip() is None
+              assert all(archive.read(name) == (root / 'candidate/tools' / name).read_bytes()
+                         for name in archive.namelist())
+          for name, expected in {'restore_capture.py': '43dfd8c1112ec95a12dc8ddb8f4e792c7de05e657cb4e1e6ce6d4dd9daae6752', 'verify_collection.py': 'f0b124aafca777733296740eb74586b0529ae461906b094a4b04998484eaf916', 'r810_evidence_export_audit.py': '190d7ef6c7bd55ace60f8ae5ec484bd25f9cfc302ac0d9bdae62d826cbe7d36d', 'r875_native_capture_audit.py': 'f8171fcce34d6fdc96ef2c3f7cbead2eca5aeb2db47581f90057be849da13966'}.items():
+              assert hashlib.sha256((root / 'baseline/tools' / name).read_bytes()).hexdigest() == expected
           baseline = subprocess.run([
               sys.executable, 'r985-probe/baseline/tools/tests/test_r985_pc_readback.py', '-v',
           ], encoding='utf-8', capture_output=True)
@@ -895,16 +902,34 @@ jobs:
           print('R985_PC_READBACK_REGRESSIONS_PASS_34')
           REPLAY
       - uses: actions/upload-artifact@v4
-        if: runner.os == 'Linux'
         with:
           name: r985-verified-pc-tools
-          path: r985-probe/R985_PC_Readback_Tools.zip
+          path: r985-probe
           if-no-files-found: error
           retention-days: 2
+  readback_windows:
+    name: Readback regression on Windows
+    needs: readback_linux
+    runs-on: windows-2022
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: r985-verified-pc-tools
+          path: r985-probe
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reproduce six defects in R984 and run the full PC regression set
+        shell: bash
+        run: *pc_regression
   publish:
     name: Publish and verify the PC package
     if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r975-device-regression'
-    needs: readback
+    needs: [readback_linux, readback_windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
