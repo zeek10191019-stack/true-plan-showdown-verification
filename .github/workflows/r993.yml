@@ -265,7 +265,7 @@ jobs:
       contents: write
     env:
       PYTHONDONTWRITEBYTECODE: '1'
-      RELEASE_TAG: r993-unsigned-device-test
+      RELEASE_TAG: r993-verified-device-test
       GH_TOKEN: ${{ github.token }}
     steps:
     - uses: actions/checkout@v4
@@ -508,11 +508,14 @@ jobs:
           extract verify "$check"
           bash "$RUNNER_TEMP/r993-check.sh"
         done
-        swift test --package-path pinned-r793/source/R720_PORTABLE_TESTS \
-          --scratch-path "$RUNNER_TEMP/r993-readout-tests" --jobs 2 \
+        test_file=Tests/R719CoreTests/R991NameIndependentReadoutTests.swift
+        focused="$RUNNER_TEMP/r966-test/R720_PORTABLE_TESTS"
+        cp "pinned-r793/source/R720_PORTABLE_TESTS/$test_file" "$focused/$test_file"
+        swift test --package-path "$focused" --jobs 2 \
           --filter R991NameIndependentReadoutTests 2>&1 | tee "$RUNNER_TEMP/r993-readout.log"
-        grep -F "testNextCommandDropsPreviousHPAndResumesWithKnownRosterSlot]' passed" "$RUNNER_TEMP/r993-readout.log"
-        grep -F "testAmbiguousOwnSlotIsNotGuessedAndSwitchDropsFormerHP]' passed" "$RUNNER_TEMP/r993-readout.log"
+        grep -Eq 'Executed 7 tests, with 0 failures' "$RUNNER_TEMP/r993-readout.log"
+        grep -E 'Test Case .*testNextCommandDropsPreviousHPAndResumesWithKnownRosterSlot.*passed' "$RUNNER_TEMP/r993-readout.log"
+        grep -E 'Test Case .*testAmbiguousOwnSlotIsNotGuessedAndSwitchDropsFormerHP.*passed' "$RUNNER_TEMP/r993-readout.log"
     - name: Build and publish the verified unsigned IPA
       shell: bash
       run: |
@@ -532,16 +535,16 @@ jobs:
         bash "$RUNNER_TEMP/r993-build.sh"
         extract "Validate the IPA"
         python3 - <<'PACKAGE'
-        import os
+        import hashlib, os
         from pathlib import Path
         root = Path(os.environ["RUNNER_TEMP"])
         text = (root / "r993-old-step").read_text()
-        old = ("a8a6ad98f54a2b98a5079657639b7001"
-                    "6558ca763803e24d5d1cbd74a82e70d4")
-        new = ("d186ce6f16796577c44b8a621fc6c7b2"
-                    "3566ed8acf4150b49b7fc810c13ce5ea")
-        assert old in text
-        text = text.replace(old,new)
+        old = "a8a6ad98f54a2b98a5079657639b70016558ca763803e24d5d1cbd74a82e70d4"
+        manifest = Path(os.environ["GITHUB_WORKSPACE"]) / "pinned-r793/source/source_manifest.json"
+        new = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        assert new == "d186ce6f16796577c44b8a621fc6c7bf4091b32b0ed0e0584f3a705f7e404d27", new
+        assert text.count(old) == 1
+        text = text.replace(old, new)
         text = text.replace("R990","R993").replace("r990","r993")
         text = text.replace('"990"','"993"')
         text = text.replace('"build": 990','"build": 993')
