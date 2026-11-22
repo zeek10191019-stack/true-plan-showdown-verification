@@ -1,0 +1,300 @@
+name: R977 retained capture and reshare
+'on':
+  push:
+    branches: [r975-device-regression]
+    paths: [.github/workflows/r977-retained-verification.yml]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: r977-unsigned-device-test
+  cancel-in-progress: false
+jobs:
+  verify:
+    name: Swift, browser, PC and iPhoneOS regression
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r975-device-regression'
+    runs-on: xcode-27
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      RELEASE_TAG: r977-unsigned-device-test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r977-retained-verification.yml
+      - name: Restore verified R976 and apply the R977 corrections
+        shell: bash
+        run: &restore |
+          set -euo pipefail
+          git show 8c7fdddbcd0bc6123a8489abf07de96346bbc4ff:.github/workflows/r976-recovery-verification.yml > "$RUNNER_TEMP/r976-baseline.yml"
+          echo '33b5a496fc0a0a7cdd605e840fd2ca890cbf6fed74e38f04f50115606d8764bb  r976-baseline.yml' | (cd "$RUNNER_TEMP" && shasum -a 256 -c -)
+          ruby -ryaml -e '
+            steps = YAML.load_file(ARGV.fetch(0), aliases: true).fetch("jobs").fetch("verify").fetch("steps")
+            puts steps.find { |step| step["name"] == "Restore verified R975 and apply the R976 corrections" }.fetch("run")
+          ' "$RUNNER_TEMP/r976-baseline.yml" > "$RUNNER_TEMP/r976-restore.sh"
+          bash "$RUNNER_TEMP/r976-restore.sh"
+          python3 - "$RUNNER_TEMP/r977.patch" <<'PAYLOAD'
+          import base64, hashlib, sys, zlib
+          from pathlib import Path
+          encoded = """
+          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
+          """
+          patch = zlib.decompress(base64.b64decode(encoded))
+          assert hashlib.sha256(patch).hexdigest() == '2cd8784f8c8347fcf875e7c0eb4892aef2a0a11eef955b28e9d1c24b13fbd52e'
+          Path(sys.argv[1]).write_bytes(patch)
+          PAYLOAD
+          patch -s -p1 -F 0 -t -d pinned-r793/source < "$RUNNER_TEMP/r977.patch"
+          python3 - <<'MANIFEST'
+          import hashlib, json
+          from pathlib import Path
+          root = Path("pinned-r793/source")
+          manifest = root/"source_manifest.json"
+          files = {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in root.rglob("*") if p.is_file() and p != manifest}
+          data = (json.dumps(files,sort_keys=True,indent=2)+'\n').encode()
+          assert hashlib.sha256(data).hexdigest() == '02c6fa2a33c82e529eb2def4b46d16f898ad832053ff24094a903bda7f0ac559'
+          manifest.write_bytes(data)
+          print("R977_SOURCE_VERIFIED", len(files))
+          MANIFEST
+      - name: Check retained movie and ledger and build arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          src=pinned-r793/source
+          native="$src/app/ios/ChampionsOnDevice"
+          swiftc -parse-as-library "$native/R975FinalMovieSample.swift" "$native/R710EvidenceState.swift" "$native/R733UserControlledCapturePolicy.swift" "$native/R734RecordingFinishPolicy.swift" "$src/tools/tests/r975_movie_sample_check.swift" -o "$RUNNER_TEMP/r975-movie-test"
+          "$RUNNER_TEMP/r975-movie-test" | tee "$RUNNER_TEMP/r977-movie-test.log"
+          grep -F R977_RETAINED_MOVIE_LEDGER_AND_REVISION_CHECK_PASS "$RUNNER_TEMP/r977-movie-test.log"
+          project="$src/app/ios/ChampionsOnDeviceResearch.xcodeproj"
+          xcodebuild -project "$project" -scheme ChampionsOnDeviceResearch -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r977-build" build > "$RUNNER_TEMP/r975-native.log" 2>&1 || { grep -E -B2 -A2 'error:|BUILD FAILED' "$RUNNER_TEMP/r975-native.log"; exit 1; }
+          grep -F 'BUILD SUCCEEDED' "$RUNNER_TEMP/r975-native.log"
+          app="$RUNNER_TEMP/r977-build/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app"
+          test "$(lipo -archs "$app/ChampionsOnDeviceResearch")" = arm64
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")" = 977
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Info.plist")" = 0.9.77
+      - name: Run integrated export, browser, Swift and PC regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e '
+            steps = YAML.load_file(ARGV.fetch(0), aliases: true).fetch("jobs").fetch(ARGV.fetch(1)).fetch("steps")
+            puts steps.find { |step| step["name"] == ARGV.fetch(2) }.fetch("run")
+          ' "$RUNNER_TEMP/r974-device-test.yml" verify 'Run Swift, Python and browser regressions' > "$RUNNER_TEMP/r975-verify.sh"
+          bash "$RUNNER_TEMP/r975-verify.sh"
+          grep -F "testR975RetainsLiteralClockAndHUDWithoutPromotingTheActiveState]' passed" "$RUNNER_TEMP/r966-swift.log"
+      - name: Validate the IPA and stage the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/r977-package"
+          mkdir -p "$work/Payload" "$work/draft-readback"
+          app="$RUNNER_TEMP/r977-build/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app"
+          ditto "$app" "$work/Payload/ChampionsOnDeviceResearch.app"
+          cd "$work"
+          zip -qry R977_Unsigned_DeviceTest.ipa Payload
+          python3 - <<'PY'
+          import hashlib, json, os, plistlib, struct, zipfile
+          from pathlib import Path
+
+          bundle = Path("Payload/ChampionsOnDeviceResearch.app")
+          ipa = Path("R977_Unsigned_DeviceTest.ipa")
+          files = {p.as_posix():p for p in bundle.rglob("*") if p.is_file()}
+          with zipfile.ZipFile(ipa) as archive:
+              assert archive.testzip() is None
+              entries = [item.filename for item in archive.infolist() if not item.is_dir()]
+              assert len(set(entries)) == len(entries) and set(entries) == set(files)
+              assert all(archive.read(name) == files[name].read_bytes() for name in entries)
+              info = plistlib.loads(archive.read((bundle / "Info.plist").as_posix()))
+          assert (info["CFBundleIdentifier"], info["CFBundleVersion"], info["CFBundleShortVersionString"],
+                  info["MinimumOSVersion"], info["DTPlatformName"]) == (
+                  "com.zeek10191019.championsresearch", "977", "0.9.77", "27.0", "iphoneos")
+          assert info["NSLocalNetworkUsageDescription"] and "screen-capture" in info["UIBackgroundModes"]
+          for binary in [bundle / info["CFBundleExecutable"], *bundle.glob("*.dylib")]:
+              data = binary.read_bytes()
+              magic, cpu, _, kind, commands, command_bytes, *_ = struct.unpack_from("<8I", data)
+              assert magic == 0xfeedfacf and cpu == 0x0100000c and kind in (2, 6)
+              offset, platforms = 32, []
+              for _ in range(commands):
+                  command, size = struct.unpack_from("<2I", data, offset)
+                  assert size >= 8 and offset + size <= len(data) and command != 29
+                  if command == 50:
+                      platforms.append(struct.unpack_from("<I", data, offset + 8)[0])
+                  offset += size
+              assert offset == 32 + command_bytes and platforms == [2]
+          report = {
+              "build": 977, "version": "0.9.77", "signed": False, "min_ios": "27.0",
+              "ipa": {"name": ipa.name, "bytes": ipa.stat().st_size,
+                      "sha256": hashlib.sha256(ipa.read_bytes()).hexdigest()},
+              "source_workflow_commit": os.environ["GITHUB_SHA"],
+              "source_manifest_sha256": "02c6fa2a33c82e529eb2def4b46d16f898ad832053ff24094a903bda7f0ac559",
+              "passed_regression_run": int(os.environ["GITHUB_RUN_ID"]),
+              "packaging_workflow_commit": os.environ["GITHUB_SHA"],
+              "packaging_run": int(os.environ["GITHUB_RUN_ID"]),
+              "r977_physical_end_to_end_status": "UNVERIFIED",
+          }
+          Path("VERIFICATION_R977.json").write_text(json.dumps(report, indent=2) + "\n")
+          print("R977_IPA_VERIFIED", json.dumps(report))
+          PY
+          assets=(R977_Unsigned_DeviceTest.ipa VERIFICATION_R977.json)
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish > existing.json 2>/dev/null; then
+            jq -e --arg commit "$GITHUB_SHA" '.isDraft and .targetCommitish == $commit' existing.json
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
+              --title 'R977 iPhone実機試験 0.9.77' \
+              --notes '未署名のiPhoneOS 27.0以降・arm64用IPA。保存済み録画の末尾フレーム補正、再起動時のフレーム台帳照合、補正済み録画からのZIP再生成を検証する試験版。導入前に現在の方法で署名してください。'
+          fi
+          for asset in "${assets[@]}"; do
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir draft-readback
+            cmp "$asset" "draft-readback/$asset"
+          done
+  vision:
+    name: Original-image Apple Vision regression
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r975-device-regression'
+    runs-on: macos-26
+    timeout-minutes: 35
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      RELEASE_TAG: r977-unsigned-device-test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r977-retained-verification.yml
+      - name: Restore verified R976 and apply the R977 corrections
+        shell: bash
+        run: *restore
+      - name: Replay retained Apple Vision fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e '
+            steps = YAML.load_file(ARGV.fetch(0), aliases: true).fetch("jobs").fetch(ARGV.fetch(1)).fetch("steps")
+            puts steps.find { |step| step["name"] == ARGV.fetch(2) }.fetch("run")
+          ' "$RUNNER_TEMP/r974-device-test.yml" vision 'Replay retained Apple Vision images' > "$RUNNER_TEMP/r975-vision.sh"
+          bash "$RUNNER_TEMP/r975-vision.sh"
+  publish:
+    name: Publish only after both checks pass
+    needs: [verify, vision]
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r975-device-regression'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: r977-unsigned-device-test
+    steps:
+      - name: Verify draft assets and publish the unsigned test IPA
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/staged" "$RUNNER_TEMP/public"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish |
+            jq -e --arg commit "$GITHUB_SHA" '.isDraft and .targetCommitish == $commit'
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/staged"
+          python3 - <<'PYTHON'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "staged"
+          report = json.loads((root/"VERIFICATION_R977.json").read_text())
+          assert report["build"] == 977 and report["version"] == "0.9.77" and report["signed"] is False
+          assert report["source_workflow_commit"] == report["packaging_workflow_commit"] == os.environ["GITHUB_SHA"]
+          assert report["passed_regression_run"] == report["packaging_run"] == int(os.environ["GITHUB_RUN_ID"])
+          assert report["source_manifest_sha256"] == "02c6fa2a33c82e529eb2def4b46d16f898ad832053ff24094a903bda7f0ac559"
+          info = report["ipa"]
+          assert info["name"] == "R977_Unsigned_DeviceTest.ipa"
+          ipa = root/info["name"]
+          assert len(ipa.read_bytes()) == info["bytes"]
+          assert hashlib.sha256(ipa.read_bytes()).hexdigest() == info["sha256"]
+          print("R977_IPA_VERIFIED", json.dumps(report))
+          PYTHON
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          for asset in R977_Unsigned_DeviceTest.ipa VERIFICATION_R977.json; do
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$asset"
+            curl --fail -sSL --retry 4 --retry-all-errors "$url" -o "$RUNNER_TEMP/public/$asset"
+            cmp "$RUNNER_TEMP/staged/$asset" "$RUNNER_TEMP/public/$asset"
+            printf 'R977_PUBLIC_READBACK_VERIFIED %s\n' "$url"
+          done
