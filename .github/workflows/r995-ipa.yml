@@ -1,0 +1,155 @@
+name: R995 verified unsigned iPhone IPA
+'on':
+  push:
+    branches:
+      - r987-ocr-pc-regression
+    paths:
+      - .github/workflows/r995-ipa.yml
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+concurrency:
+  group: r995-verified-device-ipa
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r987-ocr-pc-regression'
+    runs-on: xcode-27
+    timeout-minutes: 24
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      GH_TOKEN: ${{ github.token }}
+      VERIFIED_SHA: 5eebfff8d8d43c3cc7432aafbb39dd0724fc3c3c
+      VERIFIED_RUN: '45049580448'
+      VERIFIED_JOB: '137291516691'
+      BUILD_SHA: 736cb296fef2136f41dfcdfd86ddf02005ca5952
+      BUILD_RUN: '45051175868'
+      RELEASE_TAG: r995-verified-device-test
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+        sparse-checkout-cone-mode: false
+        sparse-checkout: .github/workflows/r995-ipa.yml
+    - name: Verify the previous build and rebuild the exact tested source
+      shell: bash
+      run: |
+        set -euo pipefail
+        gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN" |
+          jq -e --arg sha "$BUILD_SHA" --arg id "$BUILD_RUN" '
+            (.id | tostring) == $id and .head_sha == $sha and
+            .path == ".github/workflows/r995-ios27-build.yml" and
+            .head_branch == "r987-ocr-pc-regression" and .conclusion == "success"
+          '
+        prior="$RUNNER_TEMP/r995-ios27-pinned.yml"
+        git show "$BUILD_SHA:.github/workflows/r995-ios27-build.yml" > "$prior"
+        echo '40ca155e2c69f840b2bd2d5078c91928ce2755ac9d2be77897f61d5b146cd9f1  r995-ios27-pinned.yml' |
+          (cd "$RUNNER_TEMP" && shasum -a 256 -c -)
+        for step in \
+          "Confirm Xcode 27 and the completed R995 regression steps" \
+          "Restore the exact source that passed the R995 tests" \
+          "Build the verified R995 iPhoneOS arm64 target"; do
+          ruby -ryaml -e '
+            steps = YAML.load_file(ARGV[0], aliases: true).fetch("jobs").fetch("build").fetch("steps")
+            puts steps.find { |step| step["name"] == ARGV[1] }.fetch("run")
+          ' "$prior" "$step" > "$RUNNER_TEMP/r995-build-step.sh"
+          bash "$RUNNER_TEMP/r995-build-step.sh"
+        done
+    - name: Validate the unsigned IPA and publish the verified download
+      shell: bash
+      run: |
+        set -euo pipefail
+        work="$RUNNER_TEMP/r995-package"
+        app="$RUNNER_TEMP/r994/build/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app"
+        bundle="$work/Payload/ChampionsOnDeviceResearch.app"
+        mkdir -p "$work/Payload" "$work/draft-readback" "$work/public-readback"
+        ditto "$app" "$bundle"
+        cd "$work"
+        /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 995' "$bundle/Info.plist"
+        /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 0.9.95' "$bundle/Info.plist"
+        zip -qry R995_Unsigned_DeviceTest.ipa Payload
+
+        python3 - "$app" <<'PY'
+        import hashlib, json, os, plistlib, struct, sys, zipfile
+        from pathlib import Path
+
+        original = Path(sys.argv[1])
+        bundle = Path("Payload/ChampionsOnDeviceResearch.app")
+        ipa = Path("R995_Unsigned_DeviceTest.ipa")
+        packaged = {p.relative_to(bundle):p for p in bundle.rglob("*") if p.is_file()}
+        built = {p.relative_to(original):p for p in original.rglob("*") if p.is_file()}
+        assert built.keys() == packaged.keys()
+        for name in built:
+            if name != Path("Info.plist"):
+                assert built[name].read_bytes() == packaged[name].read_bytes(), name
+        info = plistlib.loads((bundle / "Info.plist").read_bytes())
+        original_info = plistlib.loads((original / "Info.plist").read_bytes())
+        assert {k for k in info.keys() | original_info.keys() if info.get(k) != original_info.get(k)} == {
+            "CFBundleVersion", "CFBundleShortVersionString"
+        }
+        assert (info["CFBundleIdentifier"], info["CFBundleVersion"], info["CFBundleShortVersionString"],
+                info["MinimumOSVersion"], info["DTPlatformName"]) == (
+                "com.zeek10191019.championsresearch", "995", "0.9.95", "27.0", "iphoneos")
+        assert info["NSLocalNetworkUsageDescription"] and "screen-capture" in info["UIBackgroundModes"]
+        assert not (bundle / "embedded.mobileprovision").exists()
+        assert not (bundle / "_CodeSignature").exists()
+        with zipfile.ZipFile(ipa) as archive:
+            assert archive.testzip() is None
+            names = [entry.filename for entry in archive.infolist() if not entry.is_dir()]
+            files = {p.as_posix():p for p in packaged.values()}
+            assert len(names) == len(set(names)) and set(names) == set(files)
+            assert all(archive.read(name) == files[name].read_bytes() for name in names)
+
+        for binary in [bundle / info["CFBundleExecutable"], *bundle.glob("*.dylib")]:
+            data = binary.read_bytes()
+            magic, cpu, _, kind, commands, command_bytes, *_ = struct.unpack_from("<8I", data)
+            assert magic == 0xfeedfacf and cpu == 0x0100000c and kind in (2, 6), binary
+            offset, platforms = 32, []
+            for _ in range(commands):
+                command, size = struct.unpack_from("<2I", data, offset)
+                assert size >= 8 and offset + size <= len(data) and command != 29, binary
+                if command == 50:
+                    platforms.append(struct.unpack_from("<I", data, offset + 8)[0])
+                offset += size
+            assert offset == 32 + command_bytes and platforms == [2], binary
+
+        sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+        source = Path(os.environ["GITHUB_WORKSPACE"]) / "pinned-r793/source/source_manifest.json"
+        report = {
+            "build": 995, "version": "0.9.95", "signed": False, "min_ios": "27.0",
+            "ipa": {"name": ipa.name, "bytes": ipa.stat().st_size, "sha256": sha(ipa)},
+            "source_workflow_commit": os.environ["VERIFIED_SHA"],
+            "source_manifest_sha256": sha(source),
+            "passed_regression_run": int(os.environ["VERIFIED_RUN"]),
+            "passed_native_build_run": int(os.environ["BUILD_RUN"]),
+            "packaging_workflow_commit": os.environ["GITHUB_SHA"],
+            "packaging_run": int(os.environ["GITHUB_RUN_ID"]),
+            "physical_retest_status": "PENDING",
+        }
+        Path("VERIFICATION_R995.json").write_text(json.dumps(report, indent=2) + "\n")
+        print("R995_IPA_VERIFIED", json.dumps(report))
+        PY
+
+        assets=(R995_Unsigned_DeviceTest.ipa VERIFICATION_R995.json)
+        if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish > existing.json 2>/dev/null; then
+          jq -e --arg commit "$GITHUB_SHA" '.isDraft and .targetCommitish == $commit' existing.json
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+        else
+          gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
+            --title 'R995 iPhone実機試験 0.9.95' \
+            --notes 'Windows PCにダウンロードする未署名のiPhoneOS 27.0以降・arm64用IPA。実機ログの再生と既存の回帰試験に合格したR995を収録。導入前に署名してください。'
+        fi
+        for asset in "${assets[@]}"; do
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir draft-readback
+          cmp "$asset" "draft-readback/$asset"
+        done
+
+        gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+        for asset in "${assets[@]}"; do
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$asset"
+          curl --fail -sSL --retry 4 --retry-all-errors "$url" -o "public-readback/$asset"
+          cmp "$asset" "public-readback/$asset"
+          printf 'R995_PUBLIC_READBACK_VERIFIED %s\n' "$url"
+        done
