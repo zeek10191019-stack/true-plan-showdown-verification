@@ -1,0 +1,84 @@
+name: R995 iPhoneOS 27 arm64 build
+'on':
+  push:
+    branches:
+      - r987-ocr-pc-regression
+    paths:
+      - .github/workflows/r995-ios27-build.yml
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: read
+jobs:
+  build:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r987-ocr-pc-regression'
+    runs-on: xcode-27
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      GH_TOKEN: ${{ github.token }}
+      VERIFIED_SHA: 5eebfff8d8d43c3cc7432aafbb39dd0724fc3c3c
+      VERIFIED_RUN: '45049580448'
+      VERIFIED_JOB: '137291516691'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+        sparse-checkout-cone-mode: false
+        sparse-checkout: .github/workflows/r995-ios27-build.yml
+    - name: Confirm Xcode 27 and the completed R995 regression steps
+      shell: bash
+      run: |
+        set -euo pipefail
+        xcodebuild -version | tee "$RUNNER_TEMP/r995-xcode.log"
+        grep -Eq '^Xcode 27([.[:space:]]|$)' "$RUNNER_TEMP/r995-xcode.log"
+        sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+        [[ "${sdk%%.*}" == "27" ]]
+        echo "IPHONEOS_SDK=$sdk"
+        gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VERIFIED_RUN" > "$RUNNER_TEMP/r995-run.json"
+        gh api "repos/$GITHUB_REPOSITORY/actions/runs/$VERIFIED_RUN/jobs?per_page=100" > "$RUNNER_TEMP/r995-jobs.json"
+        python3 - <<'VERIFY'
+        import json, os
+        from pathlib import Path
+
+        temp = Path(os.environ["RUNNER_TEMP"])
+        run = json.loads((temp / "r995-run.json").read_text())
+        assert str(run["id"]) == os.environ["VERIFIED_RUN"]
+        assert run["head_sha"] == os.environ["VERIFIED_SHA"]
+        assert run["path"] == ".github/workflows/r995-device-readout-regression.yml"
+        assert run["head_branch"] == "r987-ocr-pc-regression"
+        job = next(job for job in json.loads((temp / "r995-jobs.json").read_text())["jobs"]
+                   if str(job["id"]) == os.environ["VERIFIED_JOB"])
+        assert str(job["run_id"]) == os.environ["VERIFIED_RUN"]
+        checks = {step["name"]: step["conclusion"] for step in job["steps"]}
+        for checkpoint in (
+          "Restore the verified R993 and R994 source and apply the R995 fixes",
+          "Run the existing Apple Vision Swift browser and archive regressions",
+          "Reproduce the old failure and verify the recorded battle and coverage",
+        ):
+            assert checks[checkpoint] == "success", (checkpoint, checks[checkpoint])
+        print("R995_PRIOR_REGRESSION_CHECKPOINTS_VERIFIED")
+        VERIFY
+    - name: Restore the exact source that passed the R995 tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        prior="$RUNNER_TEMP/r995-pinned.yml"
+        git show "$VERIFIED_SHA:.github/workflows/r995-device-readout-regression.yml" > "$prior"
+        echo '1dd7ad209b3dedb78d8f94ac1367608be42bbfea1f11700def141bb87e5de9e5  r995-pinned.yml' | (cd "$RUNNER_TEMP" && shasum -a 256 -c -)
+        ruby -ryaml -e '
+          steps = YAML.load_file(ARGV[0], aliases: true).fetch("jobs").fetch("verify").fetch("steps")
+          puts steps.find { |step| step["name"] == "Restore the verified R993 and R994 source and apply the R995 fixes" }.fetch("run")
+        ' "$prior" > "$RUNNER_TEMP/r995-restore.sh"
+        bash "$RUNNER_TEMP/r995-restore.sh"
+    - name: Build the verified R995 iPhoneOS arm64 target
+      shell: bash
+      run: |
+        set -euo pipefail
+        ruby -ryaml -e '
+          steps = YAML.load_file(ARGV[0], aliases: true).fetch("jobs").fetch("verify").fetch("steps")
+          puts steps.find { |step| step["name"] == "Build and verify the iPhoneOS arm64 app" }.fetch("run")
+        ' "$RUNNER_TEMP/r995-pinned.yml" > "$RUNNER_TEMP/r995-build.sh"
+        bash "$RUNNER_TEMP/r995-build.sh"
+        echo R995_IPHONEOS27_ARM64_BUILD_VERIFIED
