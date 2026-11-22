@@ -1,0 +1,291 @@
+name: R981 split ZIP retry
+'on':
+  push:
+    branches: [r975-device-regression]
+    paths: [.github/workflows/r981-split-resume-verification.yml]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: r981-unsigned-device-test
+  cancel-in-progress: false
+jobs:
+  verify:
+    name: Swift, browser, PC and iPhoneOS regression
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r975-device-regression'
+    runs-on: xcode-27
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      RELEASE_TAG: r981-unsigned-device-test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r981-split-resume-verification.yml
+      - name: Restore verified R980 and apply the R981 corrections
+        shell: bash
+        run: &restore |
+          set -euo pipefail
+          git show b48f4086d1df0333612f4a574da0f7bbc86b5340:.github/workflows/r980-display-verification.yml > "$RUNNER_TEMP/r980-baseline.yml"
+          echo 'd8d7914b5352097b3ff8756207cfa74f8c31056b1ee64cc5c5a8552970e9404f  r980-baseline.yml' | (cd "$RUNNER_TEMP" && shasum -a 256 -c -)
+          ruby -ryaml -e '
+            steps = YAML.load_file(ARGV.fetch(0), aliases: true).fetch("jobs").fetch("verify").fetch("steps")
+            puts steps.find { |step| step["name"] == "Restore verified R979 and apply the R980 corrections" }.fetch("run")
+          ' "$RUNNER_TEMP/r980-baseline.yml" > "$RUNNER_TEMP/r980-restore.sh"
+          bash "$RUNNER_TEMP/r980-restore.sh"
+          cp "pinned-r793/source/app/ios/ChampionsOnDevice/R714ChunkedEvidence.swift" "$RUNNER_TEMP/r980-chunked.swift"
+          python3 - "$RUNNER_TEMP/r981.patch" <<'PAYLOAD'
+          import base64, hashlib, sys, zlib
+          from pathlib import Path
+          encoded = """
+          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
+          """
+          patch = zlib.decompress(base64.b64decode(encoded))
+          assert hashlib.sha256(patch).hexdigest() == '15444a6e708c608726e91e4991e13b18711ee1383f2b04f22cf066776b975dd4'
+          Path(sys.argv[1]).write_bytes(patch)
+          PAYLOAD
+          patch -s -p1 -F 0 -t -d pinned-r793/source < "$RUNNER_TEMP/r981.patch"
+          python3 - <<'MANIFEST'
+          import hashlib, json
+          from pathlib import Path
+          root = Path("pinned-r793/source")
+          manifest = root/"source_manifest.json"
+          files = {p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in root.rglob("*") if p.is_file() and p != manifest}
+          data = (json.dumps(files,sort_keys=True,indent=2)+'\n').encode()
+          assert hashlib.sha256(data).hexdigest() == '116e1a72770db4828361d2eb6b88eb1944db6c3d91e86770c77639bc12e00894'
+          manifest.write_bytes(data)
+          print("R981_SOURCE_VERIFIED", len(files))
+          MANIFEST
+      - name: Replay split resume and build iPhoneOS arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          src=pinned-r793/source
+          native="$src/app/ios/ChampionsOnDevice"
+          swiftc -parse-as-library "$native/R975FinalMovieSample.swift" "$native/R710EvidenceState.swift" "$native/R733UserControlledCapturePolicy.swift" "$native/R734RecordingFinishPolicy.swift" "$src/tools/tests/r975_movie_sample_check.swift" -o "$RUNNER_TEMP/r975-movie-test"
+          "$RUNNER_TEMP/r975-movie-test" | tee "$RUNNER_TEMP/r981-movie-test.log"
+          grep -F R978_STOP_CALLBACK_AND_RESUME_CHECK_PASS "$RUNNER_TEMP/r981-movie-test.log"
+          archive_files=(R714ChunkedEvidence R730SplitReadback R936ExportJob R689StreamingZIP R548ResearchArchive R551EvidenceIntegrity R555StoredZIPReadback R729EvidenceTransportPolicy R731ArchiveCapacity)
+          node "$src/tools/tests/test_r920_pc_display.mjs" "$RUNNER_TEMP/r979-display.swift" | tee "$RUNNER_TEMP/pc-baseline.log"
+          grep -F R979_PC_VISIBILITY_AND_PAINT_BUGS_REPRODUCED "$RUNNER_TEMP/pc-baseline.log"
+          node "$src/tools/tests/test_r920_pc_display.mjs" | tee "$RUNNER_TEMP/pc-corrected.log"
+          grep -F 'R920 browser script measurement regressions passed (18 cases)' "$RUNNER_TEMP/pc-corrected.log"
+          swift_sources=()
+          for name in "${archive_files[@]}"; do swift_sources+=("$native/$name.swift"); done
+          swiftc -O -parse-as-library "${swift_sources[@]}" "$src/tools/tests/r979_archive_check.swift" -o "$RUNNER_TEMP/archive-corrected"
+          "$RUNNER_TEMP/archive-corrected" corrected | tee "$RUNNER_TEMP/archive-corrected.log"
+          grep -F R979_ARCHIVE_REGRESSION_PASS_3 "$RUNNER_TEMP/archive-corrected.log"
+          for mode in baseline corrected; do
+            resume_sources=()
+            for name in "${archive_files[@]}"; do
+              if [ "$mode" = baseline ] && [ "$name" = R714ChunkedEvidence ]; then
+                resume_sources+=("$RUNNER_TEMP/r980-chunked.swift")
+              else
+                resume_sources+=("$native/$name.swift")
+              fi
+            done
+            swiftc -O -parse-as-library "${resume_sources[@]}" "$src/tools/tests/r981_split_resume_check.swift" -o "$RUNNER_TEMP/split-$mode"
+            "$RUNNER_TEMP/split-$mode" "$mode" | tee "$RUNNER_TEMP/split-$mode.log"
+          done
+          grep -F R980_SPLIT_RETRY_FAILURES_REPRODUCED_2 "$RUNNER_TEMP/split-baseline.log"
+          grep -F R981_SPLIT_RESUME_REGRESSIONS_PASSED_3 "$RUNNER_TEMP/split-corrected.log"
+          project="$src/app/ios/ChampionsOnDeviceResearch.xcodeproj"
+          xcodebuild -project "$project" -scheme ChampionsOnDeviceResearch -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO -derivedDataPath "$RUNNER_TEMP/r981-build" build > "$RUNNER_TEMP/r975-native.log" 2>&1 || { grep -E -B2 -A2 'error:|BUILD FAILED' "$RUNNER_TEMP/r975-native.log"; exit 1; }
+          grep -F 'BUILD SUCCEEDED' "$RUNNER_TEMP/r975-native.log"
+          app="$RUNNER_TEMP/r981-build/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app"
+          test "$(lipo -archs "$app/ChampionsOnDeviceResearch")" = arm64
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$app/Info.plist")" = 981
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Info.plist")" = 0.9.81
+      - name: Run integrated export, browser, Swift and PC regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e '
+            steps = YAML.load_file(ARGV.fetch(0), aliases: true).fetch("jobs").fetch(ARGV.fetch(1)).fetch("steps")
+            puts steps.find { |step| step["name"] == ARGV.fetch(2) }.fetch("run")
+          ' "$RUNNER_TEMP/r974-device-test.yml" verify 'Run Swift, Python and browser regressions' > "$RUNNER_TEMP/r975-verify.sh"
+          bash "$RUNNER_TEMP/r975-verify.sh"
+          grep -F "testR975RetainsLiteralClockAndHUDWithoutPromotingTheActiveState]' passed" "$RUNNER_TEMP/r966-swift.log"
+      - name: Validate the IPA and stage the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/r981-package"
+          mkdir -p "$work/Payload" "$work/draft-readback"
+          app="$RUNNER_TEMP/r981-build/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app"
+          ditto "$app" "$work/Payload/ChampionsOnDeviceResearch.app"
+          cd "$work"
+          zip -qry R981_Unsigned_DeviceTest.ipa Payload
+          python3 - <<'PY'
+          import hashlib, json, os, plistlib, struct, zipfile
+          from pathlib import Path
+
+          bundle = Path("Payload/ChampionsOnDeviceResearch.app")
+          ipa = Path("R981_Unsigned_DeviceTest.ipa")
+          files = {p.as_posix():p for p in bundle.rglob("*") if p.is_file()}
+          with zipfile.ZipFile(ipa) as archive:
+              assert archive.testzip() is None
+              entries = [item.filename for item in archive.infolist() if not item.is_dir()]
+              assert len(set(entries)) == len(entries) and set(entries) == set(files)
+              assert all(archive.read(name) == files[name].read_bytes() for name in entries)
+              info = plistlib.loads(archive.read((bundle / "Info.plist").as_posix()))
+          assert (info["CFBundleIdentifier"], info["CFBundleVersion"], info["CFBundleShortVersionString"],
+                  info["MinimumOSVersion"], info["DTPlatformName"]) == (
+                  "com.zeek10191019.championsresearch", "981", "0.9.81", "27.0", "iphoneos")
+          assert info["NSLocalNetworkUsageDescription"] and "screen-capture" in info["UIBackgroundModes"]
+          for binary in [bundle / info["CFBundleExecutable"], *bundle.glob("*.dylib")]:
+              data = binary.read_bytes()
+              magic, cpu, _, kind, commands, command_bytes, *_ = struct.unpack_from("<8I", data)
+              assert magic == 0xfeedfacf and cpu == 0x0100000c and kind in (2, 6)
+              offset, platforms = 32, []
+              for _ in range(commands):
+                  command, size = struct.unpack_from("<2I", data, offset)
+                  assert size >= 8 and offset + size <= len(data) and command != 29
+                  if command == 50:
+                      platforms.append(struct.unpack_from("<I", data, offset + 8)[0])
+                  offset += size
+              assert offset == 32 + command_bytes and platforms == [2]
+          report = {
+              "build": 981, "version": "0.9.81", "signed": False, "min_ios": "27.0",
+              "ipa": {"name": ipa.name, "bytes": ipa.stat().st_size,
+                      "sha256": hashlib.sha256(ipa.read_bytes()).hexdigest()},
+              "source_workflow_commit": os.environ["GITHUB_SHA"],
+              "source_manifest_sha256": "116e1a72770db4828361d2eb6b88eb1944db6c3d91e86770c77639bc12e00894",
+              "passed_regression_run": int(os.environ["GITHUB_RUN_ID"]),
+              "packaging_workflow_commit": os.environ["GITHUB_SHA"],
+              "packaging_run": int(os.environ["GITHUB_RUN_ID"]),
+              "r981_physical_end_to_end_status": "UNVERIFIED",
+          }
+          Path("VERIFICATION_R981.json").write_text(json.dumps(report, indent=2) + "\n")
+          print("R981_IPA_VERIFIED", json.dumps(report))
+          PY
+          assets=(R981_Unsigned_DeviceTest.ipa VERIFICATION_R981.json)
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish > existing.json 2>/dev/null; then
+            jq -e --arg commit "$GITHUB_SHA" '.isDraft and .targetCommitish == $commit' existing.json
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
+              --title 'R981 iPhone実機試験 0.9.81' \
+              --notes '未署名のiPhoneOS 27.0以降・arm64用IPA。元ZIP修復後の分割再開と、破損パートの再生成を修正した実機試験版。導入前に現在の方法で署名してください。'
+          fi
+          for asset in "${assets[@]}"; do
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir draft-readback
+            cmp "$asset" "draft-readback/$asset"
+          done
+  vision:
+    name: Original-image Apple Vision regression
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r975-device-regression'
+    runs-on: macos-26
+    timeout-minutes: 35
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      RELEASE_TAG: r981-unsigned-device-test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r981-split-resume-verification.yml
+      - name: Restore verified R980 and apply the R981 corrections
+        shell: bash
+        run: *restore
+      - name: Replay retained Apple Vision fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          ruby -ryaml -e '
+            steps = YAML.load_file(ARGV.fetch(0), aliases: true).fetch("jobs").fetch(ARGV.fetch(1)).fetch("steps")
+            puts steps.find { |step| step["name"] == ARGV.fetch(2) }.fetch("run")
+          ' "$RUNNER_TEMP/r974-device-test.yml" vision 'Replay retained Apple Vision images' > "$RUNNER_TEMP/r975-vision.sh"
+          bash "$RUNNER_TEMP/r975-vision.sh"
+  publish:
+    name: Publish only after both checks pass
+    needs: [verify, vision]
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r975-device-regression'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: r981-unsigned-device-test
+    steps:
+      - name: Verify draft assets and publish the unsigned test IPA
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/staged" "$RUNNER_TEMP/public"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish |
+            jq -e --arg commit "$GITHUB_SHA" '.isDraft and .targetCommitish == $commit'
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/staged"
+          python3 - <<'PYTHON'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "staged"
+          report = json.loads((root/"VERIFICATION_R981.json").read_text())
+          assert report["build"] == 981 and report["version"] == "0.9.81" and report["signed"] is False
+          assert report["source_workflow_commit"] == report["packaging_workflow_commit"] == os.environ["GITHUB_SHA"]
+          assert report["passed_regression_run"] == report["packaging_run"] == int(os.environ["GITHUB_RUN_ID"])
+          assert report["source_manifest_sha256"] == "116e1a72770db4828361d2eb6b88eb1944db6c3d91e86770c77639bc12e00894"
+          info = report["ipa"]
+          assert info["name"] == "R981_Unsigned_DeviceTest.ipa"
+          ipa = root/info["name"]
+          assert len(ipa.read_bytes()) == info["bytes"]
+          assert hashlib.sha256(ipa.read_bytes()).hexdigest() == info["sha256"]
+          print("R981_IPA_VERIFIED", json.dumps(report))
+          PYTHON
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          for asset in R981_Unsigned_DeviceTest.ipa VERIFICATION_R981.json; do
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$asset"
+            curl --fail -sSL --retry 4 --retry-all-errors "$url" -o "$RUNNER_TEMP/public/$asset"
+            cmp "$RUNNER_TEMP/staged/$asset" "$RUNNER_TEMP/public/$asset"
+            printf 'R981_PUBLIC_READBACK_VERIFIED %s\n' "$url"
+          done
