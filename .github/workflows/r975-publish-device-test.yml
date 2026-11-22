@@ -1,0 +1,148 @@
+name: R975 package iPhone device test
+'on':
+  push:
+    branches: [r975-device-regression]
+    paths: [.github/workflows/r975-publish-device-test.yml]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: r975-unsigned-device-test
+  cancel-in-progress: false
+jobs:
+  package:
+    name: Build and verify the R975 unsigned IPA
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/r975-device-regression'
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      SOURCE_COMMIT: b63603a2f74918c42eb5e15a9a415edfafe01bb2
+      SOURCE_RUN: '44993741274'
+      RELEASE_TAG: r975-unsigned-device-test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: .github/workflows/r975-publish-device-test.yml
+      - name: Match the app source to both successful regression jobs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_path="repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN"
+          gh api "$run_path" > "$RUNNER_TEMP/checked-run.json"
+          gh api "$run_path/jobs" > "$RUNNER_TEMP/checked-jobs.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          run = json.loads((temp/"checked-run.json").read_text())
+          assert run["head_sha"] == os.environ["SOURCE_COMMIT"] and run["conclusion"] == "success"
+          assert run["path"] == ".github/workflows/r975-device-regression.yml"
+          jobs = json.loads((temp/"checked-jobs.json").read_text())["jobs"]
+          actual = {j["name"]: j["conclusion"] for j in jobs}
+          assert actual == {
+              "Swift, browser, PC and iPhoneOS regression": "success",
+              "Original-image Apple Vision regression": "success",
+          }
+          print("R975_BOTH_REGRESSION_JOBS_VERIFIED")
+          PY
+      - name: Restore the exact app source and build iPhoneOS arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show "$SOURCE_COMMIT:.github/workflows/r975-device-regression.yml" > "$RUNNER_TEMP/r975-verified.yml"
+          echo '71eeb46fd25ec6860c88e94cfc5a8747a0174a880c60746755a7ed787b9e61fa  r975-verified.yml' | (cd "$RUNNER_TEMP" && shasum -a 256 -c -)
+          for spec in 'Restore pinned source and apply R975|restore' 'Check MOV sample repair and build arm64|build'; do
+            step="${spec%|*}"
+            script="$RUNNER_TEMP/r975-${spec##*|}.sh"
+            ruby -ryaml -e '
+              steps = YAML.load_file(ARGV.fetch(0), aliases: true).fetch("jobs").fetch("verify").fetch("steps")
+              puts steps.find { |entry| entry["name"] == ARGV.fetch(1) }.fetch("run")
+            ' "$RUNNER_TEMP/r975-verified.yml" "$step" > "$script"
+            bash "$script"
+          done
+      - name: Validate the IPA and publish a verified prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/r975-package"
+          mkdir -p "$work/Payload" "$work/draft-readback" "$work/public-readback"
+          app="$RUNNER_TEMP/r975-build/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app"
+          ditto "$app" "$work/Payload/ChampionsOnDeviceResearch.app"
+          cd "$work"
+          zip -qry R975_Unsigned_DeviceTest.ipa Payload
+          python3 - <<'PY'
+          import hashlib, json, os, plistlib, struct, zipfile
+          from pathlib import Path
+
+          bundle = Path("Payload/ChampionsOnDeviceResearch.app")
+          ipa = Path("R975_Unsigned_DeviceTest.ipa")
+          files = {p.as_posix():p for p in bundle.rglob("*") if p.is_file()}
+          with zipfile.ZipFile(ipa) as archive:
+              assert archive.testzip() is None
+              entries = [item.filename for item in archive.infolist() if not item.is_dir()]
+              assert len(set(entries)) == len(entries) and set(entries) == set(files)
+              assert all(archive.read(name) == files[name].read_bytes() for name in entries)
+              info = plistlib.loads(archive.read((bundle / "Info.plist").as_posix()))
+          assert (info["CFBundleIdentifier"], info["CFBundleVersion"], info["CFBundleShortVersionString"],
+                  info["MinimumOSVersion"], info["DTPlatformName"]) == (
+                  "com.zeek10191019.championsresearch", "975", "0.9.75", "27.0", "iphoneos")
+          assert info["NSLocalNetworkUsageDescription"] and "screen-capture" in info["UIBackgroundModes"]
+          for binary in [bundle / info["CFBundleExecutable"], *bundle.glob("*.dylib")]:
+              data = binary.read_bytes()
+              magic, cpu, _, kind, commands, command_bytes, *_ = struct.unpack_from("<8I", data)
+              assert magic == 0xfeedfacf and cpu == 0x0100000c and kind in (2, 6)
+              offset, platforms = 32, []
+              for _ in range(commands):
+                  command, size = struct.unpack_from("<2I", data, offset)
+                  assert size >= 8 and offset + size <= len(data) and command != 29
+                  if command == 50:
+                      platforms.append(struct.unpack_from("<I", data, offset + 8)[0])
+                  offset += size
+              assert offset == 32 + command_bytes and platforms == [2]
+          report = {
+              "build": 975, "version": "0.9.75", "signed": False, "min_ios": "27.0",
+              "ipa": {"name": ipa.name, "bytes": ipa.stat().st_size,
+                      "sha256": hashlib.sha256(ipa.read_bytes()).hexdigest()},
+              "source_workflow_commit": os.environ["SOURCE_COMMIT"],
+              "source_manifest_sha256": "ddfb1c958129a9d6d796815cafb0713e14743b50d2889c9218b774fd99db1a7e",
+              "passed_regression_run": int(os.environ["SOURCE_RUN"]),
+              "packaging_workflow_commit": os.environ["GITHUB_SHA"],
+              "packaging_run": int(os.environ["GITHUB_RUN_ID"]),
+              "r975_physical_end_to_end_status": "UNVERIFIED",
+          }
+          Path("VERIFICATION_R975.json").write_text(json.dumps(report, indent=2) + "\n")
+          print("R975_IPA_VERIFIED", json.dumps(report))
+          PY
+          assets=(R975_Unsigned_DeviceTest.ipa VERIFICATION_R975.json)
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish > existing.json 2>/dev/null; then
+            jq -e --arg commit "$SOURCE_COMMIT" '.isDraft and .targetCommitish == $commit' existing.json
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --target "$SOURCE_COMMIT" --draft --prerelease \
+              --title 'R975 iPhone実機試験 0.9.75' \
+              --notes '未署名のiPhoneOS 27.0以降・arm64用IPA。R975の回帰試験は合格済み。iPhone 16 PlusとLenovoでの録画末尾・選出中OCR・PC表示の計測用。導入前に現在の方法で署名してください。'
+          fi
+          for asset in "${assets[@]}"; do
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$asset" --dir draft-readback
+            cmp "$asset" "draft-readback/$asset"
+          done
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          for asset in "${assets[@]}"; do
+            url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$asset"
+            curl --fail -sSL --retry 4 --retry-all-errors "$url" -o "public-readback/$asset"
+            cmp "$asset" "public-readback/$asset"
+            printf 'R975_PUBLIC_READBACK_VERIFIED %s\n' "$url"
+          done
