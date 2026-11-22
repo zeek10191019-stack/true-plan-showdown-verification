@@ -1,0 +1,224 @@
+name: R997 integrated screen capture and OCR regression
+'on':
+  push:
+    branches:
+    - r987-ocr-pc-regression
+    paths:
+    - .github/workflows/r997-ai014-device-regression.yml
+  workflow_dispatch: null
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: r997-ai014-ipa
+  cancel-in-progress: false
+jobs:
+  verify-and-package:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private
+      && github.ref == 'refs/heads/r987-ocr-pc-regression'
+    runs-on: xcode-27
+    timeout-minutes: 42
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERIFIED_SHA: 5eebfff8d8d43c3cc7432aafbb39dd0724fc3c3c
+      VERIFIED_RUN: '45049580448'
+      VERIFIED_JOB: '137291516691'
+      R995_BUILD_COMMIT: 736cb296fef2136f41dfcdfd86ddf02005ca5952
+      RELEASE_TAG: r997-ai014-device-test
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+        sparse-checkout-cone-mode: false
+        sparse-checkout: .github/workflows/r997-ai014-device-regression.yml
+    - name: Verify and combine the pinned AI014 and R996 source
+      shell: bash
+      run: |
+        set -euo pipefail
+        work="$RUNNER_TEMP/r997"
+        mkdir -p "$work"
+        sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+        [[ "${sdk%%.*}" == 27 ]]
+        export AI014_WORKFLOW="$work/ai014-pinned.yml"
+        git show '681ccff2494ebe701d40c921720bb6e3ea506c11:.github/workflows/ai014-ios27-build.yml' > "$AI014_WORKFLOW"
+        echo '161b5678af05a6ffab2fa5bbe3a86f7d47a2e116c2084941fa2da3793be7a76a  ai014-pinned.yml' | (cd "$work" && shasum -a 256 -c -)
+        for name in 'Verify Xcode and restore the tested R995 source' 'Apply and verify the AI014 overlay'; do
+          ruby -ryaml -e '
+            steps=YAML.load_file(ENV.fetch("AI014_WORKFLOW"),aliases:true).fetch("jobs").fetch("build").fetch("steps")
+            puts steps.find { |step| step["name"] == ARGV[0] }.fetch("run")
+          ' "$name" > "$work/restore.sh"
+          bash "$work/restore.sh"
+        done
+        source=pinned-r793/source
+        echo 'd323d3ee8a81b77b39082f0fa8647231219aa9f45788f294f0bfe672705f3a8b  source_manifest.json' |
+          (cd "$source" && shasum -a 256 -c -)
+        python3 - "$work" <<'PAYLOAD'
+        import base64,hashlib,sys
+        from pathlib import Path
+        folder=Path(sys.argv[1])
+        files={'r997-ai014-readout.patch': ['ad6b690cd4012d3a241418a65d6c8854e038b31c44df10c8174d3eb75a6634c3', 'LS0tIGEvUjcyMF9QT1JUQUJMRV9URVNUUy9Tb3VyY2VzL1I3MTlDb3JlL1I5ODdCYXR0bGVSZWFkb3V0LnN3aWZ0CisrKyBiL1I3MjBfUE9SVEFCTEVfVEVTVFMvU291cmNlcy9SNzE5Q29yZS9SOTg3QmF0dGxlUmVhZG91dC5zd2lmdApAQCAtMzAwLDE0ICszMDAsMjEgQEAKICAgICAgICAgICAgICAgICAkMFsic2xvdCJdIGFzPyBJbnQgPT0gc2xvdCAmJiAkMFsicmVmZXJlbmNlX2ljb25fY29tbWl0Il0gYXM/IFN0cmluZyA9PSBSODY2UmVmZXJlbmNlQ2F0YWxvZy5pY29uUmV2aXNpb24KICAgICAgICAgICAgIH0KICAgICAgICAgICAgIGxldCBvcHBvbmVudEljb24gPSBvcHBvbmVudEljb25zLmZpcnN0IHsgJDBbInNsb3QiXSBhcz8gSW50ID09IHNsb3QgfQotICAgICAgICAgICAgaWYgbGV0IGxhYmVsID0gbGFiZWwgPz8gb3duU2xvdHNbc2xvdF0/LmxhYmVsIHsKLSAgICAgICAgICAgICAgICBvd25TbG90c1tzbG90XSA9IFNlbGVjdGlvblNsb3QobGFiZWw6bGFiZWwsCi0gICAgICAgICAgICAgICAgICAgIHNwZWNpZXM6b3duSWNvbj9bInNwZWNpZXMiXSBhcz8gU3RyaW5nID8/IG93blNsb3RzW3Nsb3RdPy5zcGVjaWVzLAotICAgICAgICAgICAgICAgICAgICBmb3JtOm93bkljb24/WyJmb3JtX2lkIl0gYXM/IFN0cmluZyA/PyBvd25TbG90c1tzbG90XT8uZm9ybSwKLSAgICAgICAgICAgICAgICAgICAgb3JkZXI6b3duU2xvdHNbc2xvdF0/Lm9yZGVyKQotICAgICAgICAgICAgfSBlbHNlIGlmIGxldCBzcGVjaWVzID0gb3duSWNvbj9bInNwZWNpZXMiXSBhcz8gU3RyaW5nIHsKLSAgICAgICAgICAgICAgICBvd25TbG90c1tzbG90XSA9IFNlbGVjdGlvblNsb3QobGFiZWw6bmlsLHNwZWNpZXM6c3BlY2llcywKLSAgICAgICAgICAgICAgICAgICAgZm9ybTpvd25JY29uP1siZm9ybV9pZCJdIGFzPyBTdHJpbmcsb3JkZXI6b3duU2xvdHNbc2xvdF0/Lm9yZGVyKQorICAgICAgICAgICAgbGV0IHByZXZpb3VzID0gb3duU2xvdHNbc2xvdF0KKyAgICAgICAgICAgIGxldCBzYXZlZExhYmVsOiBTdHJpbmc/CisgICAgICAgICAgICBpZiBsZXQgbGFiZWwsIGxldCBvbGQgPSBwcmV2aW91cz8ubGFiZWwsCisgICAgICAgICAgICAgICBTZWxmLmNhdGFsb2dMYWJlbChvbGQsaW46Ujg2NlJlZmVyZW5jZUNhdGFsb2cuc3BlY2llc05hbWVzKSAhPSBuaWwsCisgICAgICAgICAgICAgICBTZWxmLmNhdGFsb2dMYWJlbChsYWJlbCxpbjpSODY2UmVmZXJlbmNlQ2F0YWxvZy5zcGVjaWVzTmFtZXMpID09IG5pbCB7CisgICAgICAgICAgICAgICAgLy8gS2VlcCB0aGUgc2FtZSBwcmV2aWV3IHJvdydzIGVhcmxpZXIgdXNhYmxlIHJlYWRpbmcgd2hlbiBhCisgICAgICAgICAgICAgICAgLy8gbGF0ZXIgc2NhbiBjYW5ub3QgcmVzb2x2ZSBpdC4gUmF3IE9DUiBpcyBqb3VybmFsZWQgc2VwYXJhdGVseS4KKyAgICAgICAgICAgICAgICBzYXZlZExhYmVsID0gb2xkCisgICAgICAgICAgICB9IGVsc2UgeworICAgICAgICAgICAgICAgIHNhdmVkTGFiZWwgPSBsYWJlbCA/PyBwcmV2aW91cz8ubGFiZWwKKyAgICAgICAgICAgIH0KKyAgICAgICAgICAgIGxldCBzcGVjaWVzID0gb3duSWNvbj9bInNwZWNpZXMiXSBhcz8gU3RyaW5nID8/IHByZXZpb3VzPy5zcGVjaWVzCisgICAgICAgICAgICBpZiBzYXZlZExhYmVsICE9IG5pbCB8fCBzcGVjaWVzICE9IG5pbCB7CisgICAgICAgICAgICAgICAgb3duU2xvdHNbc2xvdF0gPSBTZWxlY3Rpb25TbG90KGxhYmVsOnNhdmVkTGFiZWwsc3BlY2llczpzcGVjaWVzLAorICAgICAgICAgICAgICAgICAgICBmb3JtOm93bkljb24/WyJmb3JtX2lkIl0gYXM/IFN0cmluZyA/PyBwcmV2aW91cz8uZm9ybSxvcmRlcjpwcmV2aW91cz8ub3JkZXIpCiAgICAgICAgICAgICB9CiAgICAgICAgICAgICBpZiBsZXQgc3BlY2llcyA9IG9wcG9uZW50SWNvbj9bInNwZWNpZXMiXSBhcz8gU3RyaW5nIHsKICAgICAgICAgICAgICAgICBvcHBvbmVudFNsb3RzW3Nsb3RdID0gU2VsZWN0aW9uU2xvdChsYWJlbDpuaWwsc3BlY2llczpzcGVjaWVzLAotLS0gYS9hcHAvaW9zL0NoYW1waW9uc09uRGV2aWNlL0NhcHR1cmVDb29yZGluYXRvci5zd2lmdAorKysgYi9hcHAvaW9zL0NoYW1waW9uc09uRGV2aWNlL0NhcHR1cmVDb29yZGluYXRvci5zd2lmdApAQCAtODE1LDYgKzgxNSw3IEBACiAgICAgICAgIGVsaWdpYmlsaXR5WyJraW5kIl09IlI5ODdfUENfUFVCTElDQVRJT05fREVDSVNJT04iCiAgICAgICAgIGVsaWdpYmlsaXR5WyJwY19kZWNpc2lvbiJdPXByb2plY3Rpb24ucmVhc29uCiAgICAgICAgIGVsaWdpYmlsaXR5WyJkaXNwbGF5X21vZGUiXT1tb2RlLnJhd1ZhbHVlCisgICAgICAgIGVsaWdpYmlsaXR5WyJwY19wcm9qZWN0ZWRfdmFsdWVzIl09Y29tbWl0dGVkCiAgICAgICAgIC8vIEEgc3RhdHVzLW9ubHkgdXBkYXRlIGhhcyBpdHMgb3duIGRlbGl2ZXJ5IGRlYWRsaW5lLiBJdCBkb2VzIG5vdAogICAgICAgICAvLyByZS1hZ2Ugb3IgcmV0cmFuc21pdCBhbiBleHBpcmVkIE9DUiB2YWx1ZS4KICAgICAgICAgbGV0IGRlbGl2ZXJ5T2JzZXJ2ZWRNcyA9IGZyZXNoID8gb2JzZXJ2ZWRNcyA6IG5vdwotLS0gYS9hcHAvaW9zL0NoYW1waW9uc09uRGV2aWNlL1I5ODdCYXR0bGVSZWFkb3V0LnN3aWZ0CisrKyBiL2FwcC9pb3MvQ2hhbXBpb25zT25EZXZpY2UvUjk4N0JhdHRsZVJlYWRvdXQuc3dpZnQKQEAgLTMwMCwxNCArMzAwLDIxIEBACiAgICAgICAgICAgICAgICAgJDBbInNsb3QiXSBhcz8gSW50ID09IHNsb3QgJiYgJDBbInJlZmVyZW5jZV9pY29uX2NvbW1pdCJdIGFzPyBTdHJpbmcgPT0gUjg2NlJlZmVyZW5jZUNhdGFsb2cuaWNvblJldmlzaW9uCiAgICAgICAgICAgICB9CiAgICAgICAgICAgICBsZXQgb3Bwb25lbnRJY29uID0gb3Bwb25lbnRJY29ucy5maXJzdCB7ICQwWyJzbG90Il0gYXM/IEludCA9PSBzbG90IH0KLSAgICAgICAgICAgIGlmIGxldCBsYWJlbCA9IGxhYmVsID8/IG93blNsb3RzW3Nsb3RdPy5sYWJlbCB7Ci0gICAgICAgICAgICAgICAgb3duU2xvdHNbc2xvdF0gPSBTZWxlY3Rpb25TbG90KGxhYmVsOmxhYmVsLAotICAgICAgICAgICAgICAgICAgICBzcGVjaWVzOm93bkljb24/WyJzcGVjaWVzIl0gYXM/IFN0cmluZyA/PyBvd25TbG90c1tzbG90XT8uc3BlY2llcywKLSAgICAgICAgICAgICAgICAgICAgZm9ybTpvd25JY29uP1siZm9ybV9pZCJdIGFzPyBTdHJpbmcgPz8gb3duU2xvdHNbc2xvdF0/LmZvcm0sCi0gICAgICAgICAgICAgICAgICAgIG9yZGVyOm93blNsb3RzW3Nsb3RdPy5vcmRlcikKLSAgICAgICAgICAgIH0gZWxzZSBpZiBsZXQgc3BlY2llcyA9IG93bkljb24/WyJzcGVjaWVzIl0gYXM/IFN0cmluZyB7Ci0gICAgICAgICAgICAgICAgb3duU2xvdHNbc2xvdF0gPSBTZWxlY3Rpb25TbG90KGxhYmVsOm5pbCxzcGVjaWVzOnNwZWNpZXMsCi0gICAgICAgICAgICAgICAgICAgIGZvcm06b3duSWNvbj9bImZvcm1faWQiXSBhcz8gU3RyaW5nLG9yZGVyOm93blNsb3RzW3Nsb3RdPy5vcmRlcikKKyAgICAgICAgICAgIGxldCBwcmV2aW91cyA9IG93blNsb3RzW3Nsb3RdCisgICAgICAgICAgICBsZXQgc2F2ZWRMYWJlbDogU3RyaW5nPworICAgICAgICAgICAgaWYgbGV0IGxhYmVsLCBsZXQgb2xkID0gcHJldmlvdXM/LmxhYmVsLAorICAgICAgICAgICAgICAgU2VsZi5jYXRhbG9nTGFiZWwob2xkLGluOlI4NjZSZWZlcmVuY2VDYXRhbG9nLnNwZWNpZXNOYW1lcykgIT0gbmlsLAorICAgICAgICAgICAgICAgU2VsZi5jYXRhbG9nTGFiZWwobGFiZWwsaW46Ujg2NlJlZmVyZW5jZUNhdGFsb2cuc3BlY2llc05hbWVzKSA9PSBuaWwgeworICAgICAgICAgICAgICAgIC8vIEtlZXAgdGhlIHNhbWUgcHJldmlldyByb3cncyBlYXJsaWVyIHVzYWJsZSByZWFkaW5nIHdoZW4gYQorICAgICAgICAgICAgICAgIC8vIGxhdGVyIHNjYW4gY2Fubm90IHJlc29sdmUgaXQuIFJhdyBPQ1IgaXMgam91cm5hbGVkIHNlcGFyYXRlbHkuCisgICAgICAgICAgICAgICAgc2F2ZWRMYWJlbCA9IG9sZAorICAgICAgICAgICAgfSBlbHNlIHsKKyAgICAgICAgICAgICAgICBzYXZlZExhYmVsID0gbGFiZWwgPz8gcHJldmlvdXM/LmxhYmVsCisgICAgICAgICAgICB9CisgICAgICAgICAgICBsZXQgc3BlY2llcyA9IG93bkljb24/WyJzcGVjaWVzIl0gYXM/IFN0cmluZyA/PyBwcmV2aW91cz8uc3BlY2llcworICAgICAgICAgICAgaWYgc2F2ZWRMYWJlbCAhPSBuaWwgfHwgc3BlY2llcyAhPSBuaWwgeworICAgICAgICAgICAgICAgIG93blNsb3RzW3Nsb3RdID0gU2VsZWN0aW9uU2xvdChsYWJlbDpzYXZlZExhYmVsLHNwZWNpZXM6c3BlY2llcywKKyAgICAgICAgICAgICAgICAgICAgZm9ybTpvd25JY29uP1siZm9ybV9pZCJdIGFzPyBTdHJpbmcgPz8gcHJldmlvdXM/LmZvcm0sb3JkZXI6cHJldmlvdXM/Lm9yZGVyKQogICAgICAgICAgICAgfQogICAgICAgICAgICAgaWYgbGV0IHNwZWNpZXMgPSBvcHBvbmVudEljb24/WyJzcGVjaWVzIl0gYXM/IFN0cmluZyB7CiAgICAgICAgICAgICAgICAgb3Bwb25lbnRTbG90c1tzbG90XSA9IFNlbGVjdGlvblNsb3QobGFiZWw6bmlsLHNwZWNpZXM6c3BlY2llcywK'], 'R997SelectionTransportTests.swift': ['9490aba6df07bd9f7985c53b14829ae91f72d40e3ed6756601f7ea8c8e92467f', 'aW1wb3J0IEZvdW5kYXRpb24KaW1wb3J0IFhDVGVzdApAdGVzdGFibGUgaW1wb3J0IFI3MTlDb3JlCgpmaW5hbCBjbGFzcyBSOTk3U2VsZWN0aW9uVHJhbnNwb3J0VGVzdHM6IFhDVGVzdENhc2UgewogICAgcHJpdmF0ZSBsZXQgdG9rZW4gPSAiOTE3OTM2RDEtM0Q3NC00M0U3LTk1Q0UtMjNFODM4MDM3NDc2IgogICAgcHJpdmF0ZSBsZXQgcmVxdWVzdCA9ICI5M0E1RDRBNS1EOEExLTRCQjYtOTNEMy01N0IzMjBBOEM0RTEiCgogICAgcHJpdmF0ZSBmdW5jIGRldGFpbChfIGZyYW1lOiBJbnQ2NCwgYXQgdGltZTogSW50NjQsIHdpZHRoOiBJbnQsIGhlaWdodDogSW50LAogICAgICAgICAgICAgICAgICAgICAgICByb3dzOiBbW0FueV1dKSAtPiBSOTg3RGV0YWlsU291cmNlIHsKICAgICAgICBsZXQgaGFzaCA9IFN0cmluZyhmb3JtYXQ6IiUwNjRsbHgiLGZyYW1lKQogICAgICAgIGxldCBzdGFtcGVkID0gcm93cy5tYXAgeyByb3cgLT4gW1N0cmluZzpBbnldIGluCiAgICAgICAgICAgIFsicmF3X3RleHQiOnJvd1swXSwic291cmNlX2Vwb2NoIjoxLCJzb3VyY2VfZnJhbWVfaWQiOmZyYW1lLAogICAgICAgICAgICAgInNvdXJjZV9pbWFnZV9zaGEyNTYiOmhhc2gsInJvaV9yZWN0IjpbCiAgICAgICAgICAgICAgICAieCI6cm93WzFdLCJ5Ijpyb3dbMl0sIndpZHRoIjpyb3dbM10sImhlaWdodCI6cm93WzRdXV0KICAgICAgICB9CiAgICAgICAgcmV0dXJuIFI5ODdEZXRhaWxTb3VyY2UodG9rZW46dG9rZW4sZXBvY2g6MSxmcmFtZTpmcmFtZSxvYnNlcnZlZDp0aW1lLAogICAgICAgICAgICByZXR1cm5lZDp0aW1lLHJhd1NIQTpoYXNoLGFuYWx5c2lzU0hBOmhhc2gscmVxdWVzdElEOnJlcXVlc3QsCiAgICAgICAgICAgIHdpZHRoOndpZHRoLGhlaWdodDpoZWlnaHQscm93czpzdGFtcGVkKQogICAgfQoKICAgIGZ1bmMgdGVzdFJlY29yZGVkUjk5NVByZXZpZXdLZWVwc0FsbFNpeEluVGhlUENQYWNrZXRBbmRDbGVhcnNPbkV4cGlyeSgpIHRocm93cyB7CiAgICAgICAgbGV0IGZpeHR1cmUgPSB0cnkgWENUVW53cmFwKFByb2Nlc3NJbmZvLnByb2Nlc3NJbmZvLmVudmlyb25tZW50WyJSOTk1X1NFTEVDVElPTl9GSVhUVVJFIl0pCiAgICAgICAgbGV0IHNhbXBsZXMgPSB0cnkgWENUVW53cmFwKEpTT05TZXJpYWxpemF0aW9uLmpzb25PYmplY3Qod2l0aDpEYXRhKGNvbnRlbnRzT2Y6VVJMKGZpbGVVUkxXaXRoUGF0aDpmaXh0dXJlKSkpIGFzPyBbW1N0cmluZzpBbnldXSkKICAgICAgICBsZXQgZnVsbFJvc3RlciA9IFsi44Ko44Or44Os44Kk44OJIiwi44Of44Ot44Kr44Ot44K5Iiwi44Ky44Oz44Ks44O8Iiwi44OQ44K344Oj44O844OiIiwi44Kk44OA44Kk44OI44KmIiwi44OJ44OH44Kr44OQ44K3Il0KICAgICAgICB2YXIgYm9hcmQgPSBSOTg3QmF0dGxlUmVhZG91dCh0b2tlbjp0b2tlbikKICAgICAgICBmb3Igc2FtcGxlIGluIHNhbXBsZXMgewogICAgICAgICAgICBsZXQgZnJhbWUgPSB0cnkgWENUVW53cmFwKFI5ODdEZXRhaWxTb3VyY2UubnVtYmVyKHNhbXBsZVsiZnJhbWUiXSkpCiAgICAgICAgICAgIGxldCBldmlkZW5jZSA9IGRldGFpbChmcmFtZSxhdDp0cnkgWENUVW53cmFwKFI5ODdEZXRhaWxTb3VyY2UubnVtYmVyKHNhbXBsZVsiYXQiXSkpLAogICAgICAgICAgICAgICAgd2lkdGg6dHJ5IFhDVFVud3JhcChzYW1wbGVbInciXSBhcz8gSW50KSxoZWlnaHQ6dHJ5IFhDVFVud3JhcChzYW1wbGVbImgiXSBhcz8gSW50KSwKICAgICAgICAgICAgICAgIHJvd3M6dHJ5IFhDVFVud3JhcChzYW1wbGVbInJvd3MiXSBhcz8gW1tBbnldXSkpCiAgICAgICAgICAgIFhDVEFzc2VydFRydWUoYm9hcmQuZGV0YWlsKGV2aWRlbmNlKSkKICAgICAgICAgICAgWENUQXNzZXJ0RXF1YWwoYm9hcmQucmVwb3J0WyJyb3N0ZXIiXSBhcz8gW1N0cmluZ10sZnVsbFJvc3RlciwiZnJhbWUgXChmcmFtZSkiKQogICAgICAgICAgICBsZXQgc2xvdHMgPSB0cnkgWENUVW53cmFwKGJvYXJkLnJlcG9ydFsib3duX3NlbGVjdGlvbl9zbG90cyJdIGFzPyBbW1N0cmluZzpBbnldXSkKICAgICAgICAgICAgWENUQXNzZXJ0RXF1YWwoc2xvdHMuY29tcGFjdE1hcCB7ICQwWyJzbG90Il0gYXM/IEludCB9LEFycmF5KDEuLi42KSkKICAgICAgICAgICAgWENUQXNzZXJ0RXF1YWwoc2xvdHNbMV1bImRpc3BsYXlfbmFtZSJdIGFzPyBTdHJpbmcsIuODn+ODreOCq+ODreOCuSIpCiAgICAgICAgICAgIFhDVEFzc2VydE5pbChzbG90c1sxXVsic3BlY2llc19mcm9tX2ljb24iXSwiQSB0ZXh0IHJlYWRpbmcgbXVzdCBub3QgYmUgcmVwb3J0ZWQgYXMgaWNvbiBldmlkZW5jZSIpCiAgICAgICAgICAgIFhDVEFzc2VydE5pbChib2FyZC50dXJuKQogICAgICAgICAgICBpZiBmcmFtZSA9PSA2MjAgewogICAgICAgICAgICAgICAgbGV0IG9ic2VydmF0aW9uID0gdHJ5IFhDVFVud3JhcChib2FyZC5wY0FjdGlvbkV2aWRlbmNlKGV2aWRlbmNlKSkKICAgICAgICAgICAgICAgIFhDVEFzc2VydEVxdWFsKG9ic2VydmF0aW9uLnNjcmVlbiwic2VsZWN0aW9uIikKICAgICAgICAgICAgICAgIFhDVEFzc2VydE5pbChvYnNlcnZhdGlvbi50dXJuKQogICAgICAgICAgICAgICAgWENUQXNzZXJ0VHJ1ZShvYnNlcnZhdGlvbi5tb3Zlcy5pc0VtcHR5KQogICAgICAgICAgICAgICAgWENUQXNzZXJ0VHJ1ZShvYnNlcnZhdGlvbi5hY3RpdmVTbG90cy5pc0VtcHR5KQogICAgICAgICAgICAgICAgWENUQXNzZXJ0RXF1YWwob2JzZXJ2YXRpb24ub3duUm9zdGVyLm1hcChcLnNsb3QpLEFycmF5KDEuLi42KSkKICAgICAgICAgICAgICAgIGxldCBzbG90ID0gdHJ5IFhDVFVud3JhcChvYnNlcnZhdGlvbi5vd25Sb3N0ZXIuZmlyc3QgeyAkMC5zbG90ID09IDIgfSkKICAgICAgICAgICAgICAgIFhDVEFzc2VydEVxdWFsKHNsb3QubGFiZWwsIuODn+ODreOCq+ODreOCuSIpCiAgICAgICAgICAgICAgICBYQ1RBc3NlcnROaWwoc2xvdC5zcGVjaWVzKQoKICAgICAgICAgICAgICAgIHZhciBjYWNoZSA9IEFJMDA5QWN0aW9uQ2FjaGUoKQogICAgICAgICAgICAgICAgY2FjaGUuYWNjZXB0KG9ic2VydmF0aW9uKQogICAgICAgICAgICAgICAgbGV0IGRhdGEgPSB0cnkgWENUVW53cmFwKGNhY2hlLmJvZHkobm93OmV2aWRlbmNlLm9ic2VydmVkLGluY2x1ZGVTZWxlY3Rpb246dHJ1ZSkpCiAgICAgICAgICAgICAgICBsZXQgcmVwbHkgPSB0cnkgWENUVW53cmFwKEpTT05TZXJpYWxpemF0aW9uLmpzb25PYmplY3Qod2l0aDpkYXRhKSBhcz8gW1N0cmluZzpBbnldKQogICAgICAgICAgICAgICAgWENUQXNzZXJ0RXF1YWwocmVwbHlbInNjaGVtYSJdIGFzPyBTdHJpbmcsInRydWVwbGFuLnF1aWNrLXBjLWFjdGlvbi1ldmlkZW5jZS52MSIpCiAgICAgICAgICAgICAgICBsZXQgd2lyZSA9IHRyeSBYQ1RVbndyYXAocmVwbHlbImV2aWRlbmNlIl0gYXM/IFtTdHJpbmc6QW55XSkKICAgICAgICAgICAgICAgIGxldCByb3N0ZXIgPSB0cnkgWENUVW53cmFwKHdpcmVbIm93bl9yb3N0ZXIiXSBhcz8gW1tTdHJpbmc6QW55XV0pCiAgICAgICAgICAgICAgICBYQ1RBc3NlcnRFcXVhbChyb3N0ZXJbMV1bInNsb3QiXSBhcz8gSW50LDIpCiAgICAgICAgICAgICAgICBYQ1RBc3NlcnRFcXVhbChyb3N0ZXJbMV1bImxhYmVsIl0gYXM/IFN0cmluZywi44Of44Ot44Kr44Ot44K5IikKICAgICAgICAgICAgICAgIFhDVEFzc2VydE5pbChyb3N0ZXJbMV1bInNwZWNpZXMiXSkKICAgICAgICAgICAgICAgIFhDVEFzc2VydE5pbCh3aXJlWyJ0dXJuIl0pCiAgICAgICAgICAgICAgICBYQ1RBc3NlcnROaWwoY2FjaGUuYm9keShub3c6ZXZpZGVuY2Uub2JzZXJ2ZWQgKyAzXzAwMCxpbmNsdWRlU2VsZWN0aW9uOnRydWUpKQogICAgICAgICAgICAgICAgY2FjaGUuY2xlYXJTZWxlY3Rpb24odGhyb3VnaEVwb2NoOjEsZnJhbWU6ZnJhbWUpCiAgICAgICAgICAgICAgICBYQ1RBc3NlcnROaWwoY2FjaGUuYm9keShub3c6ZXZpZGVuY2Uub2JzZXJ2ZWQsaW5jbHVkZVNlbGVjdGlvbjp0cnVlKSkKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBYQ1RBc3NlcnRFcXVhbChib2FyZC5zY3JlZW4sLnByZXBhcmF0aW9uKQogICAgICAgIFhDVEFzc2VydFRydWUoYm9hcmQuZGV0YWlsKGRldGFpbCg2NzQsYXQ6MjBfMDAwLHdpZHRoOjEyOTAsaGVpZ2h0OjU5NiwKICAgICAgICAgICAgcm93czpbWyLli53liKnjgZfjgZ8iLDI1MCw0MTUsMTAwLDIwXV0pKSkKICAgICAgICBYQ1RBc3NlcnRUcnVlKGJvYXJkLmRldGFpbChkZXRhaWwoNjc1LGF0OjIwXzUwMCx3aWR0aDoxMjkwLGhlaWdodDo1OTYsCiAgICAgICAgICAgIHJvd3M6W1si6YG45Ye65a6M5LqGIiwzMDAsNTAwLDEwMCwyMF0sWyLlvoXmqZ/kuK0iLDEwMjAsNTAwLDgwLDIwXSwKICAgICAgICAgICAgICAgICAgWyLjg5Djg7Pjgq7jg6njgrkiLDE5MCw4MiwxMDAsMjBdXSkpKQogICAgICAgIFhDVEFzc2VydEVxdWFsKGJvYXJkLnJlcG9ydFsicm9zdGVyIl0gYXM/IFtTdHJpbmddLFsi44OQ44Oz44Ku44Op44K5Il0pCiAgICAgICAgWENUQXNzZXJ0RXF1YWwoKGJvYXJkLnJlcG9ydFsib3duX3NlbGVjdGlvbl9zbG90cyJdIGFzPyBbW1N0cmluZzpBbnldXSk/LmNvdW50LDEpCiAgICB9Cn0K'], 'r995-selection-fixture.json': ['72e24e4d7ce296024131d8bae3f2eb6caf082ac48903d5a4b7b36e76e1dd089d', 'W3siZnJhbWUiOjI4OCwiYXQiOjQ4MDksInciOjI3OTYsImgiOjEyOTAsInJvd3MiOltbIuOCqOODq+ODrOOCpOODiSIsNDE4LDE3OCwxNjAsMzhdLFsi44Of44Ot44Kr44Ot44K5Iiw0MTgsMzI3LDE2NCw0MF0sWyLjgrLjg7Pjgqzjg7wiLDQxOCw0NzgsMTMxLDQyXSxbIuODkOOCt+ODo+ODvOODoiIsNDE4LDYyOCwxNjQsMzhdLFsi44Kk44OA44Kk44OI44KmIiw0MTgsNzc3LDE1Miw0MF0sWyLjg4njg4fjgqvjg5DjgrciLDQxNCw5MjgsMTY0LDM4XSxbIjAvMyIsNDc1LDEwODMsNzAsMzhdLFsi6YG45Ye65a6M5LqGIiw2ODIsMTA4MywxMzUsMzhdLFsiM+WMuemBuOWHuuOBl+OBpuOBj+OBoOOBleOBhCIsMTA4MSwyOTIsNDExLDQ2XSxbIuW+heapn+S4rSIsMjI0MywxMDgzLDk4LDM4XV19LHsiZnJhbWUiOjYyMCwiYXQiOjExMjQ3LCJ3IjoxMjkwLCJoIjo1OTYsInJvd3MiOltbIuOCqOODq+ODrOOCpOODiSIsMTkxLDgxLDc1LDE5XSxbIuS4ieODreOCq+ODreOCuSIsMTkxLDE1Miw3OCwxOF0sWyLjgrLjg7Pjgqzjg7wiLDE5MSwyMTksNjMsMjFdLFsi44OQ44K344Oj44O844OiIiwxOTMsMjkxLDc2LDE4XSxbIuOCpOODgOOCpOODiOOCpiIsMTkxLDM1OSw3MSwxOV0sWyLjg4njg4bjgqvjg5DjgrciLDE4OSw0MjksNzgsMjBdLFsi6YG45Ye65a6M5LqGIiwzMTMsNTAxLDY0LDIwXSxbIuW+heapn+S4rSIsMTAzMyw1MDEsNDksMTldXX0seyJmcmFtZSI6NjczLCJhdCI6MTI5OTksInciOjEyOTAsImgiOjU5Niwicm93cyI6W1siXFzlr77miKbmupblgpnkuK0iLDY0NSw1OSw5NSwxOV0sWyLlvoXmqZ/kuK0iLDMxOSw1MTksNDcsMTldLFsi5b6F5qmf5LitIiw5MjMsNTIxLDQ3LDE5XV19XQo='], 'Info.plist': ['ced32e8f3e3ec94255ecebe023d4b2f0f34d354ad2e10113ed9b38145bfaebda', 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPCFET0NUWVBFIHBsaXN0IFBVQkxJQyAiLS8vQXBwbGUvL0RURCBQTElTVCAxLjAvL0VOIiAiaHR0cDovL3d3dy5hcHBsZS5jb20vRFREcy9Qcm9wZXJ0eUxpc3QtMS4wLmR0ZCI+CjxwbGlzdCB2ZXJzaW9uPSIxLjAiPgo8ZGljdD4KCTxrZXk+Q0ZCdW5kbGVEaXNwbGF5TmFtZTwva2V5PgoJPHN0cmluZz5DaGFtcGlvbnMgT24tRGV2aWNlIFJlc2VhcmNoPC9zdHJpbmc+Cgk8a2V5PkNGQnVuZGxlRXhlY3V0YWJsZTwva2V5PgoJPHN0cmluZz4kKEVYRUNVVEFCTEVfTkFNRSk8L3N0cmluZz4KCTxrZXk+Q0ZCdW5kbGVJZGVudGlmaWVyPC9rZXk+Cgk8c3RyaW5nPiQoUFJPRFVDVF9CVU5ETEVfSURFTlRJRklFUik8L3N0cmluZz4KCTxrZXk+Q0ZCdW5kbGVOYW1lPC9rZXk+Cgk8c3RyaW5nPiQoUFJPRFVDVF9OQU1FKTwvc3RyaW5nPgoJPGtleT5DRkJ1bmRsZVBhY2thZ2VUeXBlPC9rZXk+Cgk8c3RyaW5nPkFQUEw8L3N0cmluZz4KCTxrZXk+Q0ZCdW5kbGVTaG9ydFZlcnNpb25TdHJpbmc8L2tleT4KCTxzdHJpbmc+MC45Ljk3PC9zdHJpbmc+Cgk8a2V5PkNGQnVuZGxlVmVyc2lvbjwva2V5PgoJPHN0cmluZz45OTc8L3N0cmluZz4KCTxrZXk+VFBJbnRlZ3JhdGlvbkJ1aWxkPC9rZXk+Cgk8c3RyaW5nPkFJMDE0PC9zdHJpbmc+Cgk8a2V5Pk5TTG9jYWxOZXR3b3JrVXNhZ2VEZXNjcmlwdGlvbjwva2V5PgoJPHN0cmluZz5QQ+ihqOekuuOBruioiOa4rOOCkumWi+Wni+OBl+OBn+WgtOWQiOOBq+mZkOOCiuOAgeWQjOOBmFdpLUZp5LiK44Gu44OW44Op44Km44K244O844GrSFDjg7vjgr/jg7zjg7Pjga7lgJnoo5zjgpLooajnpLrjgZfjgb7jgZnjgII8L3N0cmluZz4KCTxrZXk+TlNTY3JlZW5DYXB0dXJlVXNhZ2VEZXNjcmlwdGlvbjwva2V5PgoJPHN0cmluZz7jg6bjg7zjgrbjg7zjga7oqLHlj6/jgZfjgZ/nlLvpnaLjga7jgb/jgIHnq6/mnKvlhoXjga7noJTnqbbnlKhPQ1Ljgavkvb/nlKjjgZfjgb7jgZnjgII8L3N0cmluZz4KCTxrZXk+VUlCYWNrZ3JvdW5kTW9kZXM8L2tleT4KCTxhcnJheT4KCQk8c3RyaW5nPnNjcmVlbi1jYXB0dXJlPC9zdHJpbmc+Cgk8L2FycmF5PgoJPGtleT5VSUxhdW5jaFNjcmVlbjwva2V5PgoJPGRpY3QvPgo8L2RpY3Q+CjwvcGxpc3Q+Cg==']}
+        for name,(expected,encoded) in files.items():
+            body=base64.b64decode(encoded,validate=True)
+            assert hashlib.sha256(body).hexdigest()==expected,name
+            (folder/name).write_bytes(body)
+        PAYLOAD
+        patch -s -p1 -F 0 -N -t -d "$source" < "$work/r997-ai014-readout.patch"
+        cp "$work/Info.plist" "$source/app/ios/ChampionsOnDevice/Info.plist"
+        python3 - "$source" <<'MANIFEST'
+        import hashlib,json,sys
+        from pathlib import Path
+        source=Path(sys.argv[1])
+        manifest=source/'source_manifest.json'
+        original=json.loads(manifest.read_bytes())
+        current={p.relative_to(source).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+                 for p in source.rglob('*') if p.is_file() and p!=manifest}
+        assert original.keys()==current.keys()
+        assert {key:current[key] for key in original if current[key]!=original[key]}=={'app/ios/ChampionsOnDevice/CaptureCoordinator.swift': '7818dce7f0800de4993eaee8fc1ad3b563f589c1273bbf4f66439653dc24e221', 'app/ios/ChampionsOnDevice/R987BattleReadout.swift': '95d5db0723b1f87e7a39846f8f64693cca230252d7dd48ce62ddcea40501cbfc', 'R720_PORTABLE_TESTS/Sources/R719Core/R987BattleReadout.swift': '95d5db0723b1f87e7a39846f8f64693cca230252d7dd48ce62ddcea40501cbfc', 'app/ios/ChampionsOnDevice/Info.plist': 'ced32e8f3e3ec94255ecebe023d4b2f0f34d354ad2e10113ed9b38145bfaebda'}
+        assert current['R720_PORTABLE_TESTS/Sources/R719Core/R987BattleReadout.swift']==current['app/ios/ChampionsOnDevice/R987BattleReadout.swift']
+        body=(json.dumps(current,sort_keys=True,indent=2)+'\n').encode()
+        assert hashlib.sha256(body).hexdigest()=='255a96f2e049ca060b4c5e0cd80dde62bbabc821984483e349ad3c3a3c3eac04',hashlib.sha256(body).hexdigest()
+        manifest.write_bytes(body)
+        MANIFEST
+    - name: Run the existing capture, archive, Vision and browser regressions on the combined source
+      shell: bash
+      run: |
+        set -euo pipefail
+        pinned="$RUNNER_TEMP/r997/r995-pinned.yml"
+        git show "$VERIFIED_SHA:.github/workflows/r995-device-readout-regression.yml" > "$pinned"
+        echo '1dd7ad209b3dedb78d8f94ac1367608be42bbfea1f11700def141bb87e5de9e5  r995-pinned.yml' |
+          (cd "$RUNNER_TEMP/r997" && shasum -a 256 -c -)
+        set -euo pipefail
+        prior="$RUNNER_TEMP/r994/r993-pinned.yml"
+        ruby -ryaml -e '
+          doc = YAML.load_file(ARGV[0], aliases: true)
+          steps = doc.fetch("jobs").fetch(ARGV[1]).fetch("steps")
+          puts steps.find { |step| step["name"] == ARGV[2] }.fetch("run")
+        ' "$prior" vision 'Replay Apple Vision on macOS 26' > "$RUNNER_TEMP/r994/vision.sh"
+        bash "$RUNNER_TEMP/r994/vision.sh"
+        ruby -ryaml -e '
+          doc = YAML.load_file(ARGV[0], aliases: true)
+          steps = doc.fetch("jobs").fetch(ARGV[1]).fetch("steps")
+          puts steps.find { |step| step["name"] == ARGV[2] }.fetch("run")
+        ' "$prior" verify 'Run Swift, archive and browser regressions' > "$RUNNER_TEMP/r994/legacy.sh"
+        bash "$RUNNER_TEMP/r994/legacy.sh"
+    - name: Replay the real R995 six-slot case through the Lenovo PC packet and verify expiry
+      shell: bash
+      run: |
+        set -euo pipefail
+        artifacts="$RUNNER_TEMP/r994"
+        tests="$PWD/pinned-r793/source/R720_PORTABLE_TESTS/Tests/R719CoreTests"
+        export R993_REPLAY_FIXTURE="$artifacts/r993-recorded-observations.jsonl"
+        test -s "$R993_REPLAY_FIXTURE"
+        test ! -e "$tests/R994RecordedReadoutTests.swift"
+        test ! -e "$tests/R995ReadoutCoverageTests.swift"
+        export R995_SELECTION_FIXTURE="$RUNNER_TEMP/r997/r995-selection-fixture.json"
+        test ! -e "$tests/R997SelectionTransportTests.swift"
+        cleanup() { rm -f "$tests/R994RecordedReadoutTests.swift" "$tests/R995ReadoutCoverageTests.swift" "$tests/R997SelectionTransportTests.swift"; }
+        trap cleanup EXIT
+        cp "$RUNNER_TEMP/r997/R997SelectionTransportTests.swift" "$tests/"
+        cp "$artifacts/R994RecordedReadoutTests.swift" "$artifacts/R995ReadoutCoverageTests.swift" "$tests/"
+        swift test --package-path pinned-r793/source/R720_PORTABLE_TESTS \
+          --scratch-path "$RUNNER_TEMP/ai014-swift-tests" --jobs 2 \
+          --filter 'R864SelectionSpritesTests|R994RecordedReadoutTests|R995ReadoutCoverageTests|R991NameIndependentReadoutTests|R997SelectionTransportTests' 2>&1 |
+          tee "$RUNNER_TEMP/ai014-apple-tests.log"
+        for suite in R864SelectionSpritesTests R994RecordedReadoutTests R995ReadoutCoverageTests R991NameIndependentReadoutTests R997SelectionTransportTests; do
+          grep -F "Test Suite '$suite' passed" "$RUNNER_TEMP/ai014-apple-tests.log"
+        done
+    - name: Build and validate the iPhoneOS 27 arm64 IPA
+      shell: bash
+      run: |
+        set -euo pipefail
+        root="$PWD/pinned-r793/source"
+        build="$RUNNER_TEMP/ai014-build"
+        package="$RUNNER_TEMP/ai014-package"
+        python3 - "$root" <<'VERIFY_SOURCE'
+        import hashlib,json,sys
+        from pathlib import Path
+
+        root=Path(sys.argv[1])
+        manifest=root/'source_manifest.json'
+        files={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest()
+               for p in root.rglob('*') if p.is_file() and p!=manifest}
+        assert files==json.loads(manifest.read_bytes()), 'source modified after verification'
+        VERIFY_SOURCE
+        xcodebuild -project "$root/app/ios/ChampionsOnDeviceResearch.xcodeproj" \
+          -scheme ChampionsOnDeviceResearch -configuration Release -sdk iphoneos \
+          -destination 'generic/platform=iOS' -derivedDataPath "$build" \
+          ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build 2>&1 |
+          tee "$RUNNER_TEMP/ai014-native.log"
+        grep -F 'BUILD SUCCEEDED' "$RUNNER_TEMP/ai014-native.log"
+        app="$build/Build/Products/Release-iphoneos/ChampionsOnDeviceResearch.app"
+            echo '255a96f2e049ca060b4c5e0cd80dde62bbabc821984483e349ad3c3a3c3eac04  source_manifest.json' | (cd "$root" && shasum -a 256 -c -)
+        mkdir -p "$package/Payload" "$package/readback"
+        ditto "$app" "$package/Payload/ChampionsOnDeviceResearch.app"
+        cd "$package"
+        zip -qry R997_AI014_Unsigned_DeviceTest.ipa Payload
+        python3 - "$root/source_manifest.json" <<'PY'
+        import hashlib, json, os, plistlib, struct, sys, zipfile
+        from pathlib import Path
+
+        app=Path('Payload/ChampionsOnDeviceResearch.app')
+        plen=app/'Info.plist'
+        params=plistlib.loads(plen.read_bytes())
+        assert (params['TPIntegrationBuild'],params['CFBundleIdentifier'],params['CFBundleVersion'],
+                params['CFBundleShortVersionString'],params['MinimumOSVersion'],params['DTPlatformName'])==(
+                'AI014','com.zeek10191019.championsresearch','997','0.9.97','27.0','iphoneos')
+        assert params['NSLocalNetworkUsageDescription'] and 'screen-capture' in params['UIBackgroundModes']
+        assert not (app/'embedded.mobileprovision').exists() and not (app/'_CodeSignature').exists()
+        for binary in [app/params['CFBundleExecutable'], *app.glob('*.dylib')]:
+            data=binary.read_bytes()
+            magic,cpu,_,kind,commands,command_bytes,*_=struct.unpack_from('<8I',data)
+            assert magic==0xfeedfacf and cpu==0x0100000c and kind in (2,6),binary
+            offset,platforms=32,[]
+            for _ in range(commands):
+                command,size=struct.unpack_from('<2I',data,offset)
+                assert size>=8 and offset+size<=len(data) and command!=29,binary
+                if command==50:
+                    platforms.append(struct.unpack_from('<I',data,offset+8)[0])
+                offset+=size
+            assert offset==32+command_bytes and platforms==[2],binary
+
+        ipa=Path('R997_AI014_Unsigned_DeviceTest.ipa')
+        with zipfile.ZipFile(ipa) as z:
+            assert z.testzip() is None
+            members=[i.filename for i in z.infolist() if not i.is_dir()]
+            expected={str(p):p for p in app.rglob('*') if p.is_file()}
+            assert len(members)==len(expected) and set(members)==set(expected)
+            assert all(z.read(name)==p.read_bytes() for name,p in expected.items())
+        sha=lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+        record={'integration':'AI014','app_build':997,'app_version':'0.9.97','signed':False,
+                'native_build':'PASS','apple_regression':'PASS','physical_retest':'PENDING',
+                'ipa':{'name':ipa.name,'bytes':ipa.stat().st_size,'sha256':sha(ipa)},
+                'source_manifest_sha256':sha(Path(sys.argv[1])),'base_sha':os.environ['VERIFIED_SHA'],
+                'workflow_commit':os.environ['GITHUB_SHA'],'run_id':int(os.environ['GITHUB_RUN_ID'])}
+        Path('VERIFICATION_R997_IPA.json').write_text(json.dumps(record,indent=2)+'\n')
+        print('AI014_UNSIGNED_IPA_VERIFIED',record)
+        PY
+    - name: Publish and re-download the verified IPA
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "$RUNNER_TEMP/ai014-package"
+        if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,targetCommitish |
+            jq -e --arg sha "$GITHUB_SHA" '.isDraft and .targetCommitish == $sha'
+          gh release upload "$RELEASE_TAG" R997_AI014_Unsigned_DeviceTest.ipa VERIFICATION_R997_IPA.json \
+            --repo "$GITHUB_REPOSITORY" --clobber
+        else
+          gh release create "$RELEASE_TAG" R997_AI014_Unsigned_DeviceTest.ipa VERIFICATION_R997_IPA.json \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --prerelease \
+            --title 'R997 画面共有・OCR・Lenovo連携 実機試験' --notes 'Windowsから取得して署名するiPhoneOS 27以降・arm64用IPA。実機試験はこれから行います。'
+        fi
+        gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir readback
+        for name in R997_AI014_Unsigned_DeviceTest.ipa VERIFICATION_R997_IPA.json; do
+          cmp "$name" "readback/$name"
+        done
+        gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+        for name in R997_AI014_Unsigned_DeviceTest.ipa VERIFICATION_R997_IPA.json; do
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$name"
+          curl -fsSL --retry 4 --retry-all-errors "$url" -o "readback/public-$name"
+          cmp "$name" "readback/public-$name"
+          printf 'R997_PUBLIC_READBACK_VERIFIED %s\n' "$url"
+        done
