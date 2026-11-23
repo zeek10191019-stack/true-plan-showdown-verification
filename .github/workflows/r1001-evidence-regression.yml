@@ -22,10 +22,27 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ai024-pc-pairing
-          persist-credentials: false
+      - name: Read pinned R999 workflow without checking out malformed repository paths
+        shell: bash
+        env:
+          R999_AI024_COMMIT: '32f1b2014d6be23e169e50e5de52466ed1212ab3'
+          R999_AI024_WORKFLOW_BLOB: 'e73735a4d84133bf2feddf78757a9c77d4ecc2b0'
+        run: |
+          set -Eeuo pipefail
+          command -v git
+          # The repository has a path that is too long for filesystem checkout.
+          # A bare object read materializes ONLY the expected workflow file.
+          read_dir="$(mktemp -d "$RUNNER_TEMP/r999-git-read.XXXXXXXX")"
+          git -C "$read_dir" init -q
+          git -C "$read_dir" remote add origin https://github.com/zeek10191019-stack/true-plan-showdown-verification.git
+          git -C "$read_dir" -c protocol.version=2 fetch --no-tags --depth=1 origin refs/heads/ai024-pc-pairing
+          actual="$(git -C "$read_dir" rev-parse FETCH_HEAD)"
+          test "$actual" = "$R999_AI024_COMMIT" || { echo 'R999_COMMIT_DRIFT'; exit 20; }
+          mkdir -p .github/workflows
+          git -C "$read_dir" show "$actual:.github/workflows/ai024-pc-pairing.yml" > .github/workflows/ai024-pc-pairing.yml
+          actual_blob="$(git hash-object .github/workflows/ai024-pc-pairing.yml)"
+          test "$actual_blob" = "$R999_AI024_WORKFLOW_BLOB" || { echo 'R999_BLOB_MISMATCH'; exit 21; }
+          echo 'PASS: verified R999 commit and workflow blob without checkout'
       - name: Enforce R999 AI024 pairing baseline (not older R998)
         shell: bash
         run: |
