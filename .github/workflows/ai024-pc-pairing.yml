@@ -21,24 +21,26 @@ env:
   R998_WORKFLOW_BLOB: "f76b209dd3f6f2845c4d0854eab946fd61d9afbe"
 
 jobs:
-  ios:
+  verify:
     if: >-
-      github.repository == 'zeek10191019-stack/true-plan-showdown-verification'
-      && !github.event.repository.private
-      && github.ref == 'refs/heads/ai024-pc-pairing'
-    runs-on: xcode-27
-    timeout-minutes: 45
+      github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && !github.event.repository.private && github.ref == 'refs/heads/ai024-pc-pairing'
+    runs-on: macos-26
+    timeout-minutes: 42
     permissions:
-      contents: write
+      contents: read
       actions: read
+    outputs:
+      manifest: ${{ steps.identity.outputs.manifest }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - &checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
           persist-credentials: false
           sparse-checkout-cone-mode: false
           sparse-checkout: .github/workflows/ai024-pc-pairing.yml
-      - name: Restore the verified R998 source
+      - &restore
+        name: Restore the verified R998 source
         shell: bash
         run: |
           export GH_TOKEN="${{ github.token }}"
@@ -53,7 +55,8 @@ jobs:
             }.fetch("run")
           ' "$workflow" > "$RUNNER_TEMP/restore-r998.sh"
           bash "$RUNNER_TEMP/restore-r998.sh"
-      - name: Apply and verify the pairing patch
+      - &apply
+        name: Apply and verify the pairing patch
         shell: bash
         run: |
           set -euo pipefail
@@ -308,9 +311,32 @@ jobs:
           assert result['token'] == str(uuid.UUID(bytes=mac('read', body['generation'])[:16], version=4)).upper()
           print("AI024_SWIFT_PAIRING_WIRE_PASSED")
           CHECK_PAIRING
+      - name: Record the tested source identity
+        id: identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          hash="$(shasum -a 256 pinned-r793/source/source_manifest.json | cut -d' ' -f1)"
+          printf 'manifest=%s\n' "$hash" >> "$GITHUB_OUTPUT"
+  ios:
+    needs: verify
+    runs-on: xcode-27
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    env:
+      TESTED_MANIFEST: ${{ needs.verify.outputs.manifest }}
+    steps:
+      - *checkout
+      - *restore
+      - *apply
       - name: Build and inspect the arm64 iPhone IPA
         shell: bash
         run: |
+          set -euo pipefail
+          hash="$(shasum -a 256 pinned-r793/source/source_manifest.json | cut -d' ' -f1)"
+          [[ "$hash" == "$TESTED_MANIFEST" ]]
           test "$(xcrun --sdk iphoneos --show-sdk-version | cut -d. -f1)" = 27
           set -euo pipefail
           root="$PWD/pinned-r793/source"
