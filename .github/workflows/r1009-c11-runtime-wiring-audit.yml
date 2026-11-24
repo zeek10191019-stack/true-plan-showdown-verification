@@ -1,4 +1,4 @@
-name: R1009 C11 product RAW/OCR runtime hooks + native iPhoneOS build audit (NO IPA)
+name: R1019 C21 RAW receipt validation + native iPhoneOS build audit (NO IPA)
 'on':
   push:
     branches: [main]
@@ -684,7 +684,7 @@ jobs:
           // stops ReplayKit/ScreenCaptureKit, disk recording, ZIP export, or voice.
           // No screen/name/turn may be certified from this tap.
           import Foundation
-          
+
           public final class R1009C11LiveCaptureTap: @unchecked Sendable {
               public static let shared = R1009C11LiveCaptureTap()
               private let queue = DispatchQueue(label: "trueplan.r1009.c11.live-receipts", qos: .utility)
@@ -699,9 +699,15 @@ jobs:
               // Monotonic capture generations prevent a retired stream from re-arming.
               // Keep a bounded old-session registry; these are diagnostics only.
               private var closedOrder = [String]()
-          
+
               public init(adapter: R1007CaptureIntegrationAdapter = R1007CaptureIntegrationAdapter()) {
                   self.adapter = adapter
+              }
+              // Validate actual ASCII hex before mutating the current capture identity.
+              private static func validSHA(_ value: String) -> Bool {
+                  value.utf8.count == 64 && value.utf8.allSatisfy {
+                      (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
+                  }
               }
               private func submit(_ work: @escaping @Sendable () -> Void) {
                   pendingLock.lock()
@@ -724,7 +730,7 @@ jobs:
                   guard !session.isEmpty, session.utf8.count <= 128,
                         epoch > 0, epoch <= Int64(Int.max),
                         frame > 0, frame <= Int64(Int.max),
-                        observedMS >= 0, sha256.utf8.count == 64 else { return }
+                        observedMS >= 0, Self.validSHA(sha256) else { return }
                   submit { [self] in
                       let e = Int(epoch)
                       guard e >= lastEpoch, !stoppedTokens.contains(session) else { return }
@@ -753,8 +759,8 @@ jobs:
               // mismatch cannot stop capture, and is never promoted to current authority.
               public func ocrCompleted(session: String, epoch: Int64, frame: Int64,
                                        sha256: String, values: [String:Int64]) {
-                  guard !session.isEmpty, epoch > 0, epoch <= Int64(Int.max),
-                        frame > 0, frame <= Int64(Int.max), sha256.utf8.count == 64,
+                  guard !session.isEmpty, session.utf8.count <= 128, epoch > 0, epoch <= Int64(Int.max),
+                        frame > 0, frame <= Int64(Int.max), Self.validSHA(sha256),
                         values.count <= 4096 else { return }
                   // This represents numeric quick OCR candidates, NOT a game turn.
                   let bounded = Dictionary(uniqueKeysWithValues:
@@ -809,6 +815,78 @@ jobs:
           swiftc -frontend -parse -swift-version 6             "$app/CaptureCoordinator.swift" "$app/R1009C11LiveCaptureTap.swift"
           swiftc -swift-version 6 -typecheck             "$app/R1001BattleSafetyCore.swift" "$app/R1000CapturePCBridge.swift"             "$app/R1006CaptureHubStatus.swift" "$app/R1007CaptureIntegrationAdapter.swift"             "$app/R1009C11LiveCaptureTap.swift"
           echo C11_SWIFT6_TYPECHECK_PASS_NO_PHYSICAL_DEVICE
+      - name: C21 locate native archive transfer and delete handlers without modification
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/c6-objects/pinned-r793/source"
+          python3 - "$root" <<'C21_MAP'
+          import hashlib,json,re,sys
+          from pathlib import Path
+          root=Path(sys.argv[1]); manifest=json.loads((root/'source_manifest.json').read_text())
+          patterns=re.compile(r'(?i)archive|split|chunk|partzip|download|export|transfer|delete|remove|background|resume|share')
+          for p in sorted((root/'app/ios').rglob('*.swift')):
+              rel=p.relative_to(root).as_posix(); raw=p.read_bytes()
+              assert hashlib.sha256(raw).hexdigest()==manifest[rel],rel
+              hits=[]
+              for n,line in enumerate(raw.decode('utf8').splitlines(),1):
+                  m=re.search(r'\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(',line)
+                  if m and patterns.search(m.group(1)): hits.append([n,m.group(1)])
+              if hits: print('C21_EXPORT_MAP',json.dumps({'path':rel,'sha256':manifest[rel],'functions':hits},ensure_ascii=False))
+          print('C21_SOURCE_MAP_ONLY_NOT_EXPORT_CERTIFICATION')
+          C21_MAP
+      - name: C21 verify malformed RAW receipt cannot retire an active session
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          app="$RUNNER_TEMP/c6-objects/pinned-r793/source/app/ios/ChampionsOnDevice"
+          cat > "$RUNNER_TEMP/c21-receipt-test.swift" <<'C21_SWIFT'
+          import Foundation
+          @main struct C21ReceiptTests {
+              static func main() {
+                  let tap=R1009C11LiveCaptureTap()
+                  let good=String(repeating:"a",count:64)
+                  var checks=0
+                  func check(_ ok:Bool,_ reason:String) {
+                      if !ok { print("FAIL: \(reason)"); exit(1) }
+                      checks += 1
+                  }
+                  func raw(_ session:String,_ epoch:Int64,_ frame:Int64,_ hash:String) {
+                      tap.rawPersisted(session:session,epoch:epoch,frame:frame,sha256:hash,observedMS:100)
+                  }
+                  func snap()->[String:Any] {tap.debugSnapshot(nowMS:100)}
+                  raw("A",1,1,good)
+                  check(snap()["source_frame_id"] as? Int == 1,"initial RAW")
+                  for malformed in [String(repeating:"z",count:64),String(repeating:"_",count:64),String(repeating:"é",count:32),String(repeating:"a",count:63),String(repeating:"a",count:65)] {
+                      raw("B",2,2,malformed)
+                      let state=snap()
+                      check(state["capture_epoch"] as? Int == 1,"invalid digest must not retire A")
+                      check(state["source_frame_id"] as? Int == 1,"invalid digest must preserve current frame")
+                  }
+                  raw("A",1,2,good)
+                  check(snap()["source_frame_id"] as? Int == 2,"A keeps accepting RAW")
+                  tap.ocrCompleted(session:"A",epoch:1,frame:2,sha256:good,values:["hp":100])
+                  check(snap()["provisional_field_count"] as? Int == 1,"matching OCR")
+                  tap.ocrCompleted(session:"A",epoch:1,frame:2,sha256:String(repeating:"z",count:64),values:["hp":0])
+                  check(snap()["provisional_field_count"] as? Int == 1,"invalid OCR cannot change candidates")
+                  raw("B",2,1,good.uppercased())
+                  check(snap()["capture_epoch"] as? Int == 2,"valid next epoch")
+                  check(snap()["source_raw_sha256"] as? String == good,"uppercase hex normalized")
+                  raw("A",1,3,good)
+                  check(snap()["capture_epoch"] as? Int == 2,"late A cannot replace B")
+                  tap.captureStopped(session:"A")
+                  check(snap()["capture_epoch"] as? Int == 2,"late A stop cannot retire B")
+                  tap.captureStopped(session:"B")
+                  check(snap()["mode"] as? String == "NO_CAPTURE_FRAME","B stop clears projection")
+                  raw("B",2,2,good)
+                  check(snap()["mode"] as? String == "NO_CAPTURE_FRAME","late B cannot rearm")
+                  check(snap()["voice_enabled"] as? Bool == false,"voice remains off")
+                  print("C21_RECEIPT_TEST_PASS \(checks)")
+              }
+          }
+          C21_SWIFT
+          swiftc -swift-version 6 "$app/R1001BattleSafetyCore.swift" "$app/R1000CapturePCBridge.swift" "$app/R1006CaptureHubStatus.swift" "$app/R1007CaptureIntegrationAdapter.swift" "$app/R1009C11LiveCaptureTap.swift" "$RUNNER_TEMP/c21-receipt-test.swift" -o "$RUNNER_TEMP/c21-receipt-test"
+          "$RUNNER_TEMP/c21-receipt-test"
       - name: C11 compile real unsigned iPhoneOS arm64 target without exporting IPA
         shell: bash
         run: |
