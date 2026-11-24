@@ -32,7 +32,7 @@ jobs:
           from pathlib import Path
           import sys
           raw=Path(sys.argv[1]).read_bytes()
-          assert len(raw)<450000, 'GITHUB_500KB_WORKFLOW_LIMIT'
+          assert len(raw)<470000, 'GITHUB_500KB_WORKFLOW_LIMIT'
           print('C6_YAML_SIZE_OK',len(raw))
           PY
       - name: Verify SHA-pinned embedded full C4 source and prior failure evidence
@@ -216,6 +216,7 @@ jobs:
           import os
           import re
           import tempfile
+          import subprocess
           from pathlib import Path
           
           PINNED_PBX_SHA256 = '57ed49d85bb123cf8b728c588cc6a9a4d861c3f74cadb5a7108086f674170d44'
@@ -373,8 +374,8 @@ jobs:
               groups=[o for o in by_isa('PBXGroup') if capture_ref in matching_id_list(o['body'],'children')]
               if len(groups)!=1:raise ValueError('CAPTURE_GROUP_NOT_UNIQUE')
               group=groups[0]
-              _,_,group_list_end=field_list(group['body'],'children')
-              _,_,phase_list_end=field_list(phase['body'],'files')
+              group_value,_,group_list_end=field_list(group['body'],'children')
+              phase_value,_,phase_list_end=field_list(phase['body'],'files')
               refs=[];builds=[];group_lines=[];phase_lines=[]
               for fn in ADDON_HASHES:
                   ref=rid('ref',fn);build=rid('build',fn)
@@ -384,9 +385,13 @@ jobs:
                   builds.append(f'\t\t{build} /* {fn} in Sources */ = {{isa = PBXBuildFile; fileRef = {ref} /* {fn} */; }};')
                   group_lines.append(f'\t\t\t\t{ref} /* {fn} */,')
                   phase_lines.append(f'\t\t\t\t{build} /* {fn} in Sources */,')
+              # Inline OpenStep arrays may omit the final comma. Ignore comments.
+              def insertion(value, lines):
+                  tail=lexical_mask(value).strip()
+                  return (',' if tail and not tail.endswith(',') else '')+'\n'+'\n'.join(lines)+'\n'
               changes=[
-                  (group['opening']+1+group_list_end,'\n'+'\n'.join(group_lines)+'\n'),
-                  (phase['opening']+1+phase_list_end,'\n'+'\n'.join(phase_lines)+'\n'),
+                  (group['opening']+1+group_list_end,insertion(group_value,group_lines)),
+                  (phase['opening']+1+phase_list_end,insertion(phase_value,phase_lines)),
                   (root_end,'\n'+'\n'.join(refs+builds)+'\n')
               ]
               if len({p for p,_ in changes})!=3:raise ValueError('OVERLAPPING_INSERTION')
@@ -407,9 +412,26 @@ jobs:
                       raise ValueError('SOURCE_NOT_IN_GROUP:'+fn)
                   if rid('build',fn) not in matching_id_list(patched_phase['body'],'files'):
                       raise ValueError('SOURCE_NOT_IN_BUILD_PHASE:'+fn)
+              # Parse both full projects using an independent OpenStep parser.
+              def parsed(data):
+                  with tempfile.TemporaryDirectory() as tmp:
+                      p=Path(tmp)/'project.pbxproj';p.write_text(data,encoding='utf-8')
+                      raw=subprocess.check_output(['plutil','-convert','json','-o','-','--',str(p)])
+                      return json.loads(raw)
+              old_tree=parsed(text);new_tree=parsed(new)
+              old_objects=old_tree['objects']
+              expected=old_tree
+              expected['objects'][group['id']]['children'] += [rid('ref',fn) for fn in ADDON_HASHES]
+              expected['objects'][phase['id']]['files'] += [rid('build',fn) for fn in ADDON_HASHES]
+              for fn in ADDON_HASHES:
+                  ref=rid('ref',fn);build=rid('build',fn)
+                  old_objects[ref]={'isa':'PBXFileReference','lastKnownFileType':'sourcecode.swift','path':fn,'sourceTree':'<group>'}
+                  old_objects[build]={'isa':'PBXBuildFile','fileRef':ref}
+              if new_tree!=expected:raise ValueError('C17_PBX_SEMANTIC_DELTA_MISMATCH')
+              print('C17_FULL_OPENSTEP_PARSE_AND_SEMANTIC_DELTA_PASS')
               return new
-          
-          
+
+
           def verify_source(root):
               root=root.resolve();app=root/'app/ios/ChampionsOnDevice'
               project=root/'app/ios/ChampionsOnDeviceResearch.xcodeproj/project.pbxproj'
@@ -476,7 +498,9 @@ jobs:
             echo C12_BASELINE_PROJECT_REJECTED; tail -n 35 "$RUNNER_TEMP/c12-baseline-xcode.log"; exit 33;
           }
           echo C12_BASELINE_XCODE27_OPEN_PASS
+          plutil -lint -- "$project/project.pbxproj"
           python3 "$RUNNER_TEMP/c10-register.py" --source-root "$root" --apply --report "$RUNNER_TEMP/c10-registration.json"
+          plutil -lint -- "$project/project.pbxproj"
           python3 - "$root" "$RUNNER_TEMP/c10-registration.json" <<'CHECK'
           import hashlib,json,sys
           from pathlib import Path
@@ -891,7 +915,7 @@ jobs:
           path='.github/workflows/r1009-c11-runtime-wiring-audit.yml'
           raw=subprocess.run(['git','-C',repo,'show',f'{commit}:{path}'],
                              check=True,capture_output=True).stdout
-          if not (10000 < len(raw) < 450000):raise SystemExit('WORKFLOW_RAW_SIZE_LIMIT')
+          if not (10000 < len(raw) < 470000):raise SystemExit('WORKFLOW_RAW_SIZE_LIMIT')
           Path(dest).write_bytes(raw)
           assert Path(dest).read_bytes()==raw
           print('C11_WINDOWS_GIT_BYTES_PASS',len(raw),hashlib.sha256(raw).hexdigest())
