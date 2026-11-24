@@ -1,0 +1,77 @@
+name: R1021 C23 native iPhone export source recovery (READ ONLY NO IPA)
+'on':
+  push:
+    branches: [main]
+    paths: [.github/workflows/r1021-c23-native-export-source.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  source:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - name: Restore exact C21 source using previously certified restore scripts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_SHA: ab2ed826d3f4f0e1eda8fcb8d8b614571f2c4ed0a95606bb91e911b95dad5ef8
+          BUNDLE_FILES_SHA: 4a53e194f540f156de21b863fc2bfc7e92744087b6e88fab482e59caf2769585
+        run: |
+          set -Eeuo pipefail
+          repo="$RUNNER_TEMP/c6-objects"
+          pin=5e3cb5c48852d9ff7695618d72f502fd74d8c184
+          git init -q "$repo"
+          git -C "$repo" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git -C "$repo" fetch --no-tags --filter=blob:none --depth=1 origin "$pin"
+          [[ "$(git -C "$repo" rev-parse FETCH_HEAD)" == "$pin" ]]
+          git -C "$repo" show "$pin:.github/workflows/r1009-c11-runtime-wiring-audit.yml" > "$RUNNER_TEMP/c6-self.yml"
+          [[ "$(git hash-object "$RUNNER_TEMP/c6-self.yml")" == '119e1a145978407c07b003adaf31d7b8c4fd2c6b' ]]
+          ruby -ryaml -e '
+            steps=YAML.load_file(ARGV.fetch(0),aliases:true).fetch("jobs").fetch("macos-source").fetch("steps")
+            step=steps.find{|s|s["name"]==ARGV.fetch(1)} or raise "missing pinned step"
+            print step.fetch("run")
+          ' "$RUNNER_TEMP/c6-self.yml" 'Verify SHA-pinned embedded full C4 source and prior failure evidence' > "$RUNNER_TEMP/c23-unpack.sh"
+          bash "$RUNNER_TEMP/c23-unpack.sh"
+          ruby -ryaml -e '
+            steps=YAML.load_file(ARGV.fetch(0),aliases:true).fetch("jobs").fetch("macos-source").fetch("steps")
+            step=steps.find{|s|s["name"]==ARGV.fetch(1)} or raise "missing pinned step"
+            print step.fetch("run")
+          ' "$RUNNER_TEMP/c6-self.yml" 'Fetch historical commits without checkout and restore pinned R999' > "$RUNNER_TEMP/c23-restore.sh"
+          bash "$RUNNER_TEMP/c23-restore.sh"
+      - name: Emit hash-verified native archive and deletion source evidence only
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - "$RUNNER_TEMP/c6-objects/pinned-r793/source" <<'PY'
+          import hashlib,json,sys
+          from pathlib import Path
+          root=Path(sys.argv[1]); manifest=json.loads((root/'source_manifest.json').read_text())
+          app='app/ios/ChampionsOnDevice/'
+          expected={
+              'CaptureCoordinator.swift':'25db5578aa2d9ce76bba2890ce9385f8d1c5aee27adbb8bdf2d465d03cbe5d9a',
+              'R714ChunkedEvidence.swift':'cd5eb6269c50bbb3d5901556830f9edfe56bc24849ebb6ff76c401fc9f7b74a0',
+              'R936ExportJob.swift':'f610e0dd221ba89bc01e1dad3fe32b0209b9f0bef3c182213c74997cb59283c4',
+              'R946StoredCaptures.swift':'16f986ba7a4d7f73e86d7ae0e8cc5dc3a861bcd47e81b2190b5c94ac82b7e689',
+              'R729EvidenceTransportPolicy.swift':'1b8e0ade7f6d95ebef62194d5aded7a83b958cbc89d2d96bf875836cd2e39c58',
+              'R731ArchiveCapacity.swift':'5068c8f2ebcdd98d84b7807a373c33f2c3288cf4eede6fa37948351e8b0964af',
+              'R710ContinuousRecorder.swift':'60e2e5f19b756d651b832971285c25e36e6a1d5a6faffbb44fd0b677761207b8',
+          }
+          # Only publicly stored program source; no captured frames, user data, env, or credentials.
+          for name,want in expected.items():
+              path=app+name; raw=(root/path).read_bytes(); got=hashlib.sha256(raw).hexdigest()
+              assert got==want==manifest[path], (name,got)
+              lines=raw.decode('utf8').splitlines()
+              print('C23_SOURCE_BEGIN',name,got,len(lines))
+              # Full small files. Large files: relevant portions only; exact original line numbers.
+              ranges=[(1,len(lines))]
+              if name=='CaptureCoordinator.swift': ranges=[(190,490),(620,760),(900,1240),(2880,2980),(4660,len(lines))]
+              if name=='R710ContinuousRecorder.swift': ranges=[(90,190),(1080,len(lines))]
+              for a,b in ranges:
+                  for n in range(max(1,a),min(len(lines),b)+1):
+                      print('C23_SRC',name,n,json.dumps(lines[n-1],ensure_ascii=False))
+              print('C23_SOURCE_END',name)
+          print('C23_NATIVE_EXPORT_SOURCE_READY_READ_ONLY_NOT_FIX_NOT_IPA')
+          PY
