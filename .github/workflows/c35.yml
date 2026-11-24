@@ -1,0 +1,71 @@
+name: R1035 C35 fixed shell + transfer pin race (NO IPA)
+'on':
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/c35.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: ${{ matrix.job }}
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - job: macos-source
+          os: xcode-27
+        - job: windows-cli
+          os: windows-2025
+        - job: windows-receiver
+          os: windows-2025
+        - job: macos-sender
+          os: xcode-27
+        - job: windows-hud
+          os: windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+    - name: Run pinned C34 and C35 regression via fixed shell
+      shell: bash
+      env:
+        C33_JOB: ${{ matrix.job }}
+        GH_TOKEN: ${{ github.token }}
+        PYTHONUTF8: '1'
+      run: |
+        set -Eeuo pipefail
+        if [[ "$RUNNER_OS" == Windows ]]; then PY=python; else PY=python3; fi
+        "$PY" - <<'C35_PY'
+        import os, pathlib, hashlib, urllib.request, subprocess, sys, base64, zlib
+        h=lambda b:hashlib.sha256(b).hexdigest()
+        url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/c759f0efa78bf51093953d847691a80ea2d2aa5d/.github/workflows/c34.yml'
+        with urllib.request.urlopen(url,timeout=60) as response: raw=response.read(100000)
+        assert h(raw)=='f2ec8a3dc1c03a8760f6bfe24aed0be33667bd50b769b1c223db594a065106c6'
+        body=raw.decode().split('\n      run: |\n',1)[1].split('\n  gate:\n',1)[0]
+        code='\n'.join(line[8:] for line in body.splitlines())+'\n'
+        assert h(code.encode())=='182974bc8914ce66c1a2183e08bf70d82afe2a36c867e7031a97cddc349ef0f1'
+        tmp=pathlib.Path(os.environ['RUNNER_TEMP'])
+        patch=zlib.decompress(base64.b64decode('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'));assert h(patch)=='1be48c8070fb340a143cde801dbc9ae6f3499419f28e02e36ef0dfc05bc08736'
+        (tmp/'c35-stage.py').write_bytes(patch)
+        anchor="    f=root/('c33-step-'"
+        assert code.count(anchor)==1
+        insertion = '    if job==\'macos-sender\':\n        mark=\'swiftc -swift-version 6 R1029TransferClient.swift R1032TransferStage.swift stage_probe.swift -o stage_probe\'\n        assert run.count(mark)==1\n        run=run.replace(mark,\'python3 "$RUNNER_TEMP/c35-stage.py" sender .\\n\'+mark)\n    if job==\'macos-source\' and i==13:\n        run=\'set -Eeuo pipefail\\npython3 "$RUNNER_TEMP/c35-stage.py" native "$RUNNER_TEMP/c6-objects/pinned-r793/source"\\n\'+run\n'
+        code=code.replace(anchor,insertion+anchor)
+        runner=tmp/'c35-runner.py';runner.write_text(code,encoding='utf-8')
+        subprocess.run([sys.executable,str(runner)],check=True)
+        C35_PY
+  gate:
+    needs:
+    - verify
+    if: always() && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    steps:
+    - name: 'Gate: every automated job must pass; no IPA or physical certification'
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        [[ '${{ needs.verify.result }}' == success ]]
+        echo C35_AUTOMATED_GATE_PASS_UI_BACKGROUND_PHYSICAL_IPA_HOLD
