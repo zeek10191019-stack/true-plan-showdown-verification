@@ -1,4 +1,4 @@
-name: R1019 C21 RAW receipt validation + native iPhoneOS build audit (NO IPA)
+name: R1025 C26 native progress repair + C21 regression (NO IPA)
 'on':
   push:
     branches: [main]
@@ -887,6 +887,73 @@ jobs:
           C21_SWIFT
           swiftc -swift-version 6 "$app/R1001BattleSafetyCore.swift" "$app/R1000CapturePCBridge.swift" "$app/R1006CaptureHubStatus.swift" "$app/R1007CaptureIntegrationAdapter.swift" "$app/R1009C11LiveCaptureTap.swift" "$RUNNER_TEMP/c21-receipt-test.swift" -o "$RUNNER_TEMP/c21-receipt-test"
           "$RUNNER_TEMP/c21-receipt-test"
+      - name: C26 reproduce and repair native save-progress race; retain deletion and split policy checks
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          root="$RUNNER_TEMP/c6-objects/pinned-r793/source"
+          app="$root/app/ios/ChampionsOnDevice"
+          python3 - "$root" "$RUNNER_TEMP" <<'C26_PATCH'
+          import base64,hashlib,json,sys,zlib
+          from pathlib import Path
+          root=Path(sys.argv[1]); tmp=Path(sys.argv[2]); m=root/'source_manifest.json'
+          sha=lambda b:hashlib.sha256(b).hexdigest()
+          before=json.loads(m.read_text())
+          actual={p.relative_to(root).as_posix():sha(p.read_bytes()) for p in root.rglob('*') if p.is_file() and p!=m}
+          assert actual==before,'C26_BASE_MANIFEST_MISMATCH'
+          rel='app/ios/ChampionsOnDevice/R936ExportJob.swift'
+          p=root/rel; source=p.read_bytes()
+          assert sha(source)=='f610e0dd221ba89bc01e1dad3fe32b0209b9f0bef3c182213c74997cb59283c4'
+          old=zlib.decompress(base64.b64decode('eNqllEFv0zAUx+/7FF4PUyKlURkCiZQA0gbS0DTGup0QmrzEbc1cO9gvHVXXC/ddOHHhwhFpnBHSxIdhaHwMnp2kbZYeQPjguvZ7z+///Hvpc0kFSQQ1hhw8uHu/R8dsX6uBZsZE5EkukyFLTllKekym9EQwMl0jOAzoPAHSAwo5Gm6p5UM7BAM0ogMW9UBzOQjIyQSYiXYkBAQUUFEsmaCZYWm0rXIMUHPPs5SCPcLZHczcnGk+xh1nIlRyGu/1dvHH82unY6oJqoJDjhaoKEFBO7KvwmxpbSYG2OgoAz5ijdiYvYZ/d7UXoyuwuCiOV1Shdf3j06/Lj9dXFzdXX3++/3Dz+fvvLxfX3y5bQVGYTlBUpRNUJekEyxXw/NUC7YtFh5gFlpPpMb5mTNp3Os2c0G5HPhN8MIS4T4VpKj7THEPE29xkFJLhy5zlzBP0hImolQzpKONKmtAGamclI63grTJRmAMXHCZ+I2SuRXR0sOv2ueTgpVyzBJSe2G2fTNEgnu+FNMuQM8Rln8JwS40yJZkEr1VdF74xSrb8AoQ+0llC4h3XYTteou14gZt/C1Cpzv7+gZ0TghaKBW1VIKyOHLA0dkmQ9bggIHR/F4YVjnjtfJP3yXrpTTY2bEbtwrekoO0wfNgJN++Rqbs+l0UCXc0g13JWV8TeQR08N5eMubnkzM1z1sp7Naxkruh4y7SNX+9xpAGJW1/GywrxKlHn505UheqjTX9Zu3OfVoe2Mt0aqPiZYbN6+Sv9zTDzHTsKmENqJkjJlLwyTPRfI4M1IztATx6T570Xe09lolKmPT9kbuVZsX7oAnmgIkQ1UMgDNkEUUlAjnviNaKsImZdwdQs23BsKFx+/xaqYXWdLfMOhgsgrHj6w1N+mfZFWN2V9pusszf6vLQoSiecYsVd7c578+d8K/5Kp2dps7Q+S7x13',validate=True))
+          new=zlib.decompress(base64.b64decode('eNqlVUtv1DAQvvdXuHuoEilNFxBIBFKQeEhFCEoXTghVbuLdNXjtYE+2rNq9cO+FExcuHJHgjJAQP4Yi+BmM7WST7BbEIwevPR7P45tvZodcUkEyQY0he5cvXBrQKdvVaqSZMQm5XspszLJnLCcDJnN6IBg5WiP4GdBlBmQAFEpUvKHal/YTDFCJjlgyAM3lKCIHM2Am2ZEQEVBAhd8yQQvD8uSmKtFA53lZ5BTsFa7uYu7WQvMpSpyKUNmz9N7gLv4EYed2SjXBrOAhRw3MKMOEduRQxUVrb2YG2ORRAXzCVmxj9Br+/ql1jE+BpR6cwKPQO/3y5tv716efT75//vD15avvbz/9eHdy+vF9L/LA9COPSj+qIelHbQSC8OwEbcWShxgFwsn0FKuZks1z/dWYUG9H3hZ8NIZ0SIVZDbvAGmOpnEUf/LUVVA41RzfpTW4KCtn4QclKFgh6wETSy8Z0UnAlTWydbRYVj3rRc2WSuAQuOMzCFZOlFsmjvbtOziWHIOeaZaD0zIpDcoQK6UIW06KKc5fC+IaaFEoyCUGvdhc/NUr2Qk+WITK4IlKw3yXkfouR+w0lwyUSS3X45yRwj5CMsWgYWRtCdOSI5akLgqynniWxOzaKNWXRbfc1Joq/+N5Fut0nGxs+gW0vsefAm3Ri68Fvjo8rV14P5W7TRMeHZL2KzlpZX/iyJwxk0z+veLnpGuNqPz5/kRy5ZEvp072iGZRazrv4sRfQbQW3Vqx3a8V8ty7YX/nVcGYX+Blku8zaX4i2tnAUUcFMxhAxmZVaIzcqApgIg5kyTXJuMqpzQj0hCGgqDQdkLjkccxxj1NOccENoBnzK4u5cQ3Zjl9WQIb4NYhbsVqfZs82k7tTt8x1LgtoJmzqDFvn203Z5nELDS9dBTbN2Mahp5G9aNHKYtacAzvCGefMugeuatqPw0S7F4QdCTM0MO+2IPDZMDJ9gH3eUnKKD1vpcsvC7xml/o9IWbcGpFgD4L2J+ZXUl62b2/TKIleSXP0/0M6/nZ0o71eJi7d9cg55dI3cG9+/dkpnKmQ7CmLldYBEJY1eLAFSCEzNShWU0Dl4KasKzVYvdSOdLTPCr++eQ2JFjBUng2ziyE3N5Uja1u5KzIdPdyTD/v5Hq4a7Gm3UdLKZDuDjWo7OaEPO1+dpP3jHASg==',validate=True))
+          assert sha(old)=='f24100002ff4e41387c7a9d31b9f0260075ce195694453834179feb1ac071c97' and sha(new)=='090f9c86ab345636c44b7c1ab20e637e248e35d6a4c82c8567227db339fb7e32'
+          assert source.count(old)==1,'C26_EXACT_SOURCE_ANCHOR_MISMATCH'
+          assert source.endswith(old),'C26_SOURCE_TAIL_MISMATCH'
+          result=source.replace(old,new,1)
+          assert result!=source
+          p.write_bytes(result)
+          before[rel]=sha(result)
+          m.write_text(json.dumps(before,sort_keys=True,indent=2)+'\n')
+          actual={p.relative_to(root).as_posix():sha(p.read_bytes()) for p in root.rglob('*') if p.is_file() and p!=m}
+          assert actual==before,'C26_UPDATED_MANIFEST_MISMATCH'
+          # Compile the exact extracted class from each source with test-only deterministic I/O barrier.
+          needle=b'try? JSONEncoder().encode(next).write'
+          for label,body in [('old',source[len(source)-len(old):]),('new',result[len(result)-len(new):])]:
+              assert body.count(needle)==1
+              (tmp/('c26-'+label+'.swift')).write_bytes(b'import Foundation\n'+body.replace(needle,b'C26Gate.shared.beforeWrite(); '+needle))
+          (tmp/'c26-test.swift').write_bytes(zlib.decompress(base64.b64decode('eNq1Vs9v40QUvvevGHxY2dpgpUW7Ei7e3dC6xShNqthlhYQUTe3nZKjjsWbGLVUViR/aahEgcVqBBBcuiEM5cKo4wD/TFPFf8DxxHDctuyskcoiTmTfffN/73nsJm+RcKLLDiyymivFsLWEZTUmUUinJ1sbDXarAIU+KLBpDdAQxCQAjD1MgZ2sEX1LhsYikoIgcUwGxWx0yLb2fC3aM33RAyqMjtxd08bGye0wFoWKCpxOaStB75QnIFJSY20zmVEXjACY0H3MB5jFNC3DaVh0qIAUq4VWhCSoprzItcqYJ2amms1ndr0QBm/ONIptvkeny5CEkCPlUsFJglQLNoIlU0jnUYjXmZlPaCnYNwJL5EWRVibYlG6EVJWClzT6hTNV8pmvTtScTyjL0QBSRKt0KQSp50xlNWx8ckkKkzsGg2xqWmyNwAiVYNsKvh6cKpONnynrz0bucp01lKCYGGqcsw+RqY20ax3guZBPwS66YYHNjKUVADlQ1ICp9Gokqijk+fUwQipoRx/OZkv3EQW5Wa15H84D3g35vGyIeg8ArY/3JHLz91sOAHsO+4CMBUtoBqiykLSFNWongE6e8AYFwqZTouvpB7t3DFa3SdfUD8yxAFSIjpeNVShevcCxQsS1TgNxEw5tKnbbdXl+KnZKTMcNumGfmnUWmGsnQlyzLenrLnNJDdFWNBT+RK5lPJu4Owu/RDFUIzEJCi1TdNIcJN5nYCspWpuJ0mwmIFBenNs1zbFZ0ap+q8RbH/QyTbR4c+NuY0aJg8bwAlmow8XilHaF8BTWQSZWDt7ROmBrrNGA1s0YAw9ops7jEQZ4gyJn2EfEETPgx+EixgrKmNySg9y6u/hthI1+4/bHkmWHdOJu7qzVhxgvi+qo6uhwyCWVpgUFuu17WHujphh3Cj5yy/rElUnoIadUh2Ok4qZAJPyKPibHfCQLykakjLIM4xNjp+N3lirWJ1f4Gxp4trrvvrk+XkqsJac8Hpq2nUb2Z20Uel8VkXP354+ziu6vLC6O13lpvt5cxo4KKeBVmMTZ0ryusWF4ox874iWndf2AR1yW2LKIIE0QAixEbIMFWST0huDCNUTmGM16PXMNq9ESD0+XF9YvbhFaoLObVYoLVcfM0a4boeWsJZ7WMbif0gnAYhJ1db/j0Pb+L7wM/9Hu7q45vvLbl+UbNfPbHL7NnX9yVzVVSzUjkteMPkNb+oL878ILAeCV4u/368BjXMoLOnlfJ3urv7Xe90O/3DOs1y6VB4vn57Mvf/r96eXm5TO+idHX56fX3n88+++H64qdbrJrUz7/5+8VXL4v469nPs2+fz379+ur38zuS/F8L8BYs+rHV73S9YMvbHlYlGQ46vcBfcWWOhAxlRnM55spuL35yVlANvzfc8/b6gw9Ll0PPuPGrvxgRj9rkDD5BXuvNVOqpY6C6Ya8T+h94dR0ONTM9iR5UgOUfgn8Alxgl4A==',validate=True)))
+          (tmp/'c26-policy.swift').write_bytes(zlib.decompress(base64.b64decode('eNqtVm1v2kgQ/p5fsbWqylZcF+ipFUS+XkLoiVPbRNCcdMpFaG2PYS/rXd/uGuJD/PebtQ0F56UX9ZAQ4J2d55lnXhiW5VIZ8lEWIqGGSXH0S0aZINqoIjZk2Ht3KTmLywnMFWiNBmR9RPClDZrHJC1ETOwN1yNmoeRKN+f2taSKxAuIb3XY2T2sblRP3Rla8AIGZ1Jyf0Y4jYAPpkYxMffIel5QldQWBLgGsk6poXyklFRuZettTmr3x2H3JMdrxnUuT6dT8mdz7nibHS4HQ9Is/Mg4fKaCzkEFCaS04ObARElpwjQLDFhlqCrPmYLYSFUGNM9BJEjukprFUOK5AIS8uhqfu15QFCxpuAcoleRL/DotM87ErR4Le8f1dlAIDYqsjSo/ICu8kMkljBHUpWZgObSY0/AejB/df3aocip5AgplVnu6Nll6/fPV5BNZW99FaAEfCw/veifI09KMFVADO0Us18JfMbMYCwMqg4TtHTPQA6wi8E4UmEIJUhyGJGlYua1JOpP33c60LjH9xjmmni+jpwwi78AbHHobLmiWW8vRkiUgYngzurOV/puMGu8QPefCHloqFUkI9si1pMjRB4q+bqpcknOsUPe66/f8tzdesFLMgGvkIHlMXCej6haU4+2lu+6NSf+nd1NUEZIhzVE+0AFn2rgR1VAXSBBj05ow7PmOWUkklIDFQLdENzI5hxrdQhk6ce1ugCIcHC5QiPAB1Lo0XZbowTU6uPFTJbOKgZ8raTDVkDRpGVCvFYV1GqQUey4Jw+o6efWqgmr8JgHToyw3pX2OFZai6egOA9VYXFarAdAgx0/Pd2hs2BK2wZEdeitKWZi8MD8aSuTXfi4EL+syboVWH2/D2IvuxZNhPBqn3MVZeyYSkTFI0KCWoAk21JwJyp02kYfhou/BRVu4QmjgVex70taobWkp5z+sa5s++vzPIn7TaEd5KwupfNCIw/8ukDQLnNVbbbRhnD+qUCFuhVyJ76m014X3Zvjz5GsAH2qn7VHdf9tx0bUZrw4IS1C1v9o91Myf973+dhR+VVRoOwzrXQDFMnqKTDmcGkPjRWZHWa/fn/Xrt81PdUw0+wdIVC0XqryH8eLZIG87nVmnfiMI/vp8ZlcVhqsKZxkzrWzknGIqngCxBjigca04Kw3+X/WQ/jeEFl1r/GEnY8dKXD/CLBcxuB1//bJz/LIbRNbXxsPRvO/Od7qd1znFbSujd8/S+ymWXYQRjGOVLkFVciv4u8C/YJwYVd0qHCf7PdHsSbjZzb6cfh3/PppdXnwaD/+YTUa/TkbT6fjiy6xZourlymsub442R/8CjdFh+w==',validate=True)))
+          print('C26_PRODUCT_SOURCE_PATCHED',rel,sha(source),sha(result))
+          C26_PATCH
+          swiftc -swift-version 6 "$RUNNER_TEMP/c26-old.swift" "$RUNNER_TEMP/c26-test.swift" -o "$RUNNER_TEMP/c26-old"
+          if "$RUNNER_TEMP/c26-old" > "$RUNNER_TEMP/c26-old.log" 2>&1; then cat "$RUNNER_TEMP/c26-old.log"; exit 35; fi
+          cat "$RUNNER_TEMP/c26-old.log"
+          grep -Fx 'FAIL LATEST_STAGE_WHILE_WRITING' "$RUNNER_TEMP/c26-old.log"
+          grep -Fx 'FAIL SAME_STAGE_COMPLETION' "$RUNNER_TEMP/c26-old.log"
+          grep -Fx 'FAIL COALESCED_LATEST_TRANSITION' "$RUNNER_TEMP/c26-old.log"
+          swiftc -swift-version 6 "$RUNNER_TEMP/c26-new.swift" "$RUNNER_TEMP/c26-test.swift" -o "$RUNNER_TEMP/c26-new"
+          "$RUNNER_TEMP/c26-new"
+          swiftc -swift-version 6 "$app/R946StoredCaptures.swift" "$app/R729EvidenceTransportPolicy.swift" "$app/R731ArchiveCapacity.swift" "$RUNNER_TEMP/c26-policy.swift" -o "$RUNNER_TEMP/c26-policy"
+          "$RUNNER_TEMP/c26-policy"
+          swiftc -frontend -parse -swift-version 6 "$app/R936ExportJob.swift"
+          # Replay historical R978/R979/R981/R983 regression on the corrected product files, not stand-ins.
+          native="$app"
+          swiftc -parse-as-library "$native/R975FinalMovieSample.swift" "$native/R710EvidenceState.swift" "$native/R733UserControlledCapturePolicy.swift" "$native/R734RecordingFinishPolicy.swift" "$root/tools/tests/r975_movie_sample_check.swift" -o "$RUNNER_TEMP/c26-movie-test"
+          "$RUNNER_TEMP/c26-movie-test" | tee "$RUNNER_TEMP/c26-movie.log"
+          grep -F R978_STOP_CALLBACK_AND_RESUME_CHECK_PASS "$RUNNER_TEMP/c26-movie.log"
+          archive_files=(R714ChunkedEvidence R730SplitReadback R936ExportJob R689StreamingZIP R548ResearchArchive R551EvidenceIntegrity R555StoredZIPReadback R729EvidenceTransportPolicy R731ArchiveCapacity)
+          archive_sources=()
+          for name in "${archive_files[@]}"; do archive_sources+=("$native/$name.swift"); done
+          swiftc -O -parse-as-library "${archive_sources[@]}" "$root/tools/tests/r979_archive_check.swift" -o "$RUNNER_TEMP/c26-archive"
+          "$RUNNER_TEMP/c26-archive" corrected | tee "$RUNNER_TEMP/c26-archive.log"
+          grep -F R979_ARCHIVE_REGRESSION_PASS_3 "$RUNNER_TEMP/c26-archive.log"
+          swiftc -O -parse-as-library "${archive_sources[@]}" "$root/tools/tests/r981_split_resume_check.swift" -o "$RUNNER_TEMP/c26-split"
+          "$RUNNER_TEMP/c26-split" corrected | tee "$RUNNER_TEMP/c26-split.log"
+          grep -F R981_SPLIT_RESUME_REGRESSIONS_PASSED_3 "$RUNNER_TEMP/c26-split.log"
+          swiftc -O -parse-as-library "${archive_sources[@]}" "$root/tools/tests/r983_archive_snapshot_check.swift" -o "$RUNNER_TEMP/c26-snapshot"
+          "$RUNNER_TEMP/c26-snapshot" corrected | tee "$RUNNER_TEMP/c26-snapshot.log"
+          grep -F R983_ARCHIVE_FILE_IDENTITY_REGRESSION_PASS_6 "$RUNNER_TEMP/c26-snapshot.log"
+          echo C26_NATIVE_PATCH_REGRESSION_PASS_NOT_PHYSICAL_NOT_IPA
       - name: C11 compile real unsigned iPhoneOS arm64 target without exporting IPA
         shell: bash
         run: |
