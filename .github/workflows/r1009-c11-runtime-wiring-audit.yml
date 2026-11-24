@@ -1,4 +1,4 @@
-name: R1025 C26 native progress repair + C21 regression (NO IPA)
+name: R1027 C28 native image ownership protection + C26 regression (NO IPA)
 'on':
   push:
     branches: [main]
@@ -32,7 +32,7 @@ jobs:
           from pathlib import Path
           import sys
           raw=Path(sys.argv[1]).read_bytes()
-          assert len(raw)<470000, 'GITHUB_500KB_WORKFLOW_LIMIT'
+          assert len(raw)<490000, 'GITHUB_500KB_WORKFLOW_LIMIT'
           print('C6_YAML_SIZE_OK',len(raw))
           PY
       - name: Verify SHA-pinned embedded full C4 source and prior failure evidence
@@ -954,6 +954,30 @@ jobs:
           "$RUNNER_TEMP/c26-snapshot" corrected | tee "$RUNNER_TEMP/c26-snapshot.log"
           grep -F R983_ARCHIVE_FILE_IDENTITY_REGRESSION_PASS_6 "$RUNNER_TEMP/c26-snapshot.log"
           echo C26_NATIVE_PATCH_REGRESSION_PASS_NOT_PHYSICAL_NOT_IPA
+          # C28: retain images when session ownership is unverified.
+          python3 - "$root" "$RUNNER_TEMP" <<'C28'
+          import hashlib,base64,zlib,sys,json,subprocess
+          from pathlib import Path
+          r,t=map(Path,sys.argv[1:]); rel='app/ios/ChampionsOnDevice/R946StoredCaptures.swift'; p=r/rel
+          h=lambda b:hashlib.sha256(b).hexdigest()
+          assert h(p.read_bytes())=='16f986ba7a4d7f73e86d7ae0e8cc5dc3a861bcd47e81b2190b5c94ac82b7e689'
+          (t/'c28-old.swift').write_bytes(p.read_bytes())
+          subprocess.run(['patch','-p1','-F','0','-d',str(p.parent)],input=zlib.decompress(base64.b64decode('eNqtVd1u00gUvu9THCKEYtlxEygljXZp6S5ISCBWVHAT5WJqnySD7BlrZpwSlUogbgAJccPyI8ENu9JKSLsPsFzsw7Cl27fYY4+d1MFBqoQvLM945nzf+c5fq9UCtnp7Y219x0iF4U8sMalC7es9PjQrruvC7vLfW1vQ6qx558Gl9wXY2lqB8hnyCBPFJ8wgRGhApiZJzS/MjHUP+ndu3xisuMvO8piN8NaeQKXHPLkjAlSGcdGDbSkjC3GQY69vZNiX2t5aBTuzEcogjVEYDT+CVHzEBYu0H7PkLotS1M0YDQuZYc6cxuoqXIGYa83FaDWQSqWJAY20lgI0DzFgCgImhDSQKDlBMGNmgAlLGO7JVBEKcE2IyZgJDP259VyE0qfrIpBxQltI9GZU/UnOzQ+kyPzVsA9n2z7XV+PETMnlmYMTInJCJLLR3zGKaPdgB80P9vvyoOnkKnXbFBu3e2ExQqkIgCUJirDJQ7qZ3/JKj8uNTbIueOSB4SbC+TESj1Y/07s8sdKCmkeTKgEWMc+YDrwiGU7uObA/l+r0171v5wydGVL4MUOpWM+CkmQ5SScsEriFeStdN5Nuo7MgXf1jDVB6l/m2PTWoPcD7iVQm288N2916sRaN2Xqx316lhuy349Srdlo7y/Vbsk/AMwhbi53OurdOjaCz4XWXiVUEs18K5CmMKIHCgZ+VAwvMTZbsn20f1KtThL1f6NkvEnWweNtthpyNhNSGB9vTHXtqdho2N7N8qxfuu0J4tRDLhK7rDefOQaEQnMlrrKL6vJKlAiphD1IVOcCLfqRhb4wKTwL2eUj1kluiSqhoPG8EDXu713DJpC36xpfXfxw9ffL50V///vP+8M83Ry8/HT5+AQ3XNgO65ScKh/x+s+s4XhllYjNYkPmbKM06CTahcfzqw/HD3768+3j04e//Pj7//PjT4dNnx29/Jy5Hv76FBvRgGUGnnmFtYE7S9k4Rpa8rYa1tR+JF79JXlTBKmQqBG4z9crQUAXnwoLpNEacpYzCg8BcZBkhNrK5T0khOI+MPGU3S0KfRQXSbuTUe1mR6NmC4SLH656C6pHF4jezBLlJ+IUHEckJS0rybFj2T8qucfTNdygG5i4DasN2I63FlDs5FsMV2S0TTzPczlm697qXjcDrH/wcCr8NN',validate=True)),check=True)
+          assert h(p.read_bytes())=='39165655f47fbdc3998a1ee38003d3e02594fa637dc7698777b8fa77ffe13518'
+          m=r/'source_manifest.json'; doc=json.loads(m.read_bytes()); assert doc[rel]=='16f986ba7a4d7f73e86d7ae0e8cc5dc3a861bcd47e81b2190b5c94ac82b7e689';doc[rel]='39165655f47fbdc3998a1ee38003d3e02594fa637dc7698777b8fa77ffe13518'
+          assert doc=={q.relative_to(r).as_posix():h(q.read_bytes()) for q in r.rglob('*') if q.is_file() and q!=m}
+          m.write_text(json.dumps(doc,sort_keys=True,indent=2)+'\n')
+          test=zlib.decompress(base64.b64decode('eNqlVm1v2zYQ/p5fwQpDISGKGqfdlilQszRWVneebdhxiiELBFqibcYSKZBUEs/wf98d5bescRdgH4wo5N09z3NvEi9KqQy5kpXIqOFSHPxaUC6INqpKDbk8OW2ynOHFNdOGLA7gBuxSMq5EStDU9YiZKvmo8ZKALRkX0RXP2R9U0AlTQcbGtMoNXD5QRcaU55ViOjqGAxsknbJ05iYkpyOWhwOjuJj4CZlImYWfpMw9sijhzLguHpFz4vQuBgPikJA4VxetNnG8Q+vrnfExeWONFmuYw6ixXCKSVKSQGSOg7dYpuNaA4vjESaVSVWnw8VFJMTniGT4/0Lx+mAn5KI7gx9RRmVf6qBL2yLmzeq1gJaWJxkVgGGaTqnmTK5YaqeYBLUsmMsDqUTO9lHAvGEgZDltN1wuqime1YC8AsjJ/gMfBvMi5mOmWQB/XQxTIIVNkYdT8HNILtoV8YC3Ac6kJEd5brsnQ6Jvg/uiFM15Mvj3FILYoGVdQEkELtqqIVxf56OOw3yYLBKoiBN6nEF29MyCMfFPFqGGbrCDpyn/kZtoShqmCZXznmjMdQveBt2KmUoJUyw2tghkKvKoQWECP8GzbL7yAblv9ex4JnnvrtsS2y6JbRzOouhQJFDbk2R12C+qwjmSR3Trq9MeTBEChq1mW3EsApzma30XWaGn1fBl0OwOmOHTI33ZkApgc6qIcvOqO7kFGmHnBo+KGuUaG1b4krSkF91oKx9sWUdIIobAKTv/nxvGgttPvnEPq+aTkqbFDtDUC6v0V8ysFuUdTKDEYs51Yl1NalBgofuAZEyl7Fz/hAvgiR3VsJIDWTZR02/BP/Pd3O0rWwHsFjZNG0gjuywmoOdsG+rAbhNG97gVVM6bAd52IGZuH29bUkOR0Wg+ynb6UakY24xyCdeTYUunQyt/arOc83JByRkrOmHCCyoxPd+hJ+tpynX0Hb7NMLKDtW0n90Xd96qXzzIHucVgt1RCfyTMHHGzvLCER2ddBaxIpLbGYEJTaMLbxKhP1f/nw0wAGkWWXtYVeLRyXZzq8Bd87f6xkYRePXyppoOFZtkIIRz4EKSvTFfm8HmQbvV7zTnd43RteJ91O+8/k6+e4kww7v3e6XzsOeq1wsiiyKOTtW/IG1scY3ibxE9dGw+bAkmALlfDXQ4sXDTaNas0sg81w5WAIGC/IxBt3BLWopRWMakzQmOa6VrEScdMatD6148Q5xFb064BBKgUOoF78cBxw0AASlptGhvBQr/+bW4SLov0vJXg7juC9WM8x7LeVfd1YZLGi34zb8XWc9PrdGyhAt9/7fAH5rxm+ugT/yrDNLoM8bVB6/XgQ9282WVrFxzfzs/DPcQOu46I08/+u7CtW0C63bTb2Z29Nvdtv/dbqXLSTfnx90erETcd/kYukOwj4qz9UHPhsSvDTZAgpiP5y1x8jnoN1ASLrg4/HZMGeuHEbGGF5sDz4BwLPQ1Y=',validate=True));assert h(test)=='07dae453e3a926908fea0d01cba70f5f581aac4c8c96698940b0da9a58d1f197'
+          (t/'c28-test.swift').write_bytes(test)
+          C28
+          swiftc -swift-version 6 "$RUNNER_TEMP/c28-old.swift" "$RUNNER_TEMP/c28-test.swift" -o "$RUNNER_TEMP/c28-old"
+          if "$RUNNER_TEMP/c28-old" > "$RUNNER_TEMP/c28-old.log"; then exit 38; fi
+          cat "$RUNNER_TEMP/c28-old.log"; grep -Fx 'C28_FAILURES=5' "$RUNNER_TEMP/c28-old.log"
+          swiftc -swift-version 6 "$app/R946StoredCaptures.swift" "$RUNNER_TEMP/c28-test.swift" -o "$RUNNER_TEMP/c28-new"
+          "$RUNNER_TEMP/c28-new"
+          swiftc -swift-version 6 "$app/R946StoredCaptures.swift" "$app/R729EvidenceTransportPolicy.swift" "$app/R731ArchiveCapacity.swift" "$RUNNER_TEMP/c26-policy.swift" -o "$RUNNER_TEMP/c28-policy"
+          "$RUNNER_TEMP/c28-policy"
+          echo C28_STORAGE_OWNERSHIP_REGRESSION_PASS_NOT_PHYSICAL_NOT_IPA
       - name: C11 compile real unsigned iPhoneOS arm64 target without exporting IPA
         shell: bash
         run: |
@@ -1060,7 +1084,7 @@ jobs:
           path='.github/workflows/r1009-c11-runtime-wiring-audit.yml'
           raw=subprocess.run(['git','-C',repo,'show',f'{commit}:{path}'],
                              check=True,capture_output=True).stdout
-          if not (10000 < len(raw) < 470000):raise SystemExit('WORKFLOW_RAW_SIZE_LIMIT')
+          if not (10000 < len(raw) < 490000):raise SystemExit('WORKFLOW_RAW_SIZE_LIMIT')
           Path(dest).write_bytes(raw)
           assert Path(dest).read_bytes()==raw
           print('C11_WINDOWS_GIT_BYTES_PASS',len(raw),hashlib.sha256(raw).hexdigest())
