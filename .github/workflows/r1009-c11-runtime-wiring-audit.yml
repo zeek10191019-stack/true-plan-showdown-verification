@@ -490,7 +490,8 @@ jobs:
           assert hashlib.sha256(coordinator.read_bytes()).hexdigest()==report['capture_coordinator_sha256_unchanged']
           print('C10_REGISTERED_FOUR_ADDONLY_SWIFT_FILES_COHERENT')
           CHECK
-          plutil -lint "$root/app/ios/ChampionsOnDeviceResearch.xcodeproj/project.pbxproj"
+          xcodebuild -list -project "$root/app/ios/ChampionsOnDeviceResearch.xcodeproj" > "$RUNNER_TEMP/c11-xcode-list.log" 2>&1 || { tail -n 40 "$RUNNER_TEMP/c11-xcode-list.log"; exit 33; }
+          grep -Eq '^[[:space:]]*ChampionsOnDeviceResearch[[:space:]]*$' "$RUNNER_TEMP/c11-xcode-list.log"
           swiftc -frontend -parse \
             "$root/app/ios/ChampionsOnDevice/CaptureCoordinator.swift" \
             "$root/app/ios/ChampionsOnDevice/R1001BattleSafetyCore.swift" \
@@ -777,7 +778,8 @@ jobs:
           print("C11_RUNTIME_RECEIPTS_ONLY_NO_PRODUCTION_ACTIONS")
           CHECK
           app="$root/app/ios/ChampionsOnDevice"
-          plutil -lint "$root/app/ios/ChampionsOnDeviceResearch.xcodeproj/project.pbxproj"
+          xcodebuild -list -project "$root/app/ios/ChampionsOnDeviceResearch.xcodeproj" > "$RUNNER_TEMP/c11-xcode-list.log" 2>&1 || { tail -n 40 "$RUNNER_TEMP/c11-xcode-list.log"; exit 33; }
+          grep -Eq '^[[:space:]]*ChampionsOnDeviceResearch[[:space:]]*$' "$RUNNER_TEMP/c11-xcode-list.log"
           swiftc -swift-version 6 -frontend -parse             "$app/CaptureCoordinator.swift" "$app/R1009C11LiveCaptureTap.swift"
           swiftc -swift-version 6 -typecheck             "$app/R1001BattleSafetyCore.swift" "$app/R1000CapturePCBridge.swift"             "$app/R1006CaptureHubStatus.swift" "$app/R1007CaptureIntegrationAdapter.swift"             "$app/R1009C11LiveCaptureTap.swift"
           echo C11_SWIFT6_TYPECHECK_PASS_NO_PHYSICAL_DEVICE
@@ -878,11 +880,22 @@ jobs:
           & git -C $repo fetch --no-tags --filter=blob:none --depth=1 origin $env:GITHUB_SHA
           if ($LASTEXITCODE -ne 0) { throw 'FETCH_FAILED' }
           $workflow = Join-Path $env:RUNNER_TEMP 'c6-self.yml'
-          $lines = & git -C $repo show "${env:GITHUB_SHA}:.github/workflows/r1009-c11-runtime-wiring-audit.yml"
-          if ($LASTEXITCODE -ne 0) { throw 'SHOW_FAILED' }
-          [IO.File]::WriteAllLines($workflow, [string[]]$lines, [Text.UTF8Encoding]::new($false))
-          if ((Get-Item $workflow).Length -ge 450000) { throw 'WORKFLOW_SIZE_LIMIT' }
-          Write-Output 'C6_WINDOWS_NO_CHECKOUT_PASS'
+          # Do not round-trip Git bytes through PowerShell string arrays:
+          # Windows WriteAllLines changes LF to CRLF and falsely trips the size gate.
+          @'
+          import hashlib,subprocess,sys
+          from pathlib import Path
+          repo,commit,dest=sys.argv[1:]
+          path='.github/workflows/r1009-c11-runtime-wiring-audit.yml'
+          raw=subprocess.run(['git','-C',repo,'show',f'{commit}:{path}'],
+                             check=True,capture_output=True).stdout
+          if not (10000 < len(raw) < 450000):raise SystemExit('WORKFLOW_RAW_SIZE_LIMIT')
+          Path(dest).write_bytes(raw)
+          assert Path(dest).read_bytes()==raw
+          print('C11_WINDOWS_GIT_BYTES_PASS',len(raw),hashlib.sha256(raw).hexdigest())
+          '@ | python - $repo $env:GITHUB_SHA $workflow
+          if ($LASTEXITCODE -ne 0) { throw 'RAW_WORKFLOW_READ_FAILED' }
+          Write-Output 'C11_WINDOWS_NO_CHECKOUT_PASS'
       - name: Offline Lenovo CMD + PowerShell checks (not physical-device certification)
         shell: pwsh
         env:
