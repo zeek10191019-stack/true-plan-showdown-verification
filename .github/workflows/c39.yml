@@ -1,0 +1,68 @@
+name: R1038 C39 HTTP and path-identity regression (NO IPA)
+'on':
+  push:
+    branches:
+    - main
+    paths:
+    - .github/workflows/c39.yml
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: ${{ matrix.job }}
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - job: macos-source
+          os: xcode-27
+        - job: windows-cli
+          os: windows-2025
+        - job: windows-receiver
+          os: windows-2025
+        - job: macos-sender
+          os: xcode-27
+        - job: windows-hud
+          os: windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+    - name: Run pinned C38 and C39 HTTP and cancellation regression
+      shell: bash
+      env:
+        C33_JOB: ${{ matrix.job }}
+        GH_TOKEN: ${{ github.token }}
+        PYTHONUTF8: '1'
+      run: |
+        set -Eeuo pipefail
+        if [[ "$RUNNER_OS" == Windows ]]; then PY=python; else PY=python3; fi
+        "$PY" - <<'C39_PY'
+        import hashlib,urllib.request,pathlib,os,base64,zlib
+        url='https://raw.githubusercontent.com/zeek10191019-stack/true-plan-showdown-verification/85c100b1f00de1ee834e70523f727bb707ea6ec9/.github/workflows/c38.yml'
+        with urllib.request.urlopen(url,timeout=60) as r: raw=r.read(50000)
+        assert hashlib.sha256(raw).hexdigest()=='053484efd027e24f9f38543e3380ca67fa3df21edfb99ca7b22abf8fa7e77670'
+        body=raw.decode().split("        \"$PY\" - <<'C38_PY'\n",1)[1].split('\n        C38_PY',1)[0]
+        code='\n'.join(l[8:] for l in body.splitlines())+'\n'
+        assert hashlib.sha256(code.encode()).hexdigest()=='0dbdaba92e7dae347775ce89aebdab896c27ce8dfbb5e8b40c1b9027d26001b6'
+        patch=zlib.decompress(base64.b64decode('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'));assert hashlib.sha256(patch).hexdigest()=='93d5ea0c1fbecc9f23368dffc3a19f259d61e3c2c3b0bcf86c0c28e4b838141e'
+        (pathlib.Path(os.environ['RUNNER_TEMP'])/'c39_patch.py').write_bytes(patch)
+        cancel=zlib.decompress(base64.b64decode('eNqFVm1v2zYQ/q5fQThFJTWMHK8DtqVQAdd2mwyBE8QOsCE1BFqiYi40KZCUEy/of98dqThvayskFnU83j1399xJvV5vtGLqmhO34mT0/ndSs1a6A6H+4aUTWpHG6CWnRGlHhLNkMCDMWm5wzxJtcL9qS0esbk3Js16vF4l1o40jDXMrKZZ0xay/23YJyiW3ltqtpY6vm1pITv+xWkVRxWuy1pWot4V3mdj0KCJaVnnc2fusW1UxdPxVxR8CCmKzEsQuAcU0zwcRsbnNDG8kKzkKKfzvx3G8J2pSMnXiTSVjZm6FSh+Qhsdoj0vLn+l9AdzlTs0/gZYClBHYTCOyZuYmjwlc1gG0ktStKonhTB5D1ElBWiOPLi9OU7cy+tYefJw5I9Q1uX8VAFp6HQFKKbhCD/0+mUORrNOGgwur5YZbYrdrKdSNJUte4wbguAYPGRnpdcNAgDmGfEO6iai4csJtadTZw6o6fudaJn25iG24lAgw6W+YIRtubGtJvzFiwxxHGcWiM0X4XSNFKRxhUjCbZtHLJCAQXkEKEADmgBKjtQsrxdb8KOQiPfj4SWtJ7r0FvK5bZip/LJPMunMAhsFoBehJnvvDBGt1b7hrjQLOwsO33XnJkXwGtHNvpOIgAU+nL40l6Y/2dvYwEyzH2JKULrvFC7QYWoYpzG4FWAmhJfde980hfcvSb1DdQ7o7Fq4A80cHl+Hgj+LtpCyzrqj4Js+X3Yq8fRukQulOCit/7hsSeN+TLiJAHLIhQpEkxjhi6m+/xNiBoQXfHAaM0MvnhtfiLon3N/uxF+73+r0UXYHSq3rlORBZZZ6EV4NFhrX7fvO+6t54xFTJ5Vhcc+uyjlKQFs8kD4F6Kr12kmJ7dpmxz8YLoAfp0wGD3QRTL3+cUJlpVXJlnUkwmgT6J2PmegPG06xrvSRNKSqI6u6paNUJWFUst45bkC1oueLlTf4Zy5Z+BTxgjt8JlwS/WYBZ6gpQfzc3it/mOAmWQjGzzX+GLSJ75II3nDk/2vkdgyH9fHoj4QgLje+7OCNT3eXCwmjbwkwh9kY0Da+yyE+1vOnHXvXAgU/u4g8ozdY3lTBJx6QamXQFWaDvmuxa6mUSX/w2+LU4H17Mi3fZv6KJ08URSfBkvw7Fym6NcLzLWP08fVEAt3MNKfJgu8lXOO1N0YCoELYAMPD20pCluWk58qBVNr9aBHySLbmkPmoEmsQw77USJZMxfVHMpPNI/a2Pux7uAhvDvOJLKI1nBZr/ORloyRrkYqFb17TOw6U4kB+Aw+tVAAni0fs/itFwOpqcQhrnx7CeTWIaIqlla1fhwIegbqBTKjBJ4VUFnPmeBjdmpwGtkyOTOvGTEwCio2R8PpzNyOhiMpxPipPpn5PR/ORsWkz+mowu55NxjOl8cA2viKo7cDE5O59Mf3bgiZv52Xx4mg8GL/exihkDNqoqgQgeu4Y+KHmyBCuofHW4gL889+sBrj2sh63Bk63BgpJHIng1X/NdO8DoqLmJoyfNu/OQQl8+DptnAwy6Ng3TB4BLHD4SGY6/OH72yIhJySuildwSVjtu8Cssxk8rAe9xgMLXS15VoNKwrdSsIrPjIfEcslkgtKK1eqQyjMvwBZXZW1HDMH/6VYWU7nQcTtRmu9vvxmLgdhilapHXKnlYw7sSkw0czrgKq+j/+Hlx9gnoMZ5M5yfzv4vhdFwMT0+GM8/ZWTEcjydjVBpfjubF5XR0PJx+AS48o9x/ZN6MPg=='));assert hashlib.sha256(cancel).hexdigest()=='4f3e2af5efcb6f71fc548ac31882655bf4236c903ec56995b259af0b3ec02243'
+        (pathlib.Path(os.environ['RUNNER_TEMP'])/'c39_cancel_patch.py').write_bytes(cancel)
+        marker="exec(compile(code,'pinned-c37-bootstrap','exec'))";assert code.count(marker)==1
+        code=code.replace(marker,'anchor="exec(compile(code,\'pinned-c35-bootstrap\',\'exec\'))";assert code.count(anchor)==1\ncode=code.replace(anchor,\'marker="runner=tmp/\\\'c35-runner.py\\\'";assert code.count(marker)==1\\ncode=code.replace(marker,\\\'anchor="    f=root/(\\\\\\\'c33-step-\\\\\\\'";assert code.count(anchor)==1\\\\ncode=code.replace(anchor,\\\\\\\'    if job in (\\\\\\\\\\\\\\\'windows-receiver\\\\\\\\\\\\\\\',\\\\\\\\\\\\\\\'macos-sender\\\\\\\\\\\\\\\') and i==0:\\\\\\\\n        mark=(\\\\\\\\\\\\\\\'python\\\\\\\\\\\\\\\' if shell==\\\\\\\\\\\\\\\'pwsh\\\\\\\\\\\\\\\' else \\\\\\\\\\\\\\\'python3\\\\\\\\\\\\\\\')+\\\\\\\\\\\\\\\' -m unittest -v test_transfer_receiver test_recover_r714 test_resume_r714 test_finalize test_c32 test_c33\\\\\\\\\\\\\\\'\\\\\\\\n        assert run.count(mark)==1\\\\\\\\n        prefix="& python (Join-Path $env:RUNNER_TEMP \\\\\\\\\\\\\\\'c39_patch.py\\\\\\\\\\\\\\\')\\\\\\\\\\\\\\\\nif ($LASTEXITCODE -ne 0) { throw \\\\\\\\\\\\\\\'C39_CONNECTION_REGRESSION_FAILED\\\\\\\\\\\\\\\' }\\\\\\\\\\\\\\\\n" if shell==\\\\\\\\\\\\\\\'pwsh\\\\\\\\\\\\\\\' else \\\\\\\\\\\\\\\'python3 "$RUNNER_TEMP/c39_patch.py"\\\\\\\\\\\\\\\\n\\\\\\\\\\\\\\\'\\\\\\\\n        run=run.replace(mark,prefix+mark)\\\\\\\\n\\\\\\\'+anchor)\\\\n\\\'+marker)\\nf=pathlib.Path(os.environ[\\\'RUNNER_TEMP\\\'])/\\\'c37.py\\\'\\ncombined=f.read_bytes();assert combined==patch+extra38\\ntext=extra38.decode();mark=\\\'assert all(h(newfiles[n])==v[1] for n,v in encoded.items())\\\';assert text.count(mark)==1\\ninjection="\\\\nif mode==\\\'sender\\\':\\\\n    ns={}\\\\n    exec(compile((pathlib.Path(os.environ[\\\'RUNNER_TEMP\\\'])/\\\'c39_cancel_patch.py\\\').read_bytes(),\\\'c39-cancel-patch\\\',\\\'exec\\\'),ns)\\\\n    ns[\\\'apply_files\\\'](newfiles)"\\ntext=text.replace(mark,mark+injection);compile(text,\\\'c39-c38-helper\\\',\\\'exec\\\')\\nf.write_bytes(patch+text.encode())\\n\'+anchor)\n'+marker)
+        exec(compile(code,'pinned-c38-bootstrap','exec'))
+        C39_PY
+  gate:
+    needs:
+    - verify
+    if: always() && github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    steps:
+    - name: 'Gate: every automated job must pass; no IPA or physical certification'
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        [[ '${{ needs.verify.result }}' == success ]]
+        echo C39_AUTOMATED_GATE_PASS_UI_BACKGROUND_PHYSICAL_IPA_HOLD
