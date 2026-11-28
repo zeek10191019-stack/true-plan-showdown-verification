@@ -1,0 +1,109 @@
+name: R1064 C65 cross-host identical Vision binary diagnostic (NO IPA)
+'on':
+  push:
+    branches: [main]
+    paths: ['.github/workflows/C65.yml']
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: r1064-c65-cross-host-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  compile:
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    runs-on: macos-26
+    timeout-minutes: 8
+    outputs:
+      binary: ${{ steps.build.outputs.binary }}
+      sha: ${{ steps.build.outputs.sha }}
+    steps:
+      - name: Compile exact pinned C64 probe for macOS 26 deployment target
+        id: build
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$RUNNER_TEMP"
+          git init -q c65-source
+          git -C c65-source fetch --depth 1 https://github.com/zeek10191019-stack/true-plan-showdown-verification.git b166181a798382b23424ffa4525f02af6139d95a
+          [[ $(git -C c65-source rev-parse FETCH_HEAD) == b166181a798382b23424ffa4525f02af6139d95a ]]
+          git -C c65-source show FETCH_HEAD:.github/workflows/C64.yml > c64.yml
+          python3 - <<'PY'
+          import ast,base64,hashlib,pathlib,zlib
+          lines=pathlib.Path('c64.yml').read_text().splitlines()
+          matches=[s.strip()[8:] for s in lines if s.strip().startswith('payload=')]
+          assert len(matches)==1
+          packed,digest=ast.literal_eval(matches[0])['C64RevisionVisionProbe.swift']
+          raw=zlib.decompress(base64.b64decode(packed,validate=True))
+          assert digest==hashlib.sha256(raw).hexdigest()=='5f100bcc0e400241682d873bf7a4bf974e791840192005dadd4ae1b3b8232b56'
+          pathlib.Path('C64RevisionVisionProbe.swift').write_bytes(raw)
+          PY
+          sw_vers
+          swiftc --version
+          xcrun --sdk macosx --show-sdk-version
+          swiftc -O -target arm64-apple-macos26.0 -framework Vision -framework CoreML -framework CoreImage -framework CoreGraphics -framework CoreText C64RevisionVisionProbe.swift -o c65-probe
+          codesign --verify --strict c65-probe
+          python3 - <<'PY'
+          import base64,gzip,hashlib,os,pathlib
+          raw=pathlib.Path('c65-probe').read_bytes()
+          encoded=base64.b64encode(gzip.compress(raw,mtime=0)).decode('ascii')
+          assert len(encoded)<=90000, 'Cross-job output exceeds conservative bound'
+          digest=hashlib.sha256(raw).hexdigest()
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write(f'binary={encoded}\nsha={digest}\n')
+          print('C65_COMPILED_BINARY_SHA256',digest)
+          PY
+  compare:
+    needs: [compile]
+    if: github.repository == 'zeek10191019-stack/true-plan-showdown-verification' && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, xcode-27]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - name: Execute the identical signed diagnostic binary and compare to C64
+        env:
+          C65_BINARY: ${{ needs.compile.outputs.binary }}
+          C65_SHA: ${{ needs.compile.outputs.sha }}
+          C65_LANE: ${{ matrix.os }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          cd "$RUNNER_TEMP"
+          sw_vers
+          swiftc --version
+          xcrun --sdk macosx --show-sdk-version
+          python3 - <<'PY'
+          import base64,gzip,hashlib,os,pathlib,re
+          encoded=os.environ['C65_BINARY']; digest=os.environ['C65_SHA']
+          assert 0<len(encoded)<=90000 and re.fullmatch('[a-f0-9]{64}',digest)
+          raw=gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(raw).hexdigest()==digest
+          p=pathlib.Path('c65-probe'); p.write_bytes(raw); p.chmod(0o700)
+          print('C65_EXECUTED_BINARY_SHA256',digest)
+          PY
+          codesign --verify --strict c65-probe
+          unset C65_BINARY
+          ./c65-probe | tee c65-vision.log
+          python3 - <<'PY'
+          import collections,json,os,pathlib
+          lines=pathlib.Path('c65-vision.log').read_text().splitlines()
+          inventories=[json.loads(s.split(' ',1)[1]) for s in lines if s.startswith('C64_REVISION_INVENTORY {')]
+          assert len(inventories)==1 and inventories[0]['revisions']==[1,2,3]
+          assert inventories[0]['physical'] is False and inventories[0]['synthetic_only'] is True
+          assert lines.count('C64_REVISION_VISION_DIAGNOSTIC_ONLY_NOT_CERTIFIED')==1
+          rows=[json.loads(s.split(' ',1)[1]) for s in lines if s.startswith('C64_REVISION_VISION {')]
+          expected={(r,l,a,m) for r in (1,2,3) for l in ('en-US','ja-JP') for a in ('fast','accurate') for m in ('frameworkDefault','explicitCPUSoftwareContext')}
+          keys=[(x['revision'],x['language'],x['level'],x['mode']) for x in rows]
+          assert len(keys)==24 and set(keys)==expected
+          for x in rows:
+              assert x['physical'] is False and x['synthetic_only'] is True
+              assert type(x['performed']) is bool
+              assert x['status'] in ('EXACT_SYNTHETIC_MATCH','SYNTHETIC_MISMATCH','VISION_ERROR','LANGUAGE_UNSUPPORTED','CPU_UNAVAILABLE')
+              if x['status'] in ('EXACT_SYNTHETIC_MATCH','SYNTHETIC_MISMATCH'): assert x['performed'] is True
+              if x['status'] in ('LANGUAGE_UNSUPPORTED','CPU_UNAVAILABLE'): assert x['performed'] is False
+          receipt={'lane':os.environ['C65_LANE'],'binary_sha256':os.environ['C65_SHA'],'observed':len(rows),'status_counts':dict(collections.Counter(x['status'] for x in rows)),'rows':rows,'physical_certified':False,'ipa_authorized':False,'full_regression_certified':False}
+          print('C65_CROSS_HOST_RECEIPT '+json.dumps(receipt,sort_keys=True))
+          PY
